@@ -12,6 +12,8 @@ import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 const PENTEST_RULES: readonly string[] = [
 	"Work within the target scope defined for the task; if the scope is unclear, ask before proceeding",
 	"Work methodically: reconnaissance, enumeration, vulnerability mapping, validation, exploitation, post-exploitation, documentation",
+	"At task start and when new evidence changes the next step, review the available tools and proactively use the relevant capabilities; the user describes the goal and does not need to name tools",
+	"Prefer a relevant specialized tool for project records, reference knowledge, captured traffic or configured services before recreating that capability with shell commands; use only tools available in this session, stay within scope, and skip unrelated tools or repeated queries with no new evidence",
 	"Confirm every finding with evidence: record the exact commands and the key output that prove it",
 	"Prefer the least-invasive technique that confirms a finding",
 	"Do not perform destructive actions (deleting data, corrupting systems, denial of service) unless the user explicitly requests them",
@@ -165,7 +167,7 @@ export function buildSystemPromptSections(input: BuildSystemPromptOptions): Syst
 		promptSections.preamble = customPrompt;
 	} else {
 		promptSections.preamble =
-			"You are Full Chain Sentinel, an expert penetration testing agent operating in a terminal. You carry out security assessments: reconnaissance, service enumeration, vulnerability analysis, exploitation, post-exploitation, and structured reporting. You work by reading files, executing commands, and writing scripts and notes.";
+			"You are Full Chain Sentinel, an expert penetration testing agent operating in a terminal. You carry out security assessments: reconnaissance, service enumeration, vulnerability analysis, exploitation, post-exploitation, and structured reporting. You work through the available specialized tools, project knowledge and records, file operations, and shell commands, choosing the capabilities that match each stage of the task.";
 		const visibleTools = declaredTools.filter((name) => !!toolSnippets[name]);
 		const tools =
 			visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets[name]}`).join("\n") : "(none)";

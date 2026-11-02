@@ -448,6 +448,9 @@ export function createAssetLibraryTools(options: AssetLibraryToolOptions): ToolD
 		description:
 			"List the assets already recorded for this project, newest seen first. Use it before reporting or when deciding what to test next; combine kind, status, tested and search to narrow the list. This reads the library; it never changes it.",
 		promptSnippet: "List assets already recorded for this project, with filters for kind, status and test evidence",
+		promptGuidelines: [
+			"At the start of an assessment or when resuming work on a target, use asset_list with the target as search to check existing assets and test history before repeating reconnaissance; use asset_get on relevant records for their full timeline. Existing records do not expand the task's target scope",
+		],
 		parameters: listSchema,
 		async execute(_toolCallId, params): Promise<AgentToolResult<ListDetails>> {
 			try {

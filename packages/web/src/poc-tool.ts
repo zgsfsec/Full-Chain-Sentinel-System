@@ -53,7 +53,10 @@ const TEMPLATE_PATH_NOTE =
 
 const searchSchema = Type.Object({
 	search: Type.Optional(
-		Type.String({ description: "Case-insensitive substring matched against template id, name, tags and CVE ids" }),
+		Type.String({
+			description:
+				"One case-insensitive substring matched against template id, name, tags and CVE ids, e.g. 'tomcat' or 'CVE-2021-44228'. Not a natural-language query or a space-separated AND query; search different products separately.",
+		}),
 	),
 	severity: Type.Optional(
 		Type.Union(
@@ -104,10 +107,12 @@ export function createPocTools(options: PocToolOptions): ToolDefinition[] {
 		name: "poc_search",
 		label: "Search POC library",
 		description:
-			"Search the operator's read-only Nuclei POC library by keyword, tag or severity, and get back template ids with metadata. The library is generic fingerprint knowledge: templates name a product or CVE and carry one common deployment's paths, not the target's. They are reference material, not executable from here. To actually test a target, write your own yaml into the working directory and run nuclei on it via bash.",
+			"Search the operator's read-only Nuclei POC library by keyword, tag or severity, and get back template ids with metadata. Proactively use this when a task or reconnaissance identifies a product, component, version or CVE and you need to map candidate vulnerabilities, before writing or downloading a POC; do not wait for the user to mention the library. Read relevant candidates with poc_read. The library is generic fingerprint knowledge: templates carry one common deployment's paths, not the target's, and are reference material, not executable from here. To actually test a target, write your own yaml into the working directory and run nuclei on it via bash.",
 		promptSnippet: "Search the read-only Nuclei POC library for templates matching a keyword, tag or severity",
 		promptGuidelines: [
-			"Search the POC library (poc_search) before writing a template from scratch; an imported one is a starting point",
+			"When the task or reconnaissance identifies a product, component, version or CVE, proactively search the POC library (poc_search) for relevant checks before selecting vulnerability tests, writing a template from scratch or downloading a POC; do not wait for the user to name this tool",
+			"Search one product name, alias or CVE at a time (e.g. tomcat); search is a literal substring, so a sentence or several space-separated keywords may miss existing templates. Read relevant candidate ids with poc_read before adapting a check",
+			"If a focused POC search has no matches, try a relevant product alias or CVE when known, then continue with other evidence; an empty library search does not mean the target is safe, and unchanged searches need not be repeated",
 			"Templates from the library are read-only reference: to use one, write the yaml yourself into the working directory and run nuclei on your own file via bash",
 			"Use the library for generic fingerprinting of a product or CVE, not as a ready-made attack on the current target: a template's path and URL prefix are one common deployment, so confirm the real prefix from recon and adapt the request instead of firing the path as written",
 			"A template that misses on its hardcoded path is not evidence that the target is unaffected: the match logic is what it is worth, the path is a guess",

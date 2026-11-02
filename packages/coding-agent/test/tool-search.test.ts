@@ -20,6 +20,12 @@ describe("tokenize", () => {
 		expect(tokenize("listIssues for the GitHub_repo")).toEqual(["list", "issue", "git", "hub", "repo"]);
 		expect(tokenize("searches queries HTTPServer")).toEqual(["search", "query", "http", "server"]);
 	});
+
+	it("keeps Chinese and mixed-language keywords searchable", () => {
+		expect(tokenize("查询资产").length).toBeGreaterThan(0);
+		expect(tokenize("漏洞 POC 模板")).toContain("poc");
+		expect(tokenize("ＰＯＣ 模板")).toContain("poc");
+	});
 });
 
 describe("Bm25Ranker", () => {
@@ -61,6 +67,22 @@ describe("Bm25Ranker", () => {
 		expect(new Bm25Ranker().rank("kubernetes", [document], 8)).toEqual([
 			{ name: "mcp__x__run", score: expect.any(Number) },
 		]);
+	});
+
+	it("ranks Chinese queries against Chinese descriptions and schema metadata", () => {
+		const documents = [
+			createToolSearchDocument(tool("mcp__asm__query", "查询资产，筛选域名与端口")),
+			createToolSearchDocument(tool("mcp__poc__search", "检索漏洞验证模板")),
+			createToolSearchDocument(
+				tool("mcp__http__history", "Read HTTP traffic", {
+					path: { type: "string", description: "请求路径" },
+				}),
+			),
+		];
+		const ranker = new Bm25Ranker();
+		expect(ranker.rank("资产", documents, 1)[0]?.name).toBe("mcp__asm__query");
+		expect(ranker.rank("漏洞模板", documents, 1)[0]?.name).toBe("mcp__poc__search");
+		expect(ranker.rank("请求路径", documents, 1)[0]?.name).toBe("mcp__http__history");
 	});
 });
 

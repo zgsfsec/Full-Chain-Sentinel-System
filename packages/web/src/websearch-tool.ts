@@ -189,6 +189,7 @@ const searchTool = (context: WebSearchToolContext): ToolDefinition =>
 			"General web search through the operator's Tavily account. Use it for reconnaissance beyond asset platforms: breach mentions, leaked documents, tech-writeups about the target, employees on public pages. The console sends the request, so API keys stay on the host and out of the container. Multiple keys rotate automatically by remaining quota. Every call is metered against the session budget, logged, and the raw response is written into the project's evidence directory.",
 		promptSnippet: "Search the public web (Tavily) for target intelligence",
 		promptGuidelines: [
+			"Use web_search proactively when the task needs public target intelligence or current product/CVE/vendor documentation that local evidence does not supply; do not wait for the user to ask for a search. Keep queries within the task scope, omit secrets and private request data, and respect the session query budget",
 			"Prefer specific queries: add the domain, product name or unique strings instead of generic terms",
 			"include_domains/exclude_domains accept bare domains (example.com), one per array entry",
 			"topic=news with days=1-30 finds recent reporting; default general ignores recency",

@@ -316,6 +316,7 @@ import { SUPERVISOR_STRATEGY_LABELS } from "./supervisor-prompt.ts";
 import { SupervisorStore, supervisorDbPath } from "./supervisor-store.ts";
 import { createToolAuditExtension } from "./tool-audit.ts";
 import { createToolGateExtension, type ToolGateContext } from "./tool-gate.ts";
+import { createToolWorkflowExtension } from "./tool-workflow.ts";
 import { branchTranscript, branchUserMessages, messageText, withSystemPrompt } from "./transcript.ts";
 import { createVulnerabilityTools, evidencePathsToContainer } from "./vuln-tool.ts";
 import { emptyVulnStats, VulnerabilityStore, vulnerabilityDbPath } from "./vulnerabilities.ts";
@@ -778,6 +779,7 @@ export class SentinelRuntime {
 		// Loop hygiene is not permission-gated: it only aborts degenerate output
 		// and injects reminders, so it belongs in every session.
 		extensionFactories.push(createLoopGuardExtension());
+		extensionFactories.push(createToolWorkflowExtension());
 		const resourceLoader = new DefaultResourceLoader({
 			cwd,
 			agentDir: this.agentDir,

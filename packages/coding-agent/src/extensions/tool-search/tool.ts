@@ -68,15 +68,20 @@ function stem(term: string): string {
 	return term;
 }
 
-/** Lowercase terms, split at camelCase boundaries and non-alphanumerics, without stop words. */
+const wordSegmenter = new Intl.Segmenter("zh", { granularity: "word" });
+
+/** Keep Unicode words, including Chinese queries, while preserving English identifier matching. */
 export function tokenize(text: string): string[] {
-	return text
+	const normalized = text
+		.normalize("NFKC")
 		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
 		.replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
-		.toLowerCase()
-		.split(/[^a-z0-9]+/)
+		.toLowerCase();
+	return normalized
+		.split(/[^\p{L}\p{N}]+/u)
+		.flatMap((part) => Array.from(wordSegmenter.segment(part), (word) => word.segment))
 		.filter((term) => term.length > 0 && !STOP_WORDS.has(term))
-		.map(stem);
+		.map((term) => (/^[a-z]+$/.test(term) ? stem(term) : term));
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -217,7 +222,7 @@ function searchAndLoad(
  * The `tool_search` description. It does not list the searchable tools or their namespaces, so it
  * stays the same while tools are registered, for example when MCP servers connect.
  */
-export const TOOL_SEARCH_DESCRIPTION = `# Tool discovery\n\nSearches over deferred tool metadata with BM25 and exposes matching tools for the next model call.\n\nSome of the tools, such as tools of MCP servers, may not have been provided to you upfront, and you should use this tool (\`${TOOL_SEARCH_TOOL_NAME}\`) to search for the required tools. For MCP tool discovery, always use \`${TOOL_SEARCH_TOOL_NAME}\`.`;
+export const TOOL_SEARCH_DESCRIPTION = `# Tool discovery\n\nSearches over deferred tool metadata with BM25 and exposes matching tools for the next model call.\n\nSome of the tools, such as tools of MCP servers, may not have been provided to you upfront, and you should use this tool (\`${TOOL_SEARCH_TOOL_NAME}\`) to search for the required tools. For MCP tool discovery, always use \`${TOOL_SEARCH_TOOL_NAME}\`. Search by a capability or tool name; Chinese metadata is searchable, but this is keyword matching, not translation. If a Chinese query finds nothing, try the English capability or exact tool name. Already declared tools are not searched: call those directly.`;
 
 export function createToolSearchToolDefinition(
 	options: ToolSearchToolOptions = {},
