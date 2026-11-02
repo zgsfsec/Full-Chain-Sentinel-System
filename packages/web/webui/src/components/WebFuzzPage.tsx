@@ -553,9 +553,38 @@ export function WebFuzzPage({
 						items={workspace.tabs.map((item, index) => ({
 							key: item.id,
 							label: (
-								<span title={item.target}>
+								<span
+									title={item.target}
+									onFocus={(event) => event.stopPropagation()}
+									onMouseDown={(event) => event.stopPropagation()}
+									onMouseUp={(event) => event.stopPropagation()}
+									onClick={(event) => {
+										// Tabs otherwise steals focus back from the inline editor.
+										event.stopPropagation();
+										if (workspace.activeId !== item.id) change({ ...workspace, activeId: item.id });
+									}}
+									onKeyDown={(event) => {
+										if (event.target instanceof HTMLTextAreaElement) event.stopPropagation();
+									}}
+								>
 									<span className="webfuzz-tab-number">{String(index + 1).padStart(2, "0")}</span>
-									{item.name}
+									<Typography.Text
+										className="webfuzz-tab-title"
+										aria-label={tx("修改请求标题", "Rename request")}
+										editable={{
+											triggerType: ["text", "icon"],
+											tooltip: tx("点击修改标题", "Click to rename"),
+											maxLength: 80,
+											autoSize: { minRows: 1, maxRows: 1 },
+											enterIcon: null,
+											onChange: (value) => {
+												const name = value.trim();
+												if (name) change({ ...workspace, tabs: workspace.tabs.map((entry) => entry.id === item.id ? { ...entry, name } : entry) });
+											},
+										}}
+									>
+										{item.name}
+									</Typography.Text>
 								</span>
 							),
 							closable: item.id !== busyTab,

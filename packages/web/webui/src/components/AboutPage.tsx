@@ -20,6 +20,7 @@ import type { SentinelProjectInfo, SentinelResolvedModelView, SentinelStateSnaps
 import { SENTINEL_MODE_LABELS } from "../types.ts";
 import { Page } from "../ui/Page.tsx";
 import { SentinelMark } from "./icons.tsx";
+import { VersionCheck } from "./VersionCheck.tsx";
 
 const { Text } = Typography;
 
@@ -75,7 +76,7 @@ export function AboutPage({
 	];
 
 	return (
-		<Page title={t("关于")} description={t("当前运行环境与端点")}>
+		<Page title={t("关于")} description={t("当前运行环境与端点")} extra={<VersionCheck />}>
 			<div className="about-summary">
 				<div className="about-hero">
 					<span className="about-hero__mark">

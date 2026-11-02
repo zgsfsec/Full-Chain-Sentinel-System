@@ -1,0 +1,8 @@
+.console-sider-footer .console-version-update {
+	color: #91caff;
+	flex-shrink: 0;
+}
+.console-sider-footer .console-version-update:hover {
+	color: #bae0ff;
+	background: rgb(255 255 255 / 8%);
+}

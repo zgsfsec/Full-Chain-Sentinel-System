@@ -10,6 +10,8 @@ import { t } from "./i18n.ts";
 
 export const PROJECT_NAME = t("全链哨兵");
 export const PROJECT_REPOSITORY = "https://github.com/zgsfsec/Full-Chain-Sentinel-System";
+export const PROJECT_RELEASES_URL = `${PROJECT_REPOSITORY}/releases/latest`;
+export const PROJECT_LATEST_RELEASE_API = `${PROJECT_REPOSITORY.replace("https://github.com/", "https://api.github.com/repos/")}/releases/latest`;
 export const PROJECT_LICENSE = "MIT";
 export const PROJECT_LICENSE_URL = `${PROJECT_REPOSITORY}/blob/main/LICENSE`;
 

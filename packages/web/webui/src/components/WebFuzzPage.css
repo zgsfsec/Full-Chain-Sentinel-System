@@ -36,6 +36,25 @@
 	color: var(--dim);
 	font: 11px var(--mono);
 }
+.webfuzz-tab-title {
+	color: inherit;
+	cursor: text;
+}
+.webfuzz-tabs .ant-tabs-tab-btn > span {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+}
+.webfuzz-tabs .ant-typography-edit-content {
+	width: 150px;
+	margin: 0;
+}
+.webfuzz-tab-title:not(.ant-typography-edit-content) {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
 .webfuzz-addressbar {
 	display: flex;
 	align-items: center;

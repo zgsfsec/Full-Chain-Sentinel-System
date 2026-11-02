@@ -8,6 +8,8 @@ vi.mock("../branding.ts", () => ({
 	PROJECT_LICENSE_URL: "https://example.com/license",
 	PROJECT_NAME: "Sentinel",
 	PROJECT_REPOSITORY: "https://example.com/repo",
+	PROJECT_RELEASES_URL: "https://example.com/repo/releases/latest",
+	PROJECT_LATEST_RELEASE_API: "https://api.github.com/repos/example/repo/releases/latest",
 }));
 
 test("About displays historical totals even when the current session has no usage", () => {

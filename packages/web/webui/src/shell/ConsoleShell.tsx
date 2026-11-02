@@ -7,6 +7,7 @@
 
 import {
 	ArrowLeftOutlined,
+	CloudDownloadOutlined,
 	GithubOutlined,
 	LogoutOutlined,
 	MenuFoldOutlined,
@@ -34,9 +35,10 @@ import {
 } from "antd";
 import type { MenuProps } from "antd";
 import { useEffect, useState, type ReactNode } from "react";
-import { CONSOLE_VERSION, PROJECT_REPOSITORY } from "../branding.ts";
+import { CONSOLE_VERSION, PROJECT_RELEASES_URL, PROJECT_REPOSITORY } from "../branding.ts";
 import { SessionPanel, type SessionPanelProps } from "../chat/SessionPanel.tsx";
 import { SentinelMark } from "../components/icons.tsx";
+import { useVersionCheck } from "../components/VersionCheck.tsx";
 import { getLanguage, t } from "../i18n.ts";
 import type { SentinelMode, SentinelPageId, SentinelProjectInfo, SentinelProxyConfigView } from "../types.ts";
 import { SENTINEL_MODE_LABELS } from "../types.ts";
@@ -126,6 +128,7 @@ export function ConsoleShell({
 	const compact = screens.md === false;
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [globalNavigation, setGlobalNavigation] = useState(false);
+	const update = useVersionCheck();
 	const hasConversations = page === "chat" && sessionPanel !== undefined;
 	const showConversations = hasConversations && !globalNavigation;
 	const railCollapsed = !compact && collapsed;
@@ -247,6 +250,11 @@ export function ConsoleShell({
 				<span className={connected ? "console-dot is-on" : "console-dot"} />
 				{showText ? <span className="console-sider-footer__text">{connected ? t("已连接") : t("已断开")}</span> : null}
 				{showText ? <span className="console-sider-footer__version">v{CONSOLE_VERSION}</span> : null}
+				{update.result?.updateAvailable ? (
+					<Tooltip title={`${getLanguage() === "en" ? "New version" : "发现新版本"} v${update.result.latestVersion} · ${getLanguage() === "en" ? "Open releases to update manually" : "点击查看发布页，手动更新"}`}>
+						<Button className="console-version-update" type="text" size="small" icon={<CloudDownloadOutlined />} aria-label={getLanguage() === "en" ? "New version available" : "发现新版本"} href={PROJECT_RELEASES_URL} target="_blank" rel="noopener noreferrer" />
+					</Tooltip>
+				) : null}
 			</div>
 		</div>
 	);
