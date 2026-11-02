@@ -53,8 +53,10 @@ type Server struct {
 	addr    string
 	running bool
 
-	captured atomic.Int64
-	insecure atomic.Bool // 上游 TLS 校验开关（测试/自签靶场用）
+	captured        atomic.Int64
+	insecure        atomic.Bool // 上游 TLS 校验开关（测试/自签靶场用）
+	skipStatic      atomic.Bool
+	maxCaptureBytes atomic.Int64
 
 	bypassMu sync.RWMutex
 	bypass   map[string]bool

@@ -145,6 +145,9 @@ func (s *Server) recordUpgrade(req *httpreplay.Request) {
 }
 
 func (s *Server) saveFlow(f *store.Flow, event map[string]any) {
+	if !s.prepareCapture(f) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := s.store.InsertFlow(ctx, f); err != nil {

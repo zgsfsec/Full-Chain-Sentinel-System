@@ -77,6 +77,7 @@ func run() int {
 
 	bus := eventbus.New()
 	px := proxy.New(st, bus, caMan, logger)
+	px.SetCapturePolicy(cfg.ProxySkipStatic, cfg.ProxyMaxCaptureBytes)
 	if !cfg.NoProxy {
 		if err := px.Start(cfg.ProxyListen); err != nil {
 			logger.Warn("代理自动启动失败（可用 /api/proxy/start 重试）", "err", err)

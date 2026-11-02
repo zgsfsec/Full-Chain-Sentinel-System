@@ -26,6 +26,7 @@ import {
 } from "./docker.ts";
 import { ensureGateway, projectGatewayDir, withGatewayLock } from "./gateway.ts";
 import { t } from "./i18n.ts";
+import { installProjectMitmCa } from "./mitm-certificate.ts";
 import type { SentinelProxySettings } from "./protocol.ts";
 import {
 	AUTO_NODE_TAG,
@@ -227,6 +228,20 @@ async function bringProjectUp(
 	agentDir: string,
 	project: SentinelProject,
 ): Promise<{ ok: boolean; created: boolean; error?: string }> {
+	const ready = await bringProjectContainerUp(agentDir, project);
+	if (!ready.ok) return ready;
+	try {
+		await installProjectMitmCa(agentDir, project);
+		return ready;
+	} catch (error) {
+		return { ...ready, ok: false, error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+async function bringProjectContainerUp(
+	agentDir: string,
+	project: SentinelProject,
+): Promise<{ ok: boolean; created: boolean; error?: string }> {
 	const prepared = await prepareSidecar(agentDir, project);
 	if (!prepared.ok) return { ok: false, created: false, error: prepared.error };
 	const network = readContainerNetwork(agentDir);
@@ -371,6 +386,11 @@ async function recreateProjectUnlocked(
 		prepared.resolvConfPath,
 	);
 	if (!created.ok) return { error: t("容器重建失败：{error}", { error: created.error ?? "" }) };
+	try {
+		await installProjectMitmCa(agentDir, project);
+	} catch (error) {
+		return { error: error instanceof Error ? error.message : String(error) };
+	}
 	// A freshly created container is running: an earlier manual stop is spent.
 	delete project.manualStop;
 	writeProjects(agentDir, file);

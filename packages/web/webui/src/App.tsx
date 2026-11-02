@@ -27,6 +27,7 @@ import { AgentEntry, formatTime, MarkdownText, MessageView } from "./components/
 import { AssetPanel } from "./components/AssetPanel.tsx";
 import { WebSearchPanel } from "./components/WebSearchPanel.tsx";
 import { McpPanel } from "./components/McpPanel.tsx";
+import { MitmPage } from "./components/MitmPage.tsx";
 import { NotifyPanel } from "./components/NotifyPanel.tsx";
 import { Overlay } from "./components/Overlay.tsx";
 import { PermissionsPanel } from "./components/PermissionsPanel.tsx";
@@ -3134,6 +3135,8 @@ export function App() {
 							onExport={(filters) => send({ type: "export_assets", filters })}
 							onOpenVuln={openVulnFromAsset}
 						/>
+					) : page === "mitm" ? (
+						<MitmPage key={snapshot?.project?.id ?? "none"} project={snapshot?.project ?? null} />
 					) : page === "pocs" ? (
 						<PocPage
 							items={pocItems}

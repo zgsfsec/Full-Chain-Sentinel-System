@@ -25,6 +25,7 @@ export type SentinelPageId =
 	| "proxies"
 	| "vulns"
 	| "assets"
+	| "mitm"
 	| "pocs"
 	| "apimodels"
 	| "droid"

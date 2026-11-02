@@ -42,6 +42,8 @@ import { guessMimeType } from "./files.ts";
 import { FolderArchiveManager, folderArchiveContentDisposition } from "./folder-archive.ts";
 import { getServerLanguage, setServerLanguage, t } from "./i18n.ts";
 import { IosGateway } from "./ios-gateway.ts";
+import { MitmCenter } from "./mitm.ts";
+import { handleMitmApi } from "./mitm-api.ts";
 import { readProviderModelConfig } from "./model-config.ts";
 import { DEFAULT_TEST_URL } from "./node-test.ts";
 import { buildOpenVpnProfile } from "./openvpn.ts";
@@ -483,6 +485,7 @@ export async function startSentinelServer(
 			onSupervisorAdvice: (advice) => broadcast({ type: "supervisor_advice", advice }),
 		},
 	});
+	const mitm = agentDir ? new MitmCenter(agentDir, () => listProjects(agentDir).projects) : undefined;
 	const pocImports = new PocImportManager((file, onProgress, signal) =>
 		runtime.importPocBytes([file], { onProgress, signal }),
 	);
@@ -1325,6 +1328,13 @@ export async function startSentinelServer(
 			}
 			if (path.startsWith("/plugin-icon/")) {
 				void servePluginIcon(runtime, request, response);
+				return;
+			}
+			if (path === "/api/mitm" || path.startsWith("/api/mitm/")) {
+				void handleMitmApi(request, response, mitm, {
+					project: () => runtime.snapshot().project,
+					authorized: () => !authEnabled || hasValidSession(currentAuth(), request),
+				});
 				return;
 			}
 			if (path === "/api/assets/import" && request.method === "GET") {
@@ -2594,7 +2604,9 @@ export async function startSentinelServer(
 					}
 					// Scope "data": unregister, remove the container, and delete what the
 					// project owned — records, session files and the work directory.
-					const result = await removeProject(agentDir, message.id, "data");
+					const result = mitm
+						? await mitm.purge(message.id, () => removeProject(agentDir, message.id, "data"))
+						: await removeProject(agentDir, message.id, "data");
 					if (result.error) {
 						sendError(socket, result.error);
 						return;

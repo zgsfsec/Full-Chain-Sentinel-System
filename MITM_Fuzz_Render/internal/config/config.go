@@ -45,8 +45,10 @@ type Config struct {
 	NoProxy     bool
 	Quiet       bool
 
-	RetentionDays  int
-	RetentionCount int
+	RetentionDays        int
+	RetentionCount       int
+	ProxySkipStatic      bool
+	ProxyMaxCaptureBytes int64
 
 	// 由 main 注入的构建信息。
 	Version   string
@@ -101,6 +103,8 @@ func Load(args []string) (*Config, error) {
 	fs.BoolVar(&cfg.Quiet, "quiet", cfg.Quiet, "不打印访问 URL")
 	fs.IntVar(&cfg.RetentionDays, "retention-days", cfg.RetentionDays, "抓包保留天数")
 	fs.IntVar(&cfg.RetentionCount, "retention-count", cfg.RetentionCount, "抓包保留条数")
+	fs.BoolVar(&cfg.ProxySkipStatic, "proxy-skip-static", false, "不保存常见图片、音视频、字体和 CSS 静态流量")
+	fs.Int64Var(&cfg.ProxyMaxCaptureBytes, "proxy-max-capture-bytes", 0, "每侧原始报文保存字节上限，超出截断（0 使用原有行为）")
 	fs.BoolVar(&cfg.VersionRequested, "version", false, "打印版本后退出")
 
 	if err := fs.Parse(args); err != nil {
@@ -173,6 +177,9 @@ func (c *Config) validate() error {
 	}
 	if c.RetentionCount < 100 {
 		return errors.New("config: -retention-count 必须 ≥ 100")
+	}
+	if c.ProxyMaxCaptureBytes < 0 || c.ProxyMaxCaptureBytes > 32<<20 {
+		return errors.New("config: -proxy-max-capture-bytes 必须为 0–33554432")
 	}
 	if len(c.Token) > 0 && len(c.Token) < 16 {
 		return errors.New("config: 显式指定的 token 至少 16 个字符")

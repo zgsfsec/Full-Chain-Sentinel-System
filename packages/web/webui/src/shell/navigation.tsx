@@ -31,10 +31,11 @@ import {
 	SafetyCertificateOutlined,
 	SearchOutlined,
 	SettingOutlined,
+	SwapOutlined,
 	TeamOutlined,
 } from "@ant-design/icons";
 import type { ComponentType, ReactNode } from "react";
-import { t } from "../i18n.ts";
+import { getLanguage, t } from "../i18n.ts";
 import type { SentinelPageId } from "../types.ts";
 
 export type MenuIcon = ComponentType<{ className?: string }>;
@@ -68,6 +69,7 @@ export const NAV_GROUPS: { group: string; items: MenuEntry[] }[] = [
 		items: [
 			{ page: "vulns", label: t("漏洞"), icon: BugOutlined },
 			{ page: "assets", label: t("资产库"), icon: DatabaseOutlined },
+			{ page: "mitm", label: getLanguage() === "en" ? "MITM Center" : "MITM 中心", icon: SwapOutlined },
 			{ page: "apimodels", label: t("业务建模"), icon: ApartmentOutlined },
 			{ page: "pocs", label: t("POC 库"), icon: FileSearchOutlined },
 			{ page: "droid", label: t("安卓设备"), icon: AndroidOutlined },

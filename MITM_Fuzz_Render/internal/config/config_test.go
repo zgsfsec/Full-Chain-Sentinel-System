@@ -119,6 +119,8 @@ func TestValidation(t *testing.T) {
 		{"非法日志级别", []string{"-log-level", "verbose"}},
 		{"保留天数过小", []string{"-retention-days", "0"}},
 		{"显式 token 过短", []string{"-token", "short"}},
+		{"负数报文上限", []string{"-proxy-max-capture-bytes", "-1"}},
+		{"过大报文上限", []string{"-proxy-max-capture-bytes", "33554433"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,6 +129,14 @@ func TestValidation(t *testing.T) {
 				t.Fatal("期望返回错误，实际为 nil")
 			}
 		})
+	}
+}
+
+func TestCapturePolicyFlags(t *testing.T) {
+	clearEnv(t)
+	cfg, err := Load([]string{"-data-dir", t.TempDir(), "-proxy-skip-static", "-proxy-max-capture-bytes", "2097152"})
+	if err != nil || !cfg.ProxySkipStatic || cfg.ProxyMaxCaptureBytes != 2097152 {
+		t.Fatalf("capture policy flags: cfg=%+v err=%v", cfg, err)
 	}
 }
 
