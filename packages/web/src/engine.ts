@@ -1,10 +1,9 @@
 /**
  * The engineering-mode orchestrator: engines, commanders, and task scheduling.
  *
- * One engine = one commander (an LLM session with scheduling tools only) plus a
- * task board executed by workers (EngineWorker). The commander never executes
- * anything itself; the engine enforces that by mounting no execution tools on
- * its session at all. Tasks run unattended inside the project container, one
+ * One engine = one commander (an LLM session with scheduling tools and optional
+ * bounded scoping tools) plus a task board executed by workers (EngineWorker).
+ * Detailed assessment work belongs to workers. Tasks run unattended inside the project container, one
  * worker session per task, bounded by per-engine concurrency plus a global cap
  * so several engines cannot crush the container together.
  *
@@ -1837,7 +1836,7 @@ export function buildCommanderBrief(
 			? "（本工程没有可用预设，所有任务都使用默认 Agent，省略 preset 参数）"
 			: "（本工程没有可用预设，但本工程要求每个任务都必须指定预设：不要派发无预设的任务，先让操作员启用或授权预设）");
 	return [
-		"你是 全链哨兵 工程模式的主指挥官。你只负责分配与调度，绝不亲自执行任何侦察、命令或利用——你没有任何执行工具，也不要尝试扮演执行者。",
+		"你是 全链哨兵 工程模式的主指挥官，负责分配与调度。深入侦察、漏洞验证与利用由执行 Agent 完成；你仅使用当前会话实际提供的工具，按下文权限与用途限制进行编排。",
 		"",
 		`工程：${engine.name}（项目：${engine.projectName}）${kind === "resume" ? "（本次为恢复运行）" : ""}`,
 		"",
@@ -1870,18 +1869,18 @@ export function buildCommanderBrief(
 		"- 需要换思路或干净上下文时才用 dispatch_task 重派（带 target 会累计尝试次数）；无价值的任务用 abort_task 中止，不要浪费轮次。",
 		"- 全部目标处理完后，用 engine_done 提交 markdown 总报告：逐目标结论、发现汇总（漏洞中枢编号）、失败清单与原因、建议操作员复核的事项。",
 		"- 侦察能下放就下放：你的价值在编排与决策，不在等待。",
+		"",
+		"工具权限与使用纪律：",
+		permissions.read
+			? "- read 已启用：主动读取与拆解任务有关的目标附件、项目文件和已有证据，形成自包含的任务指令；只能读取，不能修改。"
+			: "- read 未启用：依据目标清单、备注与任务结果摘要编排；需要文件内容时派发读取任务。",
 		...(permissions.bash
 			? [
-					"",
-					"bash 与 read 的使用纪律（这是红线）：",
-					"- 你有 bash 和 read，只用于「拆解任务前的一次性轻量确认」：判断目标类型（Web/主机/服务）、确认目标可达、区分同类目标，以便决定怎么派、派几个、给什么指令。",
+					"- bash 已启用：只用于「拆解任务前的一次性轻量确认」，判断目标类型（Web/主机/服务）、确认目标可达、区分同类目标，以便决定怎么派、派几个、给什么指令。",
 					"- 任何需要多步骤、深入、或产出结果的工作都必须派发任务，不许自己做：端口全扫、漏洞验证、利用、批量枚举、写文件、长时间跑命令——这些一经发现即视为越权。",
 					`- 硬性限制：命令预算 ${COMMANDER_BASH_BUDGET} 条、单条 ${COMMANDER_BASH_TIMEOUT_MS / 1000} 秒超时、输出截断、破坏性命令直接拒绝。预算用完后的正确动作是派发任务，不是换方式继续执行。`,
 				]
-			: [
-					"",
-					"注意：你没有 bash 与 read 工具（操作员已在权限页关闭）。完全基于目标清单、备注与任务结果摘要进行编排；信息不足时把「先做侦察」作为任务派发下去。",
-				]),
+			: ["- bash 未启用：不能自行执行命令；信息不足时把「先做侦察」作为任务派发下去。"]),
 	].join("\n");
 }
 

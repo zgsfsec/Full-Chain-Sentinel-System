@@ -721,7 +721,7 @@ export function createIosTools(ctx: IosToolContext): ToolDefinition[] {
 		label: "Inspect one iOS app",
 		defaultActive: false,
 		description:
-			"Read one installed app's Info.plist facts, architectures, FairPlay cryptid, entitlements (when ldid is present), frameworks, URL schemes and data container path. cryptid 0 means the executable is already decrypted; a non-zero value needs the M4 decryption step before static analysis of the binary.",
+			"Read one installed app's Info.plist facts, architectures, FairPlay cryptid, entitlements (when ldid is present), frameworks, URL schemes and data container path. cryptid 0 means the executable is already decrypted; a non-zero value needs ios_decrypt before static analysis of the binary.",
 		promptSnippet: "Read an installed app's plist, signature and encryption state",
 		parameters: Type.Object({
 			bundleId: Type.String({ description: "Bundle id，例如 com.example.app" }),
@@ -808,7 +808,7 @@ export function createIosTools(ctx: IosToolContext): ToolDefinition[] {
 		label: "Pull an installed app as an IPA",
 		defaultActive: false,
 		description:
-			"Package one installed app into an IPA inside the project: the device returns a file manifest, this tool pulls every file (streaming to disk) and zips them in the project container. The IPA lands under evidence/ios/ipa/. FairPlay-encrypted binaries stay encrypted; check cryptid with ios_app_info and decrypt in M4 when needed.",
+			"Package one installed app into an IPA inside the project: the device returns a file manifest, this tool pulls every file (streaming to disk) and zips them in the project container. The IPA lands under evidence/ios/ipa/. FairPlay-encrypted binaries stay encrypted; check cryptid with ios_app_info and use ios_decrypt when needed.",
 		promptSnippet: "Pull an installed iOS app as an IPA",
 		promptGuidelines: ["Large apps take a while: thousands of small files are pulled one by one"],
 		parameters: Type.Object({

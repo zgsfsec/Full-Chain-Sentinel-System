@@ -73,7 +73,7 @@ import { buildAssetReport } from "./asset-markdown.ts";
 import { probeAssetPlatform, searchAssets } from "./asset-platforms.ts";
 import { AssetStore, assetsDbPath } from "./asset-store.ts";
 import { type AssetQueryReport, type AssetToolContext, createAssetTools, writeAssetEvidence } from "./asset-tool.ts";
-import { CAPTURE_TOOL_NAMES, createCaptureTools } from "./capture-tool.ts";
+import { createCaptureTools, DROID_CAPTURE_TOOL_NAMES, HTTP_EVIDENCE_TOOL_NAMES } from "./capture-tool.ts";
 import { CaptureStore, capturesDbPath } from "./captures.ts";
 import { readContainerNetwork } from "./container-network.ts";
 import { containerWorkPath, dockerBashOperations } from "./docker.ts";
@@ -2893,12 +2893,13 @@ export class SentinelRuntime {
 	private applyDroidTools(managed: ManagedSession): void {
 		if (managed.taskSession) return;
 		const active = managed.session.getActiveToolNames();
-		const droidNames = [...DROID_TOOL_NAMES, ...FRIDA_TOOL_NAMES, ...CAPTURE_TOOL_NAMES];
+		const droidNames = [...DROID_TOOL_NAMES, ...FRIDA_TOOL_NAMES, ...DROID_CAPTURE_TOOL_NAMES];
 		const wanted = managed.droidOn
 			? [...active, ...droidNames.filter((name) => !active.includes(name))]
 			: active.filter((name) => !droidNames.includes(name));
 		const changed = wanted.length !== active.length || wanted.some((name, index) => name !== active[index]);
 		if (changed) managed.session.setActiveToolsByName(wanted);
+		this.applyHttpEvidenceTools(managed);
 	}
 
 	// =========================================================================
@@ -3159,6 +3160,18 @@ export class SentinelRuntime {
 		const wanted = managed.iosOn
 			? [...active, ...mounted.filter((name) => !active.includes(name))]
 			: active.filter((name) => !mounted.includes(name));
+		const changed = wanted.length !== active.length || wanted.some((name, index) => name !== active[index]);
+		if (changed) managed.session.setActiveToolsByName(wanted);
+		this.applyHttpEvidenceTools(managed);
+	}
+
+	/** Shared HTTP evidence remains readable while either mobile workflow is enabled. */
+	private applyHttpEvidenceTools(managed: ManagedSession): void {
+		const active = managed.session.getActiveToolNames();
+		const wanted =
+			managed.droidOn || managed.iosOn
+				? [...active, ...HTTP_EVIDENCE_TOOL_NAMES.filter((name) => !active.includes(name))]
+				: active.filter((name) => !HTTP_EVIDENCE_TOOL_NAMES.includes(name));
 		const changed = wanted.length !== active.length || wanted.some((name, index) => name !== active[index]);
 		if (changed) managed.session.setActiveToolsByName(wanted);
 	}

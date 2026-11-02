@@ -230,6 +230,22 @@ describe("buildCommanderBrief", () => {
 		expect(text).toContain("省略 preset 会被拒绝");
 		expect(text).not.toContain("用默认 Agent。");
 	});
+
+	test.each([
+		{ bash: false, read: false },
+		{ bash: false, read: true },
+		{ bash: true, read: false },
+		{ bash: true, read: true },
+	])("describes independent commander permissions without contradictory prohibitions: %o", (permissions) => {
+		const text = buildCommanderBrief(engineFixture(true), [], [], "initial", permissions);
+		expect(text).toContain(permissions.read ? "read 已启用" : "read 未启用");
+		expect(text).toContain(permissions.bash ? "bash 已启用" : "bash 未启用");
+		expect(text).not.toContain(permissions.read ? "read 未启用" : "read 已启用");
+		expect(text).not.toContain(permissions.bash ? "bash 未启用" : "bash 已启用");
+		expect(text).not.toContain("你没有任何执行工具");
+		expect(text).toContain("深入侦察、漏洞验证与利用由执行 Agent 完成");
+		if (permissions.bash) expect(text).toContain("命令预算 40 条");
+	});
 });
 
 describe("formatTaskBoard", () => {

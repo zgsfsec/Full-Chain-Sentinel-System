@@ -121,7 +121,7 @@ test("main, worker and their sub-agents receive MITM reads bound to their own pr
 	}
 });
 
-async function assertWorkflow(session: sdk.AgentSession): Promise<void> {
+async function assertWorkflow(session: sdk.AgentSession): Promise<string> {
 	// Stop at the actual model boundary: inspect the prepared prompt/loadout
 	// without a provider request, Docker, or a scripted model choosing tools.
 	const send = vi.spyOn(session.agent, "prompt").mockResolvedValue();
@@ -136,10 +136,39 @@ async function assertWorkflow(session: sdk.AgentSession): Promise<void> {
 		expect(prompt).toContain("<tool_workflow>");
 		expect(prompt).toContain("无需用户提醒使用 POC 中心");
 		expect(prompt).toContain("When the task or reconnaissance identifies a product");
+		return prompt;
 	} finally {
 		send.mockRestore();
 	}
 }
+
+test("iOS-only sessions can read HTTP evidence and Android toggles preserve that capability", async () => {
+	writeTestModel(root, { baseUrl: "http://127.0.0.1:9/v1", apiKey: "fixture", modelId: "fixture" });
+	const created = vi.spyOn(sdk, "createAgentSession");
+	await runtime.init();
+	const main = await created.mock.results[0].value;
+	const names = () => main.session.getActiveToolNames();
+	const evidence = ["capture_import", "capture_search", "capture_get", "capture_replay"];
+	expect(names()).not.toEqual(expect.arrayContaining(evidence));
+	await runtime.setIosEnabled(true);
+	expect(names()).toEqual(expect.arrayContaining([...evidence, "ios_http_log", "ios_devices"]));
+	expect(names()).not.toContain("droid_devices");
+	expect(names()).not.toContain("droid_capture_start");
+	const prompt = await assertWorkflow(main.session);
+	expect(prompt).toContain("capture_search");
+	expect(prompt).toContain("ios_http_log");
+	await runtime.setDroidEnabled(true);
+	expect(names()).toContain("droid_capture_start");
+	await runtime.setDroidEnabled(false);
+	expect(names()).toEqual(expect.arrayContaining(evidence));
+	expect(names()).not.toContain("droid_capture_start");
+	await runtime.setDroidEnabled(true);
+	await runtime.setIosEnabled(false);
+	expect(names()).toEqual(expect.arrayContaining(evidence));
+	expect(names()).not.toContain("ios_http_log");
+	await runtime.setDroidEnabled(false);
+	for (const name of evidence) expect(names()).not.toContain(name);
+});
 
 test("disabled MITM permission removes tools from the real main and sub-agent loadouts", async () => {
 	const spawn = vi.spyOn(subagent, "createSubagentTool");

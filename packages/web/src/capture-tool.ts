@@ -18,15 +18,21 @@ import { execInContainer } from "./docker.ts";
 import type { DroidGateway } from "./droid-gateway.ts";
 import { parseTsharkHttpJson } from "./pcap-http.ts";
 
-export const CAPTURE_TOOL_NAMES: readonly string[] = [
+export const DROID_CAPTURE_TOOL_NAMES: readonly string[] = [
 	"droid_capture_start",
 	"droid_capture_status",
 	"droid_capture_pull",
+];
+
+/** Both Android and iOS write HTTP evidence to this project-scoped store. */
+export const HTTP_EVIDENCE_TOOL_NAMES: readonly string[] = [
 	"capture_import",
 	"capture_search",
 	"capture_get",
 	"capture_replay",
 ];
+
+export const CAPTURE_TOOL_NAMES: readonly string[] = [...DROID_CAPTURE_TOOL_NAMES, ...HTTP_EVIDENCE_TOOL_NAMES];
 
 const DEVICE_PCAP = "/data/local/tmp/droid-capture.pcap";
 

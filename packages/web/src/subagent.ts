@@ -2,9 +2,9 @@
  * The spawn_agent tool: lets the main agent delegate a self-contained task to
  * an isolated sub-agent session with its own transcript and turn budget.
  *
- * Sub-agents get the same tools as the main session: the coding tools, the
- * gated bash, and whatever the loaded extensions contribute. The only tool they
- * are denied is spawn_agent, so delegation cannot recurse.
+ * Sub-agents receive permission-filtered coding tools, hub tools, optional
+ * search tools and extensions. Console-only modeling, device and report tools
+ * are not passed. They never receive spawn_agent, so delegation cannot recurse.
  */
 
 import type { Model } from "@earendil-works/pi-ai";
@@ -95,12 +95,13 @@ export function createSubagentTool(options: SubagentToolOptions): ToolDefinition
 		name: "spawn_agent",
 		label: "Sub-agent",
 		description:
-			"Spawn an isolated sub-agent to complete one delegated task and return its result. Use for parallelizable or self-contained work such as reconnaissance of a single host, log triage, or researching one question. The sub-agent has the same tools as this session, minus spawn_agent, so it cannot delegate further. Every bash command it runs passes operator approval.",
+			"Spawn an isolated sub-agent to complete one delegated task and return its result. Use for parallelizable or self-contained work such as reconnaissance of a single host, log triage, or researching one question. It receives only its permission-filtered coding, project-record, POC, MITM, configured search and extension tools; it does not receive this session's business-modeling, mobile-device, capture or report-screenshot tools, and cannot delegate further. Commands follow this session's approval mode.",
 		promptSnippet:
 			"Delegate a self-contained task (e.g. recon of one host) to an isolated sub-agent and get its result",
 		promptGuidelines: [
 			"Prefer spawn_agent for independent per-target work (e.g. recon several hosts in parallel) instead of doing everything in this conversation",
 			"Give each sub-agent a complete, self-contained task with explicit target scope; it cannot ask you questions and cannot delegate further",
+			"Keep work that requires console-only business models, mobile devices, capture or report screenshots in the parent session; a sub-agent does not inherit those tools or the parent's conversation",
 		],
 		parameters: subagentSchema,
 		executionMode: "parallel",
