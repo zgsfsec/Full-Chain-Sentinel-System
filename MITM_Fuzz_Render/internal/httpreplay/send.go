@@ -29,6 +29,7 @@ type Timings struct {
 // Response 是解析后的响应视图；Raw 永远是权威数据。
 type Response struct {
 	Raw       []byte    `json:"-"`
+	RawSize   int64     `json:"-"` // Bytes received, including any bytes omitted from Raw.
 	Proto     string    `json:"proto"`
 	Status    int       `json:"status"`
 	Reason    string    `json:"reason"`
@@ -40,10 +41,11 @@ type Response struct {
 
 // Result 是一次重放的完整结果。
 type Result struct {
-	Request  *Request  `json:"-"`
-	Response *Response `json:"-"`
-	Err      *Error    `json:"-"`
-	Timings  Timings   `json:"timings"`
+	Request       *Request  `json:"-"`
+	Response      *Response `json:"-"`
+	Err           *Error    `json:"-"`
+	Timings       Timings   `json:"timings"`
+	ResponseBytes int64     `json:"-"`
 }
 
 const (
@@ -69,6 +71,8 @@ type Options struct {
 	UpstreamProxy    string
 	Resolve          map[string]string // "host:port" -> "ip:port"
 	MaxResponseBytes int64
+	// Stream the original response while retaining only bounded previews in memory.
+	ResponseWriter io.Writer
 
 	DisableAutoHost  bool // 缺 Host 时不自动补
 	DisableAutoClose bool // 缺 Connection 时不自动补 close
@@ -168,14 +172,22 @@ func (c *Client) Send(ctx context.Context, raw []byte, opts Options) Result {
 	}
 
 	// ---- 读取 ----
-	rec := &recorder{r: conn, limit: opts.MaxResponseBytes + (1 << 20)}
+	rec := &recorder{r: conn, limit: opts.MaxResponseBytes + (1 << 20), forward: opts.ResponseWriter}
+	stopCancel := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })
+	defer stopCancel()
 	br := bufio.NewReaderSize(rec, 64<<10)
 
 	resp, ttfbMS, rerr := c.readResponse(conn, br, rec, req.Method, opts)
 	res.Timings.TTFBMS = ttfbMS
 	res.Response = resp
+	res.ResponseBytes = rec.size
 	if rerr != nil {
 		res.Err = rerr
+	}
+	// bufio may consume a complete response from the same read that failed to
+	// forward. Preserve that write failure even when parsing needs no further read.
+	if rec.forwardErr != nil {
+		res.Err = classifyError(rec.forwardErr, "write")
 	}
 	res.Timings.TotalMS = msSince(start)
 	return res
@@ -352,6 +364,7 @@ func (c *Client) readResponse(conn net.Conn, br *bufio.Reader, rec *recorder, me
 	_ = conn.SetReadDeadline(deadline)
 
 	resp := &Response{Proto: proto, Status: status, Reason: reason, Headers: headers}
+	var bodyErr error
 
 	// ---- body ----
 	noBody := strings.EqualFold(method, "HEAD") || status == 204 || status == 304
@@ -359,35 +372,30 @@ func (c *Client) readResponse(conn net.Conn, br *bufio.Reader, rec *recorder, me
 	case noBody:
 		// 无 body
 	case hasChunked(headers):
-		body, trunc, warn := readChunkedBody(br, opts.MaxResponseBytes)
+		body, trunc, warn, readErr := readChunkedBody(br, opts.MaxResponseBytes, opts.ResponseWriter != nil)
 		resp.Body = body
 		resp.Truncated = trunc
 		resp.Warnings = warn
+		bodyErr = readErr
 	default:
 		cl := headerInt(headers, "Content-Length", -1)
-		if cl > 0 {
-			if int64(cl) > opts.MaxResponseBytes {
-				body, trunc := readN(br, opts.MaxResponseBytes)
-				resp.Body = body
-				resp.Truncated = true
-				_ = trunc
-			} else {
-				body := make([]byte, cl)
-				n, err := io.ReadFull(br, body)
-				body = body[:n]
-				resp.Body = body
-				if err != nil {
-					resp.Truncated = true
-				}
+		if cl >= 0 {
+			keep := min(int64(cl), opts.MaxResponseBytes)
+			body := make([]byte, keep)
+			n, err := io.ReadFull(br, body)
+			resp.Body = body[:n]
+			bodyErr = err
+			resp.Truncated = int64(cl) > keep || err != nil
+			if err == nil && int64(cl) > keep && opts.ResponseWriter != nil {
+				_, bodyErr = io.CopyN(io.Discard, br, int64(cl)-keep)
 			}
 		} else {
 			// 读到 EOF
 			var buf bytes.Buffer
 			n, err := io.Copy(&limitedWriter{w: &buf, limit: opts.MaxResponseBytes}, br)
 			resp.Body = buf.Bytes()
-			if err == nil && n >= opts.MaxResponseBytes {
-				resp.Truncated = true
-			}
+			bodyErr = err
+			resp.Truncated = n > opts.MaxResponseBytes || err != nil
 		}
 	}
 
@@ -395,6 +403,14 @@ func (c *Client) readResponse(conn net.Conn, br *bufio.Reader, rec *recorder, me
 		resp.Truncated = true
 	}
 	resp.Raw = rec.buf.Bytes()
+	resp.RawSize = rec.size
+	if bodyErr != nil {
+		resp.Truncated = true
+		if errors.Is(bodyErr, io.EOF) || errors.Is(bodyErr, io.ErrUnexpectedEOF) {
+			return resp, ttfb, errCode("body_incomplete", "响应未完整接收：对端提前关闭连接", false)
+		}
+		return resp, ttfb, classifyError(bodyErr, "body")
+	}
 	return resp, ttfb, nil
 }
 
@@ -492,14 +508,21 @@ func hasChunked(headers []Header) bool {
 
 // recorder 镜像记录从 socket 读到的原始字节，用于 Response.Raw。
 type recorder struct {
-	r     io.Reader
-	buf   bytes.Buffer
-	limit int64
-	full  bool
+	r          io.Reader
+	buf        bytes.Buffer
+	limit      int64
+	full       bool
+	size       int64
+	forward    io.Writer
+	forwardErr error
 }
 
 func (rc *recorder) Read(p []byte) (int, error) {
+	if rc.forwardErr != nil {
+		return 0, rc.forwardErr
+	}
 	n, err := rc.r.Read(p)
+	rc.size += int64(n)
 	if n > 0 && !rc.full {
 		space := rc.limit - int64(rc.buf.Len())
 		if space <= 0 {
@@ -509,6 +532,17 @@ func (rc *recorder) Read(p []byte) (int, error) {
 		} else {
 			rc.buf.Write(p[:space])
 			rc.full = true
+		}
+	}
+	if n > 0 && rc.forward != nil {
+		written, writeErr := rc.forward.Write(p[:n])
+		if writeErr != nil {
+			rc.forwardErr = writeErr
+			return n, writeErr
+		}
+		if written != n {
+			rc.forwardErr = io.ErrShortWrite
+			return n, io.ErrShortWrite
 		}
 	}
 	return n, err

@@ -1,6 +1,6 @@
 /** Read replayd's native SQLite/blob format, including while the capture worker is stopped. */
 import { isUtf8 } from "node:buffer";
-import { closeSync, existsSync, fstatSync, openSync, readSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { MitmBody, MitmBodyChunk, MitmFlow, MitmFlowDetail, MitmFlowPage, MitmHeader } from "./mitm-types.ts";
 import { openSqliteDatabase, type SqliteValue } from "./sqlite.ts";
@@ -92,23 +92,18 @@ export type MitmReader = (queries: MitmQuery[]) => Promise<unknown[][]>;
 export type MitmWriter = (queries: MitmQuery[]) => Promise<number>;
 
 /** The live writer must run in the container, alongside replayd's WAL. */
-export const MITM_DELETE_SCRIPT = `import json, sqlite3, sys
-connection = sqlite3.connect("file:/data/replayd.db?mode=rw", uri=True, timeout=5)
-try:
-    connection.execute("PRAGMA foreign_keys = ON")
-    connection.execute("BEGIN IMMEDIATE")
-    for query in json.loads(sys.argv[1]):
-        result = connection.execute(query["sql"], query["params"])
-    deleted = result.rowcount
-    connection.commit()
-    print(json.dumps(deleted))
-finally:
-    connection.close()
+export const MITM_DELETE_SCRIPT = `import json, sys, urllib.request
+queries = json.loads(sys.argv[1])
+ids = queries[0]["params"] or None
+with open("/data/token") as token:
+    request = urllib.request.Request("http://127.0.0.1:8081/api/proxy/flows/delete", data=json.dumps({"ids": ids, "confirm": True}).encode(), headers={"Authorization": "Bearer " + token.read().strip(), "Content-Type": "application/json"})
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+with opener.open(request, timeout=25) as response:
+    print(json.dumps(json.load(response)["deleted"]))
 `;
 
-/** Match replayd's deletion semantics: remove flows and release blob references.
- * Do not unlink blobs while replayd may be inserting the same content hash.
- * A stopped clear rotates the directory and reclaims the files safely.
+/** Match replayd's deletion semantics: remove flows and reclaim unreferenced blobs.
+ * Live cleanup runs inside replayd, coordinated with its file/metadata writer lock.
  */
 export async function deleteMitmFlows(directory: string, ids?: unknown, writer?: MitmWriter): Promise<number> {
 	if (
@@ -148,6 +143,13 @@ export async function deleteMitmFlows(directory: string, ids?: unknown, writer?:
 		let deleted = 0;
 		for (const query of queries) deleted = Number(db.prepare(query.sql).run(...query.params).changes ?? 0);
 		db.exec("COMMIT");
+		// This branch is only used with the worker stopped. Live deletion runs in replayd.
+		const unused = db.prepare("SELECT sha256 FROM blobs WHERE refcount = 0").all() as { sha256: string }[];
+		for (const row of unused) {
+			const file = mitmBlobPath(directory, row.sha256)!;
+			if (existsSync(file)) unlinkSync(file);
+			db.prepare("DELETE FROM blobs WHERE sha256 = ? AND refcount = 0").run(row.sha256);
+		}
 		return deleted;
 	} finally {
 		db.close();

@@ -305,21 +305,30 @@ func (s *Server) relayLoop(client net.Conn, br *bufio.Reader, firstLine string, 
 			return
 		}
 		opts := httpreplay.Options{
-			FallbackURL: req.URL.Scheme + "://" + hostPortOf(req.URL),
-			InsecureTLS: s.insecure.Load(),
+			FallbackURL:      req.URL.Scheme + "://" + hostPortOf(req.URL),
+			InsecureTLS:      s.insecure.Load(),
+			ResponseWriter:   client,
+			MaxResponseBytes: s.maxCaptureBytes.Load(),
 		}
+		_ = client.SetWriteDeadline(time.Now().Add(upstreamTimeout))
 		ctx, cancel := context.WithTimeout(context.Background(), upstreamTimeout)
 		res := s.client.Send(ctx, reqRaw, opts)
 		cancel()
 
 		if res.Err != nil {
 			s.record(req, res)
-			s.writeBadGateway(client, res.Err)
+			if res.ResponseBytes == 0 {
+				s.writeBadGateway(client, res.Err)
+			}
 			return // 上游失败后关闭连接，避免状态不同步
 		}
 		s.record(req, res)
-		_ = client.SetWriteDeadline(time.Now().Add(60 * time.Second))
-		if _, werr := client.Write(res.Response.Raw); werr != nil {
+		connection, _ := httpreplay.HeaderIn(res.Response.Headers, "Connection")
+		_, hasLength := httpreplay.HeaderIn(res.Response.Headers, "Content-Length")
+		transfer, _ := httpreplay.HeaderIn(res.Response.Headers, "Transfer-Encoding")
+		noBody := req.Method == "HEAD" || res.Response.Status == 204 || res.Response.Status == 304
+		// EOF-delimited responses must terminate the client connection as well.
+		if strings.Contains(strings.ToLower(connection), "close") || (!noBody && !hasLength && !strings.Contains(strings.ToLower(transfer), "chunked")) {
 			return
 		}
 	}

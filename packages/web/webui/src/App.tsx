@@ -28,6 +28,7 @@ import { AssetPanel } from "./components/AssetPanel.tsx";
 import { WebSearchPanel } from "./components/WebSearchPanel.tsx";
 import { McpPanel } from "./components/McpPanel.tsx";
 import { MitmPage } from "./components/MitmPage.tsx";
+import { WebFuzzPage } from "./components/WebFuzzPage.tsx";
 import { NotifyPanel } from "./components/NotifyPanel.tsx";
 import { Overlay } from "./components/Overlay.tsx";
 import { PermissionsPanel } from "./components/PermissionsPanel.tsx";
@@ -339,6 +340,7 @@ export function App() {
 	const [errors, setErrors] = useState<string[]>([]);
 	/** The one page the content area shows; navigation lives in the sider. */
 	const [page, setPage] = useState<SentinelPageId>("dashboard");
+	const [webFuzzImport, setWebFuzzImport] = useState<{ projectId: string; flowId: string } | null>(null);
 	/**
 	 * Console authentication: the console renders only once the session is
 	 * confirmed; otherwise the login (or first-run setup) screen replaces it.
@@ -3136,7 +3138,15 @@ export function App() {
 							onOpenVuln={openVulnFromAsset}
 						/>
 					) : page === "mitm" ? (
-						<MitmPage key={snapshot?.project?.id ?? "none"} project={snapshot?.project ?? null} />
+						<MitmPage key={snapshot?.project?.id ?? "none"} project={snapshot?.project ?? null} onSendToWebFuzz={(flowId) => {
+							if (!snapshot?.project) return;
+							setWebFuzzImport({ projectId: snapshot.project.id, flowId });
+							openPage("webfuzz");
+						}} />
+					) : page === "webfuzz" ? (
+						<WebFuzzPage key={snapshot?.project?.id ?? "none"} project={snapshot?.project ?? null}
+							initialFlowId={webFuzzImport?.projectId === snapshot?.project?.id ? webFuzzImport?.flowId : undefined}
+							onImportConsumed={() => setWebFuzzImport(null)} />
 					) : page === "pocs" ? (
 						<PocPage
 							items={pocItems}

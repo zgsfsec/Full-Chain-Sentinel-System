@@ -138,6 +138,7 @@ func TestProxyAuthenticationHTTPAndHTTPSRedactCredentials(t *testing.T) {
 			}
 		}
 	}
+	e.waitCaptured(t, 4)
 	flows, _, err := e.st.ListFlows(t.Context(), store.Filter{Source: "proxy"})
 	if err != nil || len(flows) != 4 {
 		t.Fatalf("capture count=%d err=%v", len(flows), err)
@@ -170,7 +171,7 @@ func TestProxyAuthenticationRequiredOnEachPlainRequest(t *testing.T) {
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	br := bufio.NewReader(conn)
 	credential := base64.StdEncoding.EncodeToString([]byte("operator:long-password"))
-	fmt.Fprintf(conn, "GET %s/ HTTP/1.1\r\nHost: ignored\r\nProxy-Authorization: Basic %s\r\n\r\n", up.URL, credential)
+	fmt.Fprintf(conn, "GET %s/ HTTP/1.1\r\nHost: ignored\r\nConnection: keep-alive\r\nProxy-Authorization: Basic %s\r\n\r\n", up.URL, credential)
 	resp, err := http.ReadResponse(br, nil)
 	if err != nil {
 		t.Fatal(err)

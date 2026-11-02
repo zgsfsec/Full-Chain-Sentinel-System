@@ -26,7 +26,9 @@ func (s *Server) prepareCapture(f *store.Flow) bool {
 		return true
 	}
 	f.ReqSize = int64(len(f.ReqRaw))
-	f.RespSize = int64(len(f.RespRaw))
+	if f.RespSize == 0 {
+		f.RespSize = int64(len(f.RespRaw))
+	}
 	var truncated []string
 	if int64(len(f.ReqRaw)) > limit {
 		f.ReqRaw = f.ReqRaw[:limit]

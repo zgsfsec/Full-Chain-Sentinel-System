@@ -20,6 +20,7 @@ export async function handleMitmApi(
 	try {
 		if (!center) throw new MitmError("控制台未配置数据目录。", 503);
 		const url = new URL(request.url ?? "/", "http://localhost");
+		const path = url.pathname.slice("/api/mitm".length);
 		let body: Record<string, unknown> = {};
 		if (request.method === "POST") {
 			if (!request.headers["content-type"]?.startsWith("application/json"))
@@ -29,7 +30,9 @@ export async function handleMitmApi(
 			for await (const chunk of request.iterator({ destroyOnReturn: false })) {
 				const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
 				size += bytes.length;
-				if (size > 16384) throw new MitmError("请求内容过大。", 413);
+				const limit =
+					path === "/webfuzz/workspace" ? 16 * 1024 * 1024 : path === "/webfuzz/send" ? 4 * 1024 * 1024 : 16384;
+				if (size > limit) throw new MitmError("请求内容过大。", 413);
 				chunks.push(bytes);
 			}
 			let parsed: unknown;
@@ -47,8 +50,11 @@ export async function handleMitmApi(
 		if (typeof id !== "string" || !id || context.project()?.id !== id)
 			throw new MitmError("当前项目已变更，请刷新页面。", 409);
 		const directory = center.directory(id);
-		const path = url.pathname.slice("/api/mitm".length);
 		if (request.method === "GET") {
+			if (path === "/webfuzz") {
+				json(center.webFuzzState(id));
+				return;
+			}
 			if (path === "" || path === "/") {
 				json(await center.status(id));
 				return;
@@ -82,6 +88,31 @@ export async function handleMitmApi(
 				return;
 			}
 		} else if (request.method === "POST") {
+			if (path === "/webfuzz/workspace") {
+				center.saveWebFuzzState(id, body);
+				json({ ok: true });
+				return;
+			}
+			if (path === "/webfuzz/import") {
+				json(await center.importWebFuzz(id, body.flowId));
+				return;
+			}
+			if (path === "/webfuzz/send") {
+				const controller = new AbortController();
+				const abort = () => controller.abort();
+				response.once("close", abort);
+				try {
+					json(
+						await center.replay(id, body.request, body.password, controller.signal, () => {
+							if (!context.authorized()) throw new MitmError("登录已失效，请重新登录。", 401);
+							if (context.project()?.id !== id) throw new MitmError("当前项目已变更，请刷新页面。", 409);
+						}),
+					);
+				} finally {
+					response.removeListener("close", abort);
+				}
+				return;
+			}
 			if (path === "/config") {
 				json(await center.save(id, body));
 				return;
@@ -108,6 +139,7 @@ export async function handleMitmApi(
 		}
 		throw new MitmError("接口不存在或请求方法错误。", 404);
 	} catch (error) {
+		if (response.destroyed) return;
 		if (response.headersSent) {
 			response.destroy();
 			return;

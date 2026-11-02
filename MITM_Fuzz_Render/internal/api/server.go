@@ -159,6 +159,7 @@ func (s *Server) routes() http.Handler {
 			pr.Put("/tabs/{id}/highlights", s.handlePutTabHighlights)
 
 			pr.Get("/proxy", s.handleProxyStatus)
+			pr.Post("/proxy/flows/delete", s.handleProxyDeleteFlows)
 			pr.Post("/proxy/start", s.handleProxyStart)
 			pr.Post("/proxy/stop", s.handleProxyStop)
 			pr.Post("/proxy/insecure", s.handleProxyInsecure)

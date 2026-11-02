@@ -1,14 +1,30 @@
 /** Project-owned capture workers. Operator traffic never enters the Agent's replayd instance. */
-import { createHash, pbkdf2Sync, randomBytes, randomUUID, X509Certificate } from "node:crypto";
+import { createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual, X509Certificate } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { containerPrefix, runDocker, SENTINEL_IMAGE } from "./docker.ts";
+import { containerPrefix, execInContainer, runDocker, SENTINEL_IMAGE } from "./docker.ts";
 import { installProjectMitmCa, projectMitmDirectory } from "./mitm-certificate.ts";
-import { deleteMitmFlows, MITM_DELETE_SCRIPT, MITM_READ_SCRIPT, MitmError, type MitmReader } from "./mitm-store.ts";
+import {
+	deleteMitmFlows,
+	getMitmFlow,
+	MITM_DELETE_SCRIPT,
+	MITM_READ_SCRIPT,
+	MitmError,
+	type MitmReader,
+} from "./mitm-store.ts";
 import type { MitmConfig, MitmStatus } from "./mitm-types.ts";
 import { readReplaydBinary, replaydArchFromUname, replaydBinaryHint } from "./replayd-binary.ts";
+import {
+	prepareWebFuzzRaw,
+	readWebFuzzState,
+	saveWebFuzzResult,
+	sendWebFuzz,
+	validateWebFuzzRequest,
+	writeWebFuzzState,
+} from "./webfuzz.ts";
+import type { WebFuzzRequest, WebFuzzResult, WebFuzzState } from "./webfuzz-types.ts";
 
 interface MitmProject {
 	id: string;
@@ -36,6 +52,7 @@ export class MitmCenter {
 	private readonly docker: typeof runDocker;
 	private readonly locks = new Map<string, Promise<unknown>>();
 	private readonly deleting = new Set<string>();
+	private readonly replays = new Map<string, Set<AbortController>>();
 	constructor(agentDir: string, projects: () => MitmProject[], docker: typeof runDocker = runDocker) {
 		this.root = resolve(agentDir, "mitm");
 		this.projects = projects;
@@ -52,6 +69,103 @@ export class MitmCenter {
 	directory(id: string): string {
 		this.project(id);
 		return projectMitmDirectory(dirname(this.root), id);
+	}
+
+	webFuzzState(id: string): WebFuzzState {
+		this.project(id);
+		return readWebFuzzState(join(this.root, id));
+	}
+
+	saveWebFuzzState(id: string, value: unknown): void {
+		this.project(id);
+		writeWebFuzzState(join(this.root, id), value);
+	}
+
+	async importWebFuzz(id: string, flowId: unknown): Promise<WebFuzzRequest> {
+		if (typeof flowId !== "string") throw new MitmError("请选择流量记录。");
+		const detail = await getMitmFlow(this.directory(id), flowId, await this.reader(id));
+		this.project(id);
+		if (detail.request.encoding !== "utf8" || detail.request.truncated || detail.request.captureTruncated)
+			throw new MitmError("报文为二进制或已截断，无法完整导入；请手动构造请求。");
+		const host = detail.host.includes(":") && !detail.host.startsWith("[") ? `[${detail.host}]` : detail.host;
+		return validateWebFuzzRequest({
+			raw: detail.request.text,
+			target: `${detail.scheme}://${host}:${detail.port}`,
+			route: "project",
+			timeoutMs: 30000,
+			insecureTLS: false,
+			fixContentLength: true,
+		});
+	}
+
+	async replay(
+		id: string,
+		value: unknown,
+		password: unknown,
+		signal: AbortSignal,
+		assertAccess: () => void,
+	): Promise<WebFuzzResult> {
+		const input = validateWebFuzzRequest(value);
+		prepareWebFuzzRaw(input);
+		const project = this.project(id);
+		const active = this.replays.get(id) ?? new Set<AbortController>();
+		if (active.size >= 4) throw new MitmError("当前项目最多同时发送 4 个请求。", 429);
+		const controller = new AbortController();
+		const abort = () => controller.abort();
+		signal.addEventListener("abort", abort, { once: true });
+		if (signal.aborted) abort();
+		active.add(controller);
+		this.replays.set(id, active);
+		try {
+			let network = "bridge";
+			let upstreamProxy: string | undefined;
+			let proxyAuthorization: string | undefined;
+			let caPath: string | undefined;
+			if (input.route === "project") {
+				if (!project.container) throw new MitmError("当前项目未配置工作容器。", 409);
+				network = `container:${project.container}`;
+			} else if (input.route === "mitm") {
+				if (!(await this.inspect(id))?.State.Running) throw new MitmError("请先启动当前项目的 MITM 代理。", 409);
+				network = `container:${this.container(id)}`;
+				const proxy = new URL("http://127.0.0.1:8080");
+				const config = this.config(id);
+				if (config.authEnabled) {
+					if (typeof password !== "string" || !/^[\x20-\x7e]{8,128}$/.test(password))
+						throw new MitmError("请输入当前项目的 MITM 代理密码。");
+					const hash = pbkdf2Sync(password, Buffer.from(config.authSalt, "hex"), 100000, 32, "sha256");
+					if (!timingSafeEqual(hash, Buffer.from(config.authPasswordHash, "hex")))
+						throw new MitmError("MITM 代理密码错误。", 403);
+					proxy.username = config.authUsername;
+					proxy.password = password;
+					proxyAuthorization = `Basic ${Buffer.from(`${config.authUsername}:${password}`).toString("base64")}`;
+				}
+				upstreamProxy = proxy.href;
+				const cert = join(this.directory(id), "ca", "ca.crt");
+				if (existsSync(cert)) caPath = cert;
+			}
+			assertAccess();
+			this.project(id);
+			const result = await sendWebFuzz(
+				input,
+				{
+					binDirectory: join(this.root, "bin"),
+					network,
+					upstreamProxy,
+					proxyAuthorization,
+					caPath,
+					signal: controller.signal,
+				},
+				{ docker: this.docker, exec: execInContainer, binary: readReplaydBinary },
+			);
+			assertAccess();
+			this.project(id);
+			saveWebFuzzResult(join(this.root, id), result);
+			return result;
+		} finally {
+			signal.removeEventListener("abort", abort);
+			active.delete(controller);
+			if (!active.size) this.replays.delete(id);
+		}
 	}
 	private container(id: string): string {
 		return `${containerPrefix()}mitm-${id}`;
@@ -454,6 +568,7 @@ export class MitmCenter {
 	purge<T>(id: string, unregister?: () => Promise<T>): Promise<T | undefined> {
 		this.project(id);
 		this.deleting.add(id);
+		for (const controller of this.replays.get(id) ?? []) controller.abort();
 		return this.exclusive(id, async () => {
 			try {
 				if (existsSync(join(this.root, id)) && (await this.inspect(id))) {

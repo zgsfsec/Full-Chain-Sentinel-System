@@ -85,6 +85,7 @@ func TestMITMCapturesHTTPS(t *testing.T) {
 	}
 
 	// 抓包落库
+	e.waitCaptured(t, 1)
 	flows, _, err := e.st.ListFlows(t.Context(), store.Filter{Source: "proxy"})
 	if err != nil {
 		t.Fatal(err)
@@ -132,6 +133,7 @@ func TestPlainHTTPCaptured(t *testing.T) {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 
+	e.waitCaptured(t, 1)
 	flows, _, _ := e.st.ListFlows(t.Context(), store.Filter{Source: "proxy"})
 	if len(flows) == 0 {
 		t.Fatal("应记录明文代理 flow")
@@ -157,6 +159,7 @@ func TestKeepAliveMultipleRequests(t *testing.T) {
 		}
 		_ = resp.Body.Close()
 	}
+	e.waitCaptured(t, 3)
 	flows, _, _ := e.st.ListFlows(t.Context(), store.Filter{Source: "proxy"})
 	if len(flows) < 3 {
 		t.Errorf("应记录 ≥3 条 flow, got %d", len(flows))
@@ -335,4 +338,17 @@ func drainConn(br *bufio.Reader) {
 			return
 		}
 	}
+}
+
+// Forwarding now streams before persistence, so clients may finish reading first.
+func (e *proxyEnv) waitCaptured(t *testing.T, count int64) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if e.srv.captured.Load() >= count {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("capture did not finish: got %d want %d", e.srv.captured.Load(), count)
 }

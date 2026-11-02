@@ -47,6 +47,8 @@ func (s *Store) InsertArtifact(ctx context.Context, a *Artifact, data []byte) er
 		return errors.New("store: artifact meta 不是合法 JSON")
 	}
 
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	sha, size, err := s.blobs.put(data)
 	if err != nil {
 		return err
@@ -57,8 +59,6 @@ func (s *Store) InsertArtifact(ctx context.Context, a *Artifact, data []byte) er
 		a.CreatedAt = s.now().UnixMilli()
 	}
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: 开启事务失败: %w", err)

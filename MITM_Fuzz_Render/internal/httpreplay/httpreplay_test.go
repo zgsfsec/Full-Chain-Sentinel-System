@@ -430,8 +430,8 @@ func TestSendTruncatedBody(t *testing.T) {
 		return []byte("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nabc")
 	})
 	res := send(t, "GET / HTTP/1.1\r\nHost: x\r\n\r\n", func(o *Options) { o.FallbackURL = "http://" + addr })
-	if res.Err != nil {
-		t.Fatalf("Err = %+v", res.Err)
+	if res.Err == nil || res.Err.Code != "body_incomplete" {
+		t.Fatalf("Err = %+v, want body_incomplete", res.Err)
 	}
 	if !res.Response.Truncated {
 		t.Error("应标记 Truncated")

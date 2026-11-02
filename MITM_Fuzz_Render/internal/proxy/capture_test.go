@@ -35,6 +35,7 @@ func TestCapturePolicyFiltersBeforeStorageAndKeepsForwarding(t *testing.T) {
 			t.Fatalf("forwarding %s changed: len=%d err=%v", path, len(body), err)
 		}
 	}
+	e.waitCaptured(t, 3)
 	flows, _, err := e.st.ListFlows(t.Context(), store.Filter{Source: "proxy"})
 	if err != nil || len(flows) != 3 || !e.srv.Status().Running {
 		t.Fatalf("live capture: count=%d err=%v", len(flows), err)
@@ -55,6 +56,7 @@ func TestCapturePolicyFiltersBeforeStorageAndKeepsForwarding(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
+	e.waitCaptured(t, 4)
 	count, err := e.st.CountFlows(t.Context(), store.Filter{Source: "proxy"})
 	if err != nil || count != 4 {
 		t.Fatalf("filter off: count=%d err=%v", count, err)

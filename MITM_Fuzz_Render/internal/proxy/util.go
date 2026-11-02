@@ -101,7 +101,7 @@ func (s *Server) record(req *httpreplay.Request, res httpreplay.Result) {
 		f.RespHeaders = convHeaders(res.Response.Headers)
 		f.RespRaw = res.Response.Raw
 		f.RespBody = res.Response.Body
-		f.RespSize = int64(len(res.Response.Raw))
+		f.RespSize = res.Response.RawSize
 	}
 	if res.Err != nil {
 		b, _ := json.Marshal(res.Err)

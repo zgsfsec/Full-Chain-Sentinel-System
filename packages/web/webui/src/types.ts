@@ -26,6 +26,7 @@ export type SentinelPageId =
 	| "vulns"
 	| "assets"
 	| "mitm"
+	| "webfuzz"
 	| "pocs"
 	| "apimodels"
 	| "droid"

@@ -20,6 +20,7 @@ test("MITM routes share the console entry gate, login and authorization statemen
 		"/api/mitm/flows?projectId=a",
 		"/api/mitm/ca.pem?projectId=a",
 		"/api/mitm/flows/flw_one/response?projectId=a",
+		"/api/mitm/webfuzz?projectId=a",
 	];
 	try {
 		for (const path of routes) expect((await fetch(origin + path)).status).toBe(404);

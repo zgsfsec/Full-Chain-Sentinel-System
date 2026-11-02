@@ -103,7 +103,9 @@ func (s *Store) InsertFlow(ctx context.Context, f *Flow) error {
 		f.ProjectID = pid
 	}
 
-	// blob 文件写入放在事务外：文件系统操作不应长时间持锁。
+	// Coordinate file creation with garbage collection, not just metadata writes.
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	type blobMeta struct {
 		sha  string
 		size int64
@@ -139,9 +141,6 @@ func (s *Store) InsertFlow(ctx context.Context, f *Flow) error {
 	if f.RespSize == 0 && len(f.RespRaw) > 0 {
 		f.RespSize = int64(len(f.RespRaw))
 	}
-
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

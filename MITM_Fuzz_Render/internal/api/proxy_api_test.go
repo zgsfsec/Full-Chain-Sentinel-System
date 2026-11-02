@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chinaran404/replayd/internal/cert"
 	"github.com/chinaran404/replayd/internal/store"
@@ -167,6 +168,17 @@ func TestProxyEndToEndViaAPI(t *testing.T) {
 		t.Fatalf("body = %q", body)
 	}
 
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		count, err := srv.store.CountFlows(t.Context(), store.Filter{Source: "proxy"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	flows, _, err := srv.store.ListFlows(context.Background(), store.Filter{Source: "proxy"})
 	if err != nil {
 		t.Fatalf("ListFlows: %v", err)

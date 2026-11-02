@@ -35,6 +35,7 @@ type replayOptions struct {
 	TotalTimeoutMS   int64  `json:"totalTimeoutMs"`
 	DisableAutoHost  bool   `json:"disableAutoHost"`
 	DisableAutoClose bool   `json:"disableAutoClose"`
+	IncludeRaw       bool   `json:"includeRaw"`
 }
 
 type replayRequest struct {
@@ -63,14 +64,16 @@ type replayReqView struct {
 }
 
 type replayRespView struct {
-	Proto      string              `json:"proto"`
-	Status     int                 `json:"status"`
-	Reason     string              `json:"reason"`
-	Headers    []httpreplay.Header `json:"headers,omitempty"`
-	BodyText   string              `json:"bodyText,omitempty"`
-	BodyBase64 string              `json:"bodyBase64,omitempty"`
-	Truncated  bool                `json:"truncated"`
-	Size       int                 `json:"size"`
+	Proto        string              `json:"proto"`
+	Status       int                 `json:"status"`
+	Reason       string              `json:"reason"`
+	Headers      []httpreplay.Header `json:"headers,omitempty"`
+	BodyText     string              `json:"bodyText,omitempty"`
+	BodyBase64   string              `json:"bodyBase64,omitempty"`
+	Truncated    bool                `json:"truncated"`
+	Size         int                 `json:"size"`
+	RawBase64    string              `json:"rawBase64,omitempty"`
+	RawTruncated bool                `json:"rawTruncated,omitempty"`
 }
 
 func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +188,14 @@ func (s *Server) doReplay(ctx context.Context, in replayRequest, sc *store.Scrip
 	}
 	if res.Response != nil {
 		out.Response = newRespView(res.Response)
+		if in.Opts.IncludeRaw {
+			raw := res.Response.Raw
+			if len(raw) > 128*1024 {
+				raw = raw[:128*1024]
+			}
+			out.Response.RawBase64 = base64.StdEncoding.EncodeToString(raw)
+			out.Response.RawTruncated = int64(len(raw)) < res.Response.RawSize
+		}
 	}
 	out.Error = res.Err
 

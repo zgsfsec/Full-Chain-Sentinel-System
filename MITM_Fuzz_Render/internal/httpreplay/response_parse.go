@@ -13,7 +13,7 @@ import (
 // ReadChunked 从 br 解析 chunked body（导出给 MITM 捕获客户端请求使用）。
 // 到达 EOF 视为截断而不视为致命错误。
 func ReadChunked(br *bufio.Reader, limit int64) (body []byte, truncated bool) {
-	b, t, _ := readChunkedBody(br, limit)
+	b, t, _, _ := readChunkedBody(br, limit, false)
 	return b, t
 }
 

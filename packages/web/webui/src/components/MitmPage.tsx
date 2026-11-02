@@ -1,4 +1,4 @@
-import { DeleteOutlined, DownloadOutlined, QuestionCircleOutlined, ReloadOutlined, SettingOutlined } from "@ant-design/icons";
+import { DeleteOutlined, DownloadOutlined, QuestionCircleOutlined, ReloadOutlined, SendOutlined, SettingOutlined } from "@ant-design/icons";
 import {
 	Alert,
 	Badge,
@@ -100,7 +100,7 @@ export function MitmFlowLink({ flow, onOpen }: { flow: MitmFlow; onOpen: () => v
 	);
 }
 
-export function MitmPage({ project }: { project: { id: string; name: string } | null }) {
+export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; name: string } | null; onSendToWebFuzz?: (flowId: string) => void }) {
 	const [status, setStatus] = useState<MitmStatus | null>(null);
 	const [flows, setFlows] = useState<MitmFlowPage>({ items: [], total: 0, page: 1, pageSize: 50 });
 	const [query, setQuery] = useState({ q: "", method: "", status: "", page: 1 });
@@ -637,6 +637,7 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 			</Drawer>
 			<Drawer
 				className="mitm-detail"
+				extra={onSendToWebFuzz ? <Button icon={<SendOutlined />} disabled={!detail} onClick={() => { if (detail) onSendToWebFuzz(detail.id); }}>{tx("发送到 WebFuzz", "Send to WebFuzz")}</Button> : null}
 				title={tx("流量详情", "Traffic details")}
 				open={selected !== null}
 				onClose={() => setSelected(null)}

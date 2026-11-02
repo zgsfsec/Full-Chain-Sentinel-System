@@ -1,10 +1,11 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash, pbkdf2Sync } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import type { runDocker } from "../src/docker.ts";
 import { MitmCenter } from "../src/mitm.ts";
@@ -75,6 +76,7 @@ function insert(
 		raw,
 		raw,
 	);
+	if (raw) db.prepare("UPDATE blobs SET refcount = refcount + 2 WHERE sha256 = ?").run(raw);
 }
 
 test("reads native replayd records, pages and combines filters without including replay traffic", async () => {
@@ -160,7 +162,7 @@ test("stopped-only clear rotates data, retains CA/token/config, and cannot touch
 	expect(existsSync(other)).toBe(true);
 });
 
-test("running clear and selective deletion use a container transaction and keep capturing", async () => {
+test("running deletion calls the authenticated worker cleanup endpoint and keeps capturing", async () => {
 	db.exec("PRAGMA journal_mode = WAL");
 	const sha = blob(Buffer.from("shared"));
 	insert("selected", 200, "proxy", "a.example", sha);
@@ -171,6 +173,26 @@ test("running clear and selective deletion use a container transaction and keep 
 		.update(`${join(root, "mitm")}/a`)
 		.digest("hex");
 	let writes = 0;
+	writeFileSync(join(directory, "token"), "fixture-token");
+	server = createServer((req, res) => {
+		void (async () => {
+			expect(req.url).toBe("/api/proxy/flows/delete");
+			expect(req.headers.authorization).toBe("Bearer fixture-token");
+			const chunks: Buffer[] = [];
+			for await (const chunk of req) chunks.push(Buffer.from(chunk));
+			const input = JSON.parse(Buffer.concat(chunks).toString()) as { ids: string[] | null; confirm: boolean };
+			expect(input.confirm).toBe(true);
+			const deleted = await deleteMitmFlows(directory, input.ids ?? undefined);
+			res.setHeader("content-type", "application/json");
+			res.end(JSON.stringify({ deleted }));
+		})().catch((error: unknown) => {
+			res.statusCode = 500;
+			res.end(String(error));
+		});
+	});
+	await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("No listen address");
 	const docker: typeof runDocker = async (args) => {
 		if (args[0] === "inspect")
 			return {
@@ -187,14 +209,21 @@ test("running clear and selective deletion use a container transaction and keep 
 		expect(args.slice(0, 4)).toEqual(["exec", "sentinel-mitm-a", "python3", "-c"]);
 		expect(args[4]).toBe(MITM_DELETE_SCRIPT);
 		writes++;
-		const script = args[4].replace("/data/replayd.db", join(directory, "replayd.db"));
-		return { code: 0, stderr: "", stdout: execFileSync("python3", ["-c", script, args[5]], { encoding: "utf8" }) };
+		const script = args[4]
+			.replace("/data/token", join(directory, "token"))
+			.replace("127.0.0.1:8081", `127.0.0.1:${address.port}`);
+		const result = await promisify(execFile)("python3", ["-c", script, args[5]], { encoding: "utf8" });
+		return { code: 0, ...result };
 	};
 	const center = new MitmCenter(root, () => [{ id: "a", name: "A" }], docker);
 	expect(await center.deleteFlows("a", ["selected", "replayed", "missing", "selected"])).toBe(1);
 	expect((await listMitmFlows(directory, new URLSearchParams())).items.map((flow) => flow.id)).toEqual(["keep"]);
 	expect(db.prepare("SELECT refcount FROM blobs WHERE sha256 = ?").get(sha)).toEqual({ refcount: 4 });
+	const unique = blob(Buffer.from("only proxy"));
+	insert("unshared", 200, "proxy", "a.example", unique);
 	await center.clear("a");
+	expect(existsSync(mitmBlobPath(directory, unique)!)).toBe(false);
+	expect(existsSync(mitmBlobPath(directory, sha)!)).toBe(true);
 	expect((await listMitmFlows(directory, new URLSearchParams())).total).toBe(0);
 	expect(db.prepare("SELECT id FROM flows").all()).toEqual([{ id: "replayed" }]);
 	expect(db.prepare("SELECT refcount FROM blobs WHERE sha256 = ?").get(sha)).toEqual({ refcount: 2 });
@@ -221,6 +250,8 @@ test("selective deletion validates IDs and rolls back metadata and blob referenc
 	expect(await center.deleteFlows("a", ["one"])).toBe(1);
 	expect(db.prepare("SELECT refcount FROM blobs WHERE sha256 = ?").get(sha)).toEqual({ refcount: 2 });
 	expect((await getMitmFlow(directory, "two")).request.text).toBe("shared");
+	expect(await center.deleteFlows("a", ["two"])).toBe(1);
+	expect(existsSync(mitmBlobPath(directory, sha)!)).toBe(false);
 });
 
 test("foreign containers cannot be cleared or reconfigured; unused projects delete without Docker", async () => {

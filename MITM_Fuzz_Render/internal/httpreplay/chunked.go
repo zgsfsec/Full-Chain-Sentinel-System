@@ -18,7 +18,7 @@ var (
 
 // readChunkedBody 解析 chunked 编码 body。
 // 返回解包后的 body、是否被截断、以及解析警告（trailer、异常格式仍尽量容错）。
-func readChunkedBody(br *bufio.Reader, limit int64) ([]byte, bool, []Warning) {
+func readChunkedBody(br *bufio.Reader, limit int64, drain bool) ([]byte, bool, []Warning, error) {
 	var out bytes.Buffer
 	var warnings []Warning
 	truncated := false
@@ -31,7 +31,7 @@ func readChunkedBody(br *bufio.Reader, limit int64) ([]byte, bool, []Warning) {
 				Code:    "chunked_truncated",
 				Message: "chunked body 未正常结束（连接中断）",
 			})
-			break
+			return out.Bytes(), true, warnings, err
 		}
 		t := strings.TrimSpace(strings.TrimRight(line, "\r\n"))
 		if t == "" {
@@ -46,40 +46,43 @@ func readChunkedBody(br *bufio.Reader, limit int64) ([]byte, bool, []Warning) {
 				Message: fmt.Sprintf("非法 chunk 大小行 %q，按原文截断处理", truncate(t, 40)),
 			})
 			truncated = true
-			break
+			return out.Bytes(), true, warnings, errors.New("响应 chunk 大小无效")
 		}
 		if size == 0 {
 			// trailer 部分：读到空行为止
 			for {
 				tl, terr := readLineCapped(br, maxHeaderLine)
-				if terr != nil || strings.TrimRight(tl, "\r\n") == "" {
+				if terr != nil {
+					return out.Bytes(), true, warnings, terr
+				}
+				if strings.TrimRight(tl, "\r\n") == "" {
 					break
 				}
 			}
 			break
 		}
-		if int64(out.Len())+size > limit {
-			// 超限：读满剩余空间后停止
-			remain := limit - int64(out.Len())
-			if remain > 0 {
-				chunk := make([]byte, remain)
-				_, _ = io.ReadFull(br, chunk)
-				out.Write(chunk)
+		keep := min(size, max(0, limit-int64(out.Len())))
+		if _, err := io.CopyN(&out, br, keep); err != nil {
+			return out.Bytes(), true, warnings, err
+		}
+		if keep < size {
+			truncated = true
+			if !drain {
+				break
 			}
-			truncated = true
-			break
+			if _, err := io.CopyN(io.Discard, br, size-keep); err != nil {
+				return out.Bytes(), true, warnings, err
+			}
 		}
-		chunk := make([]byte, size)
-		if _, err := io.ReadFull(br, chunk); err != nil {
-			out.Write(chunk[:0])
-			truncated = true
-			break
+		var ending [2]byte
+		if _, err := io.ReadFull(br, ending[:]); err != nil {
+			return out.Bytes(), true, warnings, err
 		}
-		out.Write(chunk)
-		// chunk 之后的 CRLF
-		_, _ = br.Discard(2)
+		if string(ending[:]) != "\r\n" {
+			return out.Bytes(), true, warnings, errors.New("响应 chunk 缺少 CRLF")
+		}
 	}
-	return out.Bytes(), truncated, warnings
+	return out.Bytes(), truncated, warnings, nil
 }
 
 // readN 最多读 n 字节（用于超大 Content-Length 的截断读取）。
