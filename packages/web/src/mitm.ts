@@ -1,5 +1,5 @@
 /** Project-owned capture workers. Operator traffic never enters the Agent's replayd instance. */
-import { createHash, randomUUID, X509Certificate } from "node:crypto";
+import { createHash, pbkdf2Sync, randomBytes, randomUUID, X509Certificate } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -14,6 +14,15 @@ interface MitmProject {
 	id: string;
 	name: string;
 	container?: string;
+}
+interface StoredMitmConfig extends Omit<MitmConfig, "hasPassword"> {
+	authSalt: string;
+	authPasswordHash: string;
+}
+
+function publicConfig(config: StoredMitmConfig): MitmConfig {
+	const { authSalt, authPasswordHash, ...visible } = config;
+	return { ...visible, hasPassword: Boolean(authSalt && authPasswordHash) };
 }
 interface DockerState {
 	State: { Running: boolean };
@@ -54,13 +63,13 @@ export class MitmCenter {
 		return join(this.root, id, "config.json");
 	}
 
-	private config(id: string): MitmConfig {
+	private config(id: string): StoredMitmConfig {
 		const path = this.configPath(id);
-		if (!existsSync(path)) return { bind: "127.0.0.1", port: 0, skipStatic: true, maxCaptureMb: 2 };
+		if (!existsSync(path)) return this.validate({ bind: "127.0.0.1", port: 0 });
 		return this.validate(JSON.parse(readFileSync(path, "utf8")));
 	}
-	private validate(value: unknown): MitmConfig {
-		const raw = value as Partial<MitmConfig> | null;
+	private validate(value: unknown): StoredMitmConfig {
+		const raw = value as Partial<StoredMitmConfig> | null;
 		if (
 			!raw ||
 			!["127.0.0.1", "0.0.0.0"].includes(raw.bind ?? "") ||
@@ -73,9 +82,32 @@ export class MitmCenter {
 		const maxCaptureMb = raw.maxCaptureMb ?? 2;
 		if (typeof skipStatic !== "boolean" || !Number.isInteger(maxCaptureMb) || maxCaptureMb < 1 || maxCaptureMb > 32)
 			throw new MitmError("报文保存上限应为 1–32 MB，静态资源过滤应为开关值。");
-		return { bind: raw.bind as MitmConfig["bind"], port: raw.port as number, skipStatic, maxCaptureMb };
+		const authEnabled = raw.authEnabled ?? false;
+		const authUsername = raw.authUsername ?? "";
+		const authSalt = raw.authSalt ?? "";
+		const authPasswordHash = raw.authPasswordHash ?? "";
+		if (
+			typeof authEnabled !== "boolean" ||
+			typeof authUsername !== "string" ||
+			!/^[\x21-\x39\x3b-\x7e]{0,64}$/.test(authUsername) ||
+			(authEnabled && !authUsername) ||
+			typeof authSalt !== "string" ||
+			typeof authPasswordHash !== "string" ||
+			(authEnabled && (!/^[a-f0-9]{32}$/.test(authSalt) || !/^[a-f0-9]{64}$/.test(authPasswordHash)))
+		)
+			throw new MitmError("请设置代理账号和密码；账号应为 1–64 位可见 ASCII 字符，不含冒号或空格。");
+		return {
+			bind: raw.bind as MitmConfig["bind"],
+			port: raw.port as number,
+			skipStatic,
+			maxCaptureMb,
+			authEnabled,
+			authUsername,
+			authSalt,
+			authPasswordHash,
+		};
 	}
-	private writeConfig(id: string, config: MitmConfig): void {
+	private writeConfig(id: string, config: StoredMitmConfig): void {
 		mkdirSync(join(this.root, id), { recursive: true, mode: 0o700 });
 		const path = this.configPath(id);
 		writeFileSync(`${path}.tmp`, JSON.stringify(config), { mode: 0o600 });
@@ -130,7 +162,7 @@ export class MitmCenter {
 
 	async status(id: string): Promise<MitmStatus> {
 		const project = this.project(id);
-		const config = this.config(id);
+		const config = publicConfig(this.config(id));
 		const lanIps = [
 			...new Set(
 				Object.values(networkInterfaces()).flatMap((addresses) =>
@@ -174,7 +206,34 @@ export class MitmCenter {
 		return this.exclusive(id, async () => {
 			this.project(id);
 			if ((await this.inspect(id))?.State.Running) throw new MitmError("请先停止代理，再修改监听配置。", 409);
-			this.writeConfig(id, this.validate(value));
+			if (!value || typeof value !== "object" || Array.isArray(value)) throw new MitmError("代理配置格式错误。");
+			const raw = value as Partial<MitmConfig> & { password?: unknown };
+			const previous = this.config(id);
+			let authSalt = previous.authSalt;
+			let authPasswordHash = previous.authPasswordHash;
+			if (raw.password !== undefined && typeof raw.password !== "string") throw new MitmError("代理密码格式错误。");
+			if (typeof raw.password === "string" && raw.password !== "") {
+				if (!/^[\x20-\x7e]{8,128}$/.test(raw.password))
+					throw new MitmError("代理密码应为 8–128 位可见 ASCII 字符。");
+				authSalt = randomBytes(16).toString("hex");
+				authPasswordHash = pbkdf2Sync(raw.password, Buffer.from(authSalt, "hex"), 100000, 32, "sha256").toString(
+					"hex",
+				);
+			}
+			const authEnabled = raw.authEnabled ?? previous.authEnabled;
+			this.writeConfig(
+				id,
+				this.validate({
+					bind: raw.bind,
+					port: raw.port,
+					skipStatic: raw.skipStatic,
+					maxCaptureMb: raw.maxCaptureMb,
+					authEnabled,
+					authUsername: raw.authUsername ?? previous.authUsername,
+					authSalt: authEnabled ? authSalt : "",
+					authPasswordHash: authEnabled ? authPasswordHash : "",
+				}),
+			);
 			return this.status(id);
 		});
 	}
@@ -202,6 +261,7 @@ export class MitmCenter {
 			const directory = this.directory(id);
 			mkdirSync(directory, { recursive: true, mode: 0o700 });
 			const config = this.config(id);
+			this.writeConfig(id, config);
 			if (state) {
 				const removed = await this.docker(["rm", this.container(id)], { timeoutMs: 15000 });
 				if (removed.code !== 0) throw new MitmError(`无法更新 MITM 容器：${removed.stderr}`, 502);
@@ -238,6 +298,8 @@ export class MitmCenter {
 					`${directory}:/data`,
 					"-v",
 					`${binPath}:/opt/mitm/replayd:ro`,
+					"-v",
+					`${this.configPath(id)}:/opt/mitm/proxy-auth.json:ro`,
 					"--entrypoint",
 					"/opt/mitm/replayd",
 					SENTINEL_IMAGE,
@@ -247,6 +309,8 @@ export class MitmCenter {
 					"127.0.0.1:8081",
 					"-proxy-listen",
 					"0.0.0.0:8080",
+					"-proxy-auth-file",
+					"/opt/mitm/proxy-auth.json",
 					`-proxy-skip-static=${config.skipStatic}`,
 					"-proxy-max-capture-bytes",
 					String(config.maxCaptureMb * 1024 * 1024),
@@ -270,7 +334,7 @@ export class MitmCenter {
 						if (status.state === "running" && status.port && status.ca) {
 							this.writeConfig(id, { ...config, port: status.port });
 							await installProjectMitmCa(dirname(this.root), this.project(id), this.docker);
-							return { ...status, config: { ...config, port: status.port } };
+							return { ...status, config: publicConfig({ ...config, port: status.port }) };
 						}
 					}
 					await delay(200);

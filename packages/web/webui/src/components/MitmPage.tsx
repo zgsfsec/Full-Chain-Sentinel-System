@@ -112,7 +112,16 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 	const [error, setError] = useState("");
 	const [pollError, setPollError] = useState("");
 	const [drawer, setDrawer] = useState<"settings" | "help" | null>(null);
-	const [config, setConfig] = useState<MitmConfig>({ bind: "127.0.0.1", port: 0, skipStatic: true, maxCaptureMb: 2 });
+	const [config, setConfig] = useState<MitmConfig>({
+		bind: "127.0.0.1",
+		port: 0,
+		skipStatic: true,
+		maxCaptureMb: 2,
+		authEnabled: false,
+		authUsername: "",
+		hasPassword: false,
+	});
+	const [password, setPassword] = useState("");
 	const [selected, setSelected] = useState<string | null>(null);
 	const [detail, setDetail] = useState<MitmFlowDetail | null>(null);
 	const [detailError, setDetailError] = useState("");
@@ -194,7 +203,10 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 			const result = await api<MitmStatus | { ok: true }>(`/api/mitm/${name}`, undefined, { ...extra, projectId });
 			if (!alive.current) return;
 			if ("state" in result) setStatus(result);
-			if (name === "config") setDrawer(null);
+			if (name === "config") {
+				setDrawer(null);
+				setPassword("");
+			}
 			if (name === "clear") {
 				setSelected(null);
 				setQuery((prev) => ({ ...prev, page: 1 }));
@@ -232,6 +244,8 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 						disabled={!status || running || busy || unavailable}
 						onClick={() => {
 							if (status) setConfig(status.config);
+							setPassword("");
+							setError("");
 							setDrawer("settings");
 						}}
 					>
@@ -269,6 +283,7 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 							{endpoint ??
 								(port ? tx("未检测到主机 IP", "Host IP unavailable") : tx("启动后分配端口", "Port assigned on start"))}
 						</Typography.Text>
+						{status?.config.authEnabled ? <Tag>{tx("账号认证", "Authentication")}</Tag> : null}
 					</Space>
 					<Typography.Text type="secondary">
 						{tx("HTTP 显式代理 · HTTPS 解密", "HTTP proxy · HTTPS decryption")}
@@ -411,7 +426,7 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 				onClose={() => setDrawer(null)}
 				size={400}
 				extra={
-					<Button type="primary" loading={busy} onClick={() => void action("config", { ...config })}>
+					<Button type="primary" loading={busy} onClick={() => void action("config", { ...config, password })}>
 						{tx("保存", "Save")}
 					</Button>
 				}
@@ -423,10 +438,43 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 							onChange={(bind) => setConfig((prev) => ({ ...prev, bind }))}
 							options={[
 								{ value: "127.0.0.1", label: tx("仅 Docker 主机", "Docker host only") },
-								{ value: "0.0.0.0", label: tx("允许局域网设备", "Allow LAN devices") },
+								{ value: "0.0.0.0", label: tx("所有网卡（0.0.0.0）", "All interfaces (0.0.0.0)") },
 							]}
 						/>
 					</Form.Item>
+					<Form.Item label={tx("代理账号认证", "Proxy authentication")}>
+						<Switch
+							checked={config.authEnabled}
+							onChange={(authEnabled) => setConfig((prev) => ({ ...prev, authEnabled }))}
+						/>
+					</Form.Item>
+					{config.authEnabled ? (
+						<>
+							<Form.Item label={tx("代理账号", "Proxy username")} required>
+								<Input
+									aria-label={tx("代理账号", "Proxy username")}
+									autoComplete="off"
+									maxLength={64}
+									value={config.authUsername}
+									onChange={(event) => setConfig((prev) => ({ ...prev, authUsername: event.target.value }))}
+								/>
+							</Form.Item>
+							<Form.Item
+								label={tx("代理密码", "Proxy password")}
+								required={!config.hasPassword}
+								extra={tx("8–128 位可见 ASCII 字符，保存后不回显。", "8–128 printable ASCII characters. Never displayed after saving.")}
+							>
+								<Input.Password
+									aria-label={tx("代理密码", "Proxy password")}
+									autoComplete="new-password"
+									maxLength={128}
+									value={password}
+									placeholder={config.hasPassword ? tx("已设置，留空保留原密码", "Configured; leave blank to keep") : tx("设置代理密码", "Set a proxy password")}
+									onChange={(event) => setPassword(event.target.value)}
+								/>
+							</Form.Item>
+						</>
+					) : null}
 					<Form.Item
 						label={tx("端口", "Port")}
 						extra={tx(
@@ -470,10 +518,11 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 						/>
 					</Form.Item>
 				</Form>
+				{error ? <Typography.Paragraph type="danger">{error}</Typography.Paragraph> : null}
 				<Typography.Paragraph type="secondary">
 					{tx(
-						"允许局域网后，页面将显示主机 IP 和端口；多网卡或端口转发环境请按实际网络调整。该代理没有账号认证，请通过防火墙限制可访问的设备。",
-						"LAN mode displays the host IP and port. Adjust for multiple interfaces or port forwarding. This proxy has no authentication; restrict access with your firewall.",
+						"远程接入请使用主机实际 IP 和端口，并启用账号认证。Basic 认证不加密客户端到代理的链路，公网建议配合 VPN 或 SSH 隧道使用。",
+						"For remote access, use the host IP and port and enable authentication. Basic authentication does not encrypt the client-to-proxy connection; use a VPN or SSH tunnel on public networks.",
 					)}
 				</Typography.Paragraph>
 			</Drawer>
@@ -492,8 +541,8 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 					</li>
 					<li>
 						{tx(
-							"在浏览器或设备中配置 HTTP 代理；远程设备请先在代理设置中允许局域网访问。",
-							"Set your browser or device's HTTP proxy. For remote devices, enable LAN access first.",
+							"在浏览器或设备中配置 HTTP 代理；远程设备请先将监听范围设为所有网卡。启用认证后，还需填写当前项目的代理账号和密码。",
+							"Configure the browser or device's HTTP proxy. For remote devices, listen on all interfaces. When authentication is enabled, enter this project's proxy username and password.",
 						)}
 					</li>
 					<li>
@@ -503,6 +552,12 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 						)}
 					</li>
 				</ol>
+				{status?.config.authEnabled ? (
+					<Typography.Paragraph>
+						{tx("代理账号：", "Proxy username: ")}
+						<Typography.Text code copyable>{status.config.authUsername}</Typography.Text>
+					</Typography.Paragraph>
+				) : null}
 				<Space>
 					<Button icon={<DownloadOutlined />} href={download("ca.crt")} disabled={!status?.ca}>
 						{tx("下载 CA 证书", "Download CA")}

@@ -266,6 +266,7 @@ export type SentinelPermissionKey =
 	| "asset_read"
 	| "asset_library_write"
 	| "asset_library_read"
+	| "mitm_read"
 	| "web_search";
 
 /** The switches of one agent; a missing entry means "not allowed". */

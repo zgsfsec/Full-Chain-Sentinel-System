@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, pbkdf2Sync } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -136,7 +136,7 @@ test("stopped-only clear rotates data, retains CA/token/config, and cannot touch
 	expect(readFileSync(join(directory, "ca", "ca.key"), "utf8")).toBe("private");
 	expect(readFileSync(join(directory, "token"), "utf8")).toBe("secret");
 	expect((await listMitmFlows(directory, new URLSearchParams())).total).toBe(0);
-	expect(JSON.parse(readFileSync(join(root, "mitm", "a", "config.json"), "utf8"))).toEqual({
+	expect(JSON.parse(readFileSync(join(root, "mitm", "a", "config.json"), "utf8"))).toMatchObject({
 		bind: "127.0.0.1",
 		port: 18080,
 		skipStatic: true,
@@ -282,4 +282,44 @@ test("HTTP API isolates projects, validates bodies, downloads raw bytes and rech
 	active = "a";
 	authorized = false;
 	expect((await fetch(`${origin}/api/mitm/flows?projectId=a`)).status).toBe(401);
+});
+
+test("proxy credentials are hashed, redacted, project-scoped and retained only when requested", async () => {
+	const projects = [
+		{ id: "a", name: "A" },
+		{ id: "b", name: "B" },
+	];
+	const center = new MitmCenter(root, () => projects, missingDocker);
+	const input = { bind: "0.0.0.0", port: 0, authEnabled: true, authUsername: "operator", password: "p@ss:word123" };
+	await expect(center.save("a", { ...input, password: "" })).rejects.toThrow();
+	for (const authUsername of ["", "user:name", "white space", "\nadmin", "a".repeat(65), 123]) {
+		await expect(center.save("a", { ...input, authUsername })).rejects.toThrow();
+	}
+	for (const password of ["short", "a".repeat(129), "password\n", "中文密码12345", 123]) {
+		await expect(center.save("a", { ...input, password })).rejects.toThrow();
+	}
+	const status = await center.save("a", input);
+	expect(status.config).toMatchObject({ authEnabled: true, authUsername: "operator", hasPassword: true });
+	expect(JSON.stringify(status)).not.toContain(input.password);
+	expect(JSON.stringify(status)).not.toContain("authPasswordHash");
+	expect(JSON.stringify(status)).not.toContain("authSalt");
+	const path = join(root, "mitm", "a", "config.json");
+	const stored = JSON.parse(readFileSync(path, "utf8")) as { authSalt: string; authPasswordHash: string };
+	expect(readFileSync(path, "utf8")).not.toContain(input.password);
+	expect(statSync(path).mode & 0o777).toBe(0o600);
+	expect(pbkdf2Sync(input.password, Buffer.from(stored.authSalt, "hex"), 100000, 32, "sha256").toString("hex")).toBe(
+		stored.authPasswordHash,
+	);
+	await center.save("a", { ...status.config, password: "", authSalt: "fake", authPasswordHash: "fake" });
+	expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject(stored);
+	const restarted = new MitmCenter(root, () => projects, missingDocker);
+	expect((await restarted.status("a")).config.hasPassword).toBe(true);
+	expect((await restarted.status("b")).config).toMatchObject({ authEnabled: false, hasPassword: false });
+	await restarted.clear("a");
+	expect((await restarted.status("a")).config.hasPassword).toBe(true);
+	await restarted.save("a", { ...status.config, password: "replacement-password" });
+	expect(JSON.parse(readFileSync(path, "utf8")).authPasswordHash).not.toBe(stored.authPasswordHash);
+	await restarted.save("a", { ...status.config, authEnabled: false });
+	expect((await restarted.status("a")).config.hasPassword).toBe(false);
+	await expect(restarted.save("a", { ...status.config, password: "" })).rejects.toThrow();
 });

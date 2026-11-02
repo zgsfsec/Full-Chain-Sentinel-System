@@ -97,6 +97,12 @@ const SWITCHES: { key: SentinelPermissionKey; label: string; hint: string; subag
 		subagent: true,
 	},
 	{
+		key: "mitm_read",
+		label: "mitm_flows / mitm_flow_get / mitm_flow_read",
+		hint: t("只读查询会话所属项目的 MITM 流量，支持筛选与分段读取；不能启停代理、修改配置或清空记录"),
+		subagent: true,
+	},
+	{
 		key: "asset_read",
 		label: "fofa_search / quake_search / hunter_search",
 		hint: t("用 FOFA / 360 Quake / 奇安信 Hunter 做互联网资产测绘（设置 → 资产测绘 管理平台与密钥）"),

@@ -1,4 +1,4 @@
-/** Operator-only MITM centre. These types deliberately do not enter Agent tool schemas. */
+/** Project-scoped MITM centre views. */
 export interface MitmConfig {
 	bind: "127.0.0.1" | "0.0.0.0";
 	/** Zero requests an unused port from Docker. */
@@ -6,6 +6,10 @@ export interface MitmConfig {
 	skipStatic: boolean;
 	/** Maximum stored bytes per request or response, in MiB. */
 	maxCaptureMb: number;
+	authEnabled: boolean;
+	authUsername: string;
+	/** Passwords and their hashes are never returned to the browser. */
+	hasPassword: boolean;
 }
 
 export interface MitmStatus {
@@ -60,4 +64,12 @@ export interface MitmFlowDetail extends MitmFlow {
 	respHeaders: MitmHeader[];
 	request: MitmBody;
 	response: MitmBody;
+}
+
+/** Byte offsets refer to the saved raw HTTP message, before UTF-8/Base64 encoding. */
+export interface MitmBodyChunk extends MitmBody {
+	available: boolean;
+	offset: number;
+	bytesRead: number;
+	nextOffset: number | null;
 }

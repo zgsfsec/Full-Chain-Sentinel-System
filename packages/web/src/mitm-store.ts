@@ -2,7 +2,7 @@
 import { isUtf8 } from "node:buffer";
 import { closeSync, existsSync, fstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
-import type { MitmBody, MitmFlow, MitmFlowDetail, MitmFlowPage, MitmHeader } from "./mitm-types.ts";
+import type { MitmBody, MitmBodyChunk, MitmFlow, MitmFlowDetail, MitmFlowPage, MitmHeader } from "./mitm-types.ts";
 import { openSqliteDatabase, type SqliteValue } from "./sqlite.ts";
 
 export class MitmError extends Error {
@@ -60,13 +60,13 @@ export function mitmBlobPath(directory: string, sha: string | null): string | nu
 	return join(directory, "blobs", sha.slice(0, 2), sha.slice(2, 4), sha);
 }
 
-function body(directory: string, sha: string | null, originalSize: number): MitmBody {
+function body(directory: string, sha: string | null, originalSize: number, maxBytes = 1024 * 1024): MitmBody {
 	const path = mitmBlobPath(directory, sha);
 	if (!path) return { text: "", encoding: "utf8", size: 0, truncated: false, captureTruncated: false };
 	const fd = openSync(path, "r");
 	try {
 		const size = fstatSync(fd).size;
-		const bytes = Buffer.alloc(Math.min(size, 1024 * 1024));
+		const bytes = Buffer.alloc(Math.min(size, maxBytes));
 		const length = readSync(fd, bytes, 0, bytes.length, 0);
 		const content = bytes.subarray(0, length);
 		const utf8 = isUtf8(content);
@@ -124,12 +124,14 @@ export async function listMitmFlows(
 ): Promise<MitmFlowPage> {
 	const requestedPage = Number(params.get("page") ?? 1);
 	const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? Math.min(requestedPage, 1_000_000) : 1;
-	const pageSize = 50;
+	const requestedSize = Number(params.get("pageSize") ?? 50);
+	const pageSize = Number.isSafeInteger(requestedSize) && requestedSize > 0 ? Math.min(requestedSize, 50) : 50;
 	const where = ["source = 'proxy'"];
 	const values: SqliteValue[] = [];
 	for (const [key, column] of [
 		["q", "(host || path || COALESCE(query,''))"],
 		["host", "host"],
+		["path", "path"],
 	]) {
 		const value = params.get(key)?.trim();
 		if (value) {
@@ -137,6 +139,21 @@ export async function listMitmFlows(
 			values.push(value.slice(0, 2048));
 		}
 	}
+	for (const [key, operator] of [
+		["since", ">="],
+		["until", "<="],
+	]) {
+		const value = params.get(key);
+		if (value !== null) {
+			const timestamp = Number(value);
+			if (!value.trim() || !Number.isSafeInteger(timestamp) || timestamp < 0)
+				throw new MitmError("时间筛选应为非负 Unix 毫秒时间戳。");
+			where.push(`ts ${operator} ?`);
+			values.push(timestamp);
+		}
+	}
+	if (params.has("since") && params.has("until") && Number(params.get("since")) > Number(params.get("until")))
+		throw new MitmError("开始时间不能晚于结束时间。");
 	const method = params.get("method")?.trim();
 	if (method) {
 		where.push("method = ?");
@@ -155,7 +172,7 @@ export async function listMitmFlows(
 	const [count, rows] = await reader([
 		{ sql: `SELECT COUNT(*) AS n FROM flows WHERE ${clause}`, params: values },
 		{
-			sql: `SELECT * FROM flows WHERE ${clause} ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?`,
+			sql: `SELECT id, ts, method, scheme, host, port, path, query, status, duration_ms, req_size, resp_size, error, note FROM flows WHERE ${clause} ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?`,
 			params: [...values, pageSize, (page - 1) * pageSize],
 		},
 	]);
@@ -171,7 +188,10 @@ export async function getMitmFlow(
 	directory: string,
 	id: string,
 	reader: MitmReader = async (queries) => readStore(directory, queries),
+	previewBytes = 1024 * 1024,
 ): Promise<MitmFlowDetail> {
+	if (!Number.isSafeInteger(previewBytes) || previewBytes < 0 || previewBytes > 1024 * 1024)
+		throw new MitmError("报文预览大小无效。");
 	const [rows] = await reader([{ sql: "SELECT * FROM flows WHERE id = ? AND source = 'proxy'", params: [id] }]);
 	const row = rows[0] as FlowRow | undefined;
 	if (!row) throw new MitmError("流量记录不存在。", 404);
@@ -179,9 +199,68 @@ export async function getMitmFlow(
 		...flow(row),
 		reqHeaders: JSON.parse(row.req_headers || "[]") as MitmHeader[],
 		respHeaders: JSON.parse(row.resp_headers || "[]") as MitmHeader[],
-		request: body(directory, row.req_raw_sha, row.req_size),
-		response: body(directory, row.resp_raw_sha, row.resp_size ?? 0),
+		request: body(directory, row.req_raw_sha, row.req_size, previewBytes),
+		response: body(directory, row.resp_raw_sha, row.resp_size ?? 0, previewBytes),
 	};
+}
+
+/** Read only a bounded range; never load the full blob to serve an Agent page. */
+export async function readMitmFlowChunk(
+	directory: string,
+	id: string,
+	side: "request" | "response",
+	offset: number,
+	limit: number,
+	reader: MitmReader = async (queries) => readStore(directory, queries),
+): Promise<MitmBodyChunk> {
+	if (side !== "request" && side !== "response") throw new MitmError("请选择请求或响应。");
+	if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 16384)
+		throw new MitmError("offset 应为非负字节偏移，limit 应为 1–16384 字节。");
+	const column = side === "request" ? "req" : "resp";
+	const [rows] = await reader([
+		{
+			sql: `SELECT ${column}_raw_sha AS sha, ${column}_size AS size FROM flows WHERE id = ? AND source = 'proxy'`,
+			params: [id],
+		},
+	]);
+	const row = rows[0] as { sha: string | null; size: number | null } | undefined;
+	if (!row) throw new MitmError("流量记录不存在。", 404);
+	const path = mitmBlobPath(directory, row.sha);
+	if (!path)
+		return {
+			text: "",
+			encoding: "utf8",
+			size: 0,
+			truncated: false,
+			captureTruncated: false,
+			available: false,
+			offset,
+			bytesRead: 0,
+			nextOffset: null,
+		};
+	const fd = openSync(path, "r");
+	try {
+		const size = fstatSync(fd).size;
+		const bytes = Buffer.alloc(Math.min(Math.max(size - offset, 0), limit));
+		const length = readSync(fd, bytes, 0, bytes.length, Math.min(offset, size));
+		const content = bytes.subarray(0, length);
+		// A page may split a UTF-8 code point. Base64 preserves those bytes exactly.
+		const utf8 = isUtf8(content);
+		const nextOffset = offset + length < size ? offset + length : null;
+		return {
+			text: content.toString(utf8 ? "utf8" : "base64"),
+			encoding: utf8 ? "utf8" : "base64",
+			size,
+			truncated: nextOffset !== null,
+			captureTruncated: (row.size ?? 0) > size,
+			available: true,
+			offset,
+			bytesRead: length,
+			nextOffset,
+		};
+	} finally {
+		closeSync(fd);
+	}
 }
 
 export async function mitmRawPath(

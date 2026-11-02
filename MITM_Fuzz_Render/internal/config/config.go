@@ -35,15 +35,16 @@ const (
 
 // Config 是进程的完整启动配置。
 type Config struct {
-	Listen      string
-	ProxyListen string
-	DataDir     string
-	Token       string
-	LogLevel    string
-	LogFormat   string
-	OpenBrowser bool
-	NoProxy     bool
-	Quiet       bool
+	Listen        string
+	ProxyListen   string
+	ProxyAuthFile string
+	DataDir       string
+	Token         string
+	LogLevel      string
+	LogFormat     string
+	OpenBrowser   bool
+	NoProxy       bool
+	Quiet         bool
 
 	RetentionDays        int
 	RetentionCount       int
@@ -94,6 +95,7 @@ func Load(args []string) (*Config, error) {
 		"控制台监听地址（默认在 7000-8000 随机挑一个空闲端口）")
 	fs.StringVar(&cfg.ProxyListen, "proxy-listen", cfg.ProxyListen,
 		"代理监听地址（默认在 7000-8000 随机挑一个空闲端口）")
+	fs.StringVar(&cfg.ProxyAuthFile, "proxy-auth-file", "", "代理认证配置文件（不指定则不启用账号认证）")
 	fs.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "数据目录")
 	fs.StringVar(&cfg.Token, "token", cfg.Token, "访问令牌（默认自动生成）")
 	fs.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "日志级别: debug|info|warn|error")

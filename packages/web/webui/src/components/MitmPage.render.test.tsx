@@ -7,7 +7,10 @@ import { MitmFlowLink, MitmPage, MitmRawMessage, mitmProxyEndpoint } from "./Mit
 test("proxy address uses the console IP or host LAN IP and respects loopback binding", () => {
 	const status: MitmStatus = {
 		project: { id: "p", name: "P" },
-		config: { bind: "0.0.0.0", port: 32774, skipStatic: true, maxCaptureMb: 2 },
+		config: {
+			bind: "0.0.0.0", port: 32774, skipStatic: true, maxCaptureMb: 2,
+			authEnabled: false, authUsername: "", hasPassword: false,
+		},
 		state: "running",
 		port: 32774,
 		lanIps: ["192.168.1.10"],

@@ -32,6 +32,7 @@ import type {
 } from "../types.ts";
 import { SENTINEL_API_MODEL_STATUS_LABELS } from "../types.ts";
 import { Page } from "../ui/Page.tsx";
+import "./apimodel-page.css";
 
 const { Text } = Typography;
 

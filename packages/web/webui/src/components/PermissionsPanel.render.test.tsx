@@ -55,6 +55,7 @@ function config(mcp: boolean): SentinelPermissionsConfig {
 		asset_read: true,
 		asset_library_write: true,
 		asset_library_read: true,
+		mitm_read: true,
 		web_search: true,
 	};
 	return {
@@ -228,4 +229,10 @@ test("a plugin the operator disabled in the plugin center says why it mounts now
 test("distinguishes 'plugins not loaded yet' from 'none installed'", () => {
 	expect(render([], { plugins: null })).toContain("正在读取插件…");
 	expect(render([], { plugins: pluginView([]) })).toContain("还没有安装插件（设置 → 插件）");
+});
+
+test("shows the read-only MITM permission for both main and sub-agents", () => {
+	const html = render([]);
+	expect(html.match(/mitm_flows \/ mitm_flow_get \/ mitm_flow_read/g)).toHaveLength(2);
+	expect(html).toContain("不能启停代理、修改配置或清空记录");
 });

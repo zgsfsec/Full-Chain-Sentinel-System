@@ -137,3 +137,18 @@ test("asset library switches exist, default on, and recon is read-only", () => {
 	const off = excludeToolsFor({ ...fresh.main, asset_library_write: false, asset_library_read: false });
 	expect(off).toEqual(expect.arrayContaining(["asset_report", "asset_note", "asset_list", "asset_get"]));
 });
+
+test("MITM reads obey presets, explicit opt-in for stored files, denylist and the sub-agent subset", () => {
+	const fresh = defaultPermissions();
+	expect(fresh.main.mitm_read).toBe(true);
+	expect(fresh.subagent.mitm_read).toBe(true);
+	expect(PERMISSION_PRESETS.find((preset) => preset.id === "recon")?.main.mitm_read).toBe(true);
+	expect(PERMISSION_PRESETS.find((preset) => preset.id === "locked")?.main.mitm_read).toBe(false);
+	const { mitm_read: _omitted, ...stored } = fresh.main;
+	expect(normalizePermissions({ main: stored, subagent: fresh.subagent }).main.mitm_read).toBe(false);
+	expect(normalizePermissions({ main: stored, subagent: fresh.subagent }).subagent.mitm_read).toBe(false);
+	expect(excludeToolsFor({ ...fresh.main, mitm_read: false })).toEqual(
+		expect.arrayContaining(["mitm_flows", "mitm_flow_get", "mitm_flow_read"]),
+	);
+	expect(excludeToolsFor(fresh.main)).not.toContain("mitm_flows");
+});

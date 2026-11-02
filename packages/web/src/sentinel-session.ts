@@ -140,6 +140,8 @@ import {
 	validateMcpServerInput,
 	saveMcpServer as writeMcpServer,
 } from "./mcp-config.ts";
+import { MitmCenter } from "./mitm.ts";
+import { createMitmTools } from "./mitm-tool.ts";
 import { modelsJsonPath } from "./model-config.ts";
 import { listBuiltinChannelModels, listBuiltinChannels, matchBuiltinModelDefaults } from "./model-defaults.ts";
 import {
@@ -936,6 +938,10 @@ export class SentinelRuntime {
 		// Web search follows the same rule: the switch plus a usable pool key is
 		// what puts web_search/web_extract in the tool list at all.
 		const webSearchOn = !task && permissions.web_search && usablePoolKeys(this.agentDir).length > 0;
+		const mitmContext = {
+			center: new MitmCenter(this.agentDir, () => listProjects(this.agentDir).projects),
+			projectId: managed.projectId,
+		};
 		const customTools: ToolDefinition[] = [
 			// The agent names the conversation once the task is clear; task
 			// sessions keep their engine prefix so the sidebar badge holds.
@@ -972,6 +978,8 @@ export class SentinelRuntime {
 			// The POC library is read-only reference; the switch controls both of
 			// its tools, and sub-agents inherit it through the subset rule.
 			...(permissions.poc_read ? createPocTools({ store: this.pocs }) : []),
+			// Main and engineering workers read only their fixed session project.
+			...(permissions.mitm_read ? createMitmTools(mitmContext) : []),
 			...(assetPlatforms.length > 0
 				? createAssetTools(
 						assetPlatforms,
@@ -1067,6 +1075,7 @@ export class SentinelRuntime {
 								}),
 							extraTools: [
 								...(subagentPermissions.poc_read ? createPocTools({ store: this.pocs }) : []),
+								...(subagentPermissions.mitm_read ? createMitmTools(mitmContext) : []),
 								// A sub-agent shares the parent session's query budget, so a
 								// fan-out cannot spend the operator's quota faster than the
 								// budget allows.

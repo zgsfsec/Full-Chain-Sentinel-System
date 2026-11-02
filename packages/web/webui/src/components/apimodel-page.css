@@ -1,0 +1,28 @@
+/* Document readers fill the workspace; list pages keep their content height. */
+.console-page > .ui-page.apimodel-detail {
+	flex: 1;
+	overflow: hidden;
+}
+
+.apimodel-detail > .ui-page__body {
+	min-width: 0;
+	overflow: hidden;
+}
+
+/* Override the shared page rule that makes non-table children content-sized. */
+.apimodel-detail > .ui-page__body > .apimodel-stage {
+	flex: 1 !important;
+	min-width: 0;
+	min-height: 0;
+}
+
+.apimodel-detail .apimodel-meta {
+	margin-block: 0;
+}
+
+.apimodel-detail .apimodel-doc {
+	display: block;
+	min-width: 0;
+	height: 100%;
+	box-sizing: border-box;
+}

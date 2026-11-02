@@ -47,6 +47,7 @@ type Server struct {
 	ca     *cert.Manager
 	client *httpreplay.Client
 	log    *slog.Logger
+	auth   *proxyCredentials // Immutable while running; loaded before accepting connections.
 
 	mu      sync.Mutex
 	ln      net.Listener
@@ -209,6 +210,14 @@ func (s *Server) handleConn(conn net.Conn) {
 
 // handleConnect 处理 CONNECT：解密 MITM 或 bypass 隧道。
 func (s *Server) handleConnect(conn net.Conn, br *bufio.Reader, requestLine string) {
+	_, credential, headErr := readProxyHead(br, requestLine)
+	if headErr != nil {
+		return
+	}
+	if !s.authorized(credential) {
+		writeProxyAuthRequired(conn)
+		return
+	}
 	hostPort := strings.TrimSpace(strings.TrimPrefix(requestLine, "CONNECT"))
 	hostPort, _, _ = strings.Cut(hostPort, " ") // 去掉尾部的 HTTP/1.1
 	host, portStr, err := net.SplitHostPort(hostPort)
@@ -220,9 +229,6 @@ func (s *Server) handleConnect(conn net.Conn, br *bufio.Reader, requestLine stri
 	if p, perr := strconv.Atoi(portStr); perr == nil {
 		port = p
 	}
-	// 丢弃 CONNECT 请求的其余头（到空行为止）
-	_ = drainHead(br)
-
 	// ---- bypass：盲隧道 ----
 	if s.isBypassed(host) {
 		_, _ = conn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
@@ -272,7 +278,11 @@ func (s *Server) relayLoop(client net.Conn, br *bufio.Reader, firstLine string, 
 			}
 		}
 
-		reqRaw, bodyErr := s.readRequest(br, line)
+		reqRaw, bodyErr := s.readRequest(br, line, fallback.Scheme == "http")
+		if errors.Is(bodyErr, errProxyAuth) {
+			writeProxyAuthRequired(client)
+			return
+		}
 		if bodyErr != nil && len(reqRaw) == 0 {
 			return
 		}
@@ -363,28 +373,17 @@ func blindCopy(a, b net.Conn) {
 
 // readRequest 从 br 读取一条完整请求（head + body），返回原始字节。
 // bodyErr 非 nil 表示 body 读取不完整（仍返回已读部分）。
-func (s *Server) readRequest(br *bufio.Reader, firstLine string) (raw []byte, bodyErr error) {
-	var head strings.Builder
-	head.WriteString(firstLine)
-	if !strings.HasSuffix(firstLine, "\n") {
-		head.WriteString("\n") // firstLine 可能来自已被截断的读取
+func (s *Server) readRequest(br *bufio.Reader, firstLine string, requireAuth bool) (raw []byte, bodyErr error) {
+	headBytes, credential, err := readProxyHead(br, firstLine)
+	if err != nil {
+		return nil, err
 	}
-
+	if requireAuth && !s.authorized(credential) {
+		return nil, errProxyAuth
+	}
 	contentLength := -1
 	chunked := false
-	sawBlank := false
-
-	for i := 0; i < maxHeadLines; i++ {
-		line, err := readLineCapped(br, maxHeadLineBytes)
-		if err != nil {
-			return []byte(head.String()), err
-		}
-		if strings.TrimRight(line, "\r\n") == "" {
-			sawBlank = true
-			head.WriteString(line) // 空行是报文结束符，必须保留（原文可能是 \r\n 或 \n）
-			break
-		}
-		head.WriteString(line)
+	for _, line := range strings.Split(string(headBytes), "\n")[1:] {
 		name, value, ok := strings.Cut(line, ":")
 		if ok {
 			n, v := strings.TrimSpace(name), strings.TrimSpace(value)
@@ -396,14 +395,8 @@ func (s *Server) readRequest(br *bufio.Reader, firstLine string) (raw []byte, bo
 			if strings.EqualFold(n, "Transfer-Encoding") && strings.Contains(strings.ToLower(v), "chunked") {
 				chunked = true
 			}
-			_ = n
 		}
 	}
-	if !sawBlank {
-		return []byte(head.String()), errors.New("请求头未正常结束")
-	}
-
-	headBytes := []byte(head.String()) // readLineCapped 保留了原始行尾
 	if contentLength < 0 && !chunked {
 		return headBytes, nil
 	}
