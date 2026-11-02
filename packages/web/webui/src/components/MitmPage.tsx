@@ -1,4 +1,4 @@
-import { DownloadOutlined, QuestionCircleOutlined, ReloadOutlined, SettingOutlined } from "@ant-design/icons";
+import { DeleteOutlined, DownloadOutlined, QuestionCircleOutlined, ReloadOutlined, SettingOutlined } from "@ant-design/icons";
 import {
 	Alert,
 	Badge,
@@ -123,6 +123,7 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 	});
 	const [password, setPassword] = useState("");
 	const [selected, setSelected] = useState<string | null>(null);
+	const [checked, setChecked] = useState<string[]>([]);
 	const [detail, setDetail] = useState<MitmFlowDetail | null>(null);
 	const [detailError, setDetailError] = useState("");
 	const alive = useRef(true);
@@ -144,6 +145,9 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 	const scope = `projectId=${encodeURIComponent(projectId ?? "")}`;
 	const running = status?.state === "running";
 	const unavailable = status?.state === "unavailable";
+	useEffect(() => {
+		setChecked([]);
+	}, [projectId, query.q, query.method, query.status, query.page]);
 
 	useEffect(() => {
 		if (!projectId || busy) return;
@@ -209,6 +213,13 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 			}
 			if (name === "clear") {
 				setSelected(null);
+				setChecked([]);
+				setFlows((prev) => ({ ...prev, items: [], total: 0, page: 1 }));
+				setQuery((prev) => ({ ...prev, page: 1 }));
+			}
+			if (name === "flows/delete") {
+				if (selected && checked.includes(selected)) setSelected(null);
+				setChecked([]);
 				setQuery((prev) => ({ ...prev, page: 1 }));
 			}
 		} catch (cause) {
@@ -236,12 +247,25 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 			title={tx("MITM 中心", "MITM Center")}
 			extra={
 				<>
+					<Popconfirm
+						title={tx("清空当前项目的全部数据包？", "Clear all packets for this project?")}
+						description={tx("CA 证书会保留，流量记录无法恢复。", "Keeps the CA. Deleted traffic cannot be restored.")}
+						okText={tx("清空", "Clear")}
+						cancelText={tx("取消", "Cancel")}
+						okButtonProps={{ danger: true }}
+						disabled={!status || unavailable || busy}
+						onConfirm={() => action("clear", { confirm: true })}
+					>
+						<Button icon={<DeleteOutlined />} danger disabled={!status || unavailable || busy}>
+							{tx("清空数据包", "Clear packets")}
+						</Button>
+					</Popconfirm>
 					<Button icon={<QuestionCircleOutlined />} onClick={() => setDrawer("help")}>
 						{tx("接入与证书", "Setup & CA")}
 					</Button>
 					<Button
 						icon={<SettingOutlined />}
-						disabled={!status || running || busy || unavailable}
+						disabled={!status || busy || unavailable}
 						onClick={() => {
 							if (status) setConfig(status.config);
 							setPassword("");
@@ -294,6 +318,21 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 				title={tx("流量记录", "Traffic")}
 				extra={
 					<Space>
+						{checked.length > 0 ? (
+							<Popconfirm
+								title={tx(`删除选中的 ${checked.length} 个数据包？`, `Delete ${checked.length} selected packets?`)}
+								description={tx("删除后无法恢复，不影响继续抓包。", "Cannot be undone. Capture will continue.")}
+								okText={tx("删除", "Delete")}
+								cancelText={tx("取消", "Cancel")}
+								okButtonProps={{ danger: true }}
+								disabled={busy || unavailable}
+								onConfirm={() => action("flows/delete", { ids: checked, confirm: true })}
+							>
+								<Button size="small" danger icon={<DeleteOutlined />} disabled={busy || unavailable}>
+									{tx(`删除选中 (${checked.length})`, `Delete selected (${checked.length})`)}
+								</Button>
+							</Popconfirm>
+						) : null}
 						<Typography.Text type="secondary">{tx("实时刷新", "Live")}</Typography.Text>
 						<Switch size="small" checked={live} onChange={setLive} />
 						<Button
@@ -304,20 +343,6 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 							disabled={busy}
 							onClick={() => setRevision((prev) => prev + 1)}
 						/>
-						<Popconfirm
-							title={tx("清空当前项目的全部流量？", "Clear all traffic for this project?")}
-							description={tx("CA 证书会保留，流量记录无法恢复。", "Keeps the CA. Deleted traffic cannot be restored.")}
-							onConfirm={() => action("clear", { confirm: true })}
-						>
-							<Button
-								size="small"
-								danger
-								type="text"
-								disabled={!status || running || unavailable || busy || flows.total === 0}
-							>
-								{tx("清空记录", "Clear")}
-							</Button>
-						</Popconfirm>
 					</Space>
 				}
 			>
@@ -360,6 +385,12 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 					rowKey="id"
 					size="small"
 					dataSource={flows.items}
+					rowSelection={{
+						selectedRowKeys: checked,
+						onChange: (keys) => setChecked(keys.map(String)),
+						getCheckboxProps: () => ({ disabled: busy || unavailable }),
+						columnWidth: 44,
+					}}
 					scroll={{ x: 1100 }}
 					tableLayout="fixed"
 					pagination={{
@@ -431,7 +462,12 @@ export function MitmPage({ project }: { project: { id: string; name: string } | 
 					</Button>
 				}
 			>
-				<Form layout="vertical">
+				{running ? (
+					<Typography.Paragraph type="secondary">
+						{tx("保存后自动重启代理，现有连接会短暂中断；历史记录和证书保留。", "Saving restarts the proxy and briefly interrupts connections. History and certificates are retained.")}
+					</Typography.Paragraph>
+				) : null}
+				<Form layout="vertical" disabled={busy}>
 					<Form.Item label={tx("监听范围", "Listen on")}>
 						<Select
 							value={config.bind}

@@ -100,6 +100,11 @@ export async function handleMitmApi(
 				json({ ok: true });
 				return;
 			}
+			if (path === "/flows/delete") {
+				if (body.confirm !== true) throw new MitmError("请确认删除选中的流量记录。");
+				json({ ok: true, deleted: await center.deleteFlows(id, body.ids) });
+				return;
+			}
 		}
 		throw new MitmError("接口不存在或请求方法错误。", 404);
 	} catch (error) {

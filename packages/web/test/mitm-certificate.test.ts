@@ -15,6 +15,7 @@ import {
 	startProject,
 	stopProject,
 } from "../src/projects.ts";
+import * as replayd from "../src/replayd-binary.ts";
 import { installFakeDocker } from "./fake-docker.ts";
 
 let fixtures: string;
@@ -134,6 +135,77 @@ test("starting an already running MITM worker repairs trust in its registered wo
 	expect((await center.start("a")).state).toBe("running");
 	expect(installed).toBe(true);
 });
+
+test.each([false, true])(
+	"saving during capture applies settings and restores the old proxy on failure: %s",
+	async (fail) => {
+		vi.spyOn(replayd, "readReplaydBinary").mockReturnValue({
+			path: "fixture",
+			bytes: Buffer.from("fixture"),
+			sha256: "fixture",
+			source: "env",
+			arch: "amd64",
+		});
+		const owner = createHash("sha256")
+			.update(`${join(root, "mitm")}/a`)
+			.digest("hex");
+		let running = false;
+		let attempts = 0;
+		let port = 18080;
+		const calls: string[][] = [];
+		const docker: typeof runDocker = async (args) => {
+			calls.push(args);
+			if (args[0] === "inspect")
+				return {
+					code: 0,
+					stderr: "",
+					stdout: JSON.stringify([
+						{
+							Config: { Labels: { "sentinel.mitm.owner": owner } },
+							State: { Running: running },
+							NetworkSettings: { Ports: { "8080/tcp": [{ HostPort: String(port) }] } },
+						},
+					]),
+				};
+			if (args[0] === "image") return { code: 0, stdout: "amd64", stderr: "" };
+			if (args[0] === "stop") running = false;
+			if (args[0] === "run") {
+				attempts++;
+				if (fail && attempts === 1) return { code: 1, stdout: "", stderr: "port is already allocated" };
+				port = Number(args[args.indexOf("-p") + 1].split(":")[1]);
+				running = true;
+			}
+			return { code: 0, stdout: "", stderr: "" };
+		};
+		const center = new MitmCenter(root, () => [{ id: "a", name: "A" }], docker);
+		await center.save("a", { bind: "127.0.0.1", port: 18080 });
+		const ca = join(center.directory("a"), "ca");
+		mkdirSync(ca, { recursive: true });
+		writeFileSync(join(ca, "ca.crt"), pem);
+		writeFileSync(join(center.directory("a"), "keep-history"), "history");
+		running = true;
+		const before = calls.length;
+		await expect(center.save("a", { bind: "127.0.0.1", port: -1 })).rejects.toThrow();
+		expect(calls.slice(before).every((call) => call[0] === "inspect")).toBe(true);
+		await center.save("a", { bind: "127.0.0.1", port: 18080 });
+		expect(attempts).toBe(0);
+		const saving = center.save("a", { bind: "0.0.0.0", port: 18081, skipStatic: false, maxCaptureMb: 8 });
+		if (fail) await expect(saving).rejects.toThrow("已恢复原配置和代理");
+		else
+			await expect(saving).resolves.toMatchObject({
+				state: "running",
+				config: { port: 18081, skipStatic: false, maxCaptureMb: 8 },
+			});
+		expect((await center.status("a")).config.port).toBe(fail ? 18080 : 18081);
+		expect(running).toBe(true);
+		expect(readFileSync(join(ca, "ca.crt"), "utf8")).toBe(pem);
+		expect(readFileSync(join(center.directory("a"), "keep-history"), "utf8")).toBe("history");
+		expect(attempts).toBe(fail ? 2 : 1);
+		const launch = calls.filter((call) => call[0] === "run")[0];
+		expect(launch).toContain("-proxy-skip-static=false");
+		expect(launch[launch.indexOf("-proxy-max-capture-bytes") + 1]).toBe(String(8 * 1024 * 1024));
+	},
+);
 
 test("work container start, readiness, recreation and removed-container recovery all install the project CA", async () => {
 	const fake = installFakeDocker(root, join(root, "projects", "demo"));

@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { containerPrefix, runDocker, SENTINEL_IMAGE } from "./docker.ts";
 import { installProjectMitmCa, projectMitmDirectory } from "./mitm-certificate.ts";
-import { MITM_READ_SCRIPT, MitmError, type MitmReader } from "./mitm-store.ts";
+import { deleteMitmFlows, MITM_DELETE_SCRIPT, MITM_READ_SCRIPT, MitmError, type MitmReader } from "./mitm-store.ts";
 import type { MitmConfig, MitmStatus } from "./mitm-types.ts";
 import { readReplaydBinary, replaydArchFromUname, replaydBinaryHint } from "./replayd-binary.ts";
 
@@ -205,7 +205,7 @@ export class MitmCenter {
 	save(id: string, value: unknown): Promise<MitmStatus> {
 		return this.exclusive(id, async () => {
 			this.project(id);
-			if ((await this.inspect(id))?.State.Running) throw new MitmError("请先停止代理，再修改监听配置。", 409);
+			const running = (await this.inspect(id))?.State.Running;
 			if (!value || typeof value !== "object" || Array.isArray(value)) throw new MitmError("代理配置格式错误。");
 			const raw = value as Partial<MitmConfig> & { password?: unknown };
 			const previous = this.config(id);
@@ -221,150 +221,206 @@ export class MitmCenter {
 				);
 			}
 			const authEnabled = raw.authEnabled ?? previous.authEnabled;
-			this.writeConfig(
-				id,
-				this.validate({
-					bind: raw.bind,
-					port: raw.port,
-					skipStatic: raw.skipStatic,
-					maxCaptureMb: raw.maxCaptureMb,
-					authEnabled,
-					authUsername: raw.authUsername ?? previous.authUsername,
-					authSalt: authEnabled ? authSalt : "",
-					authPasswordHash: authEnabled ? authPasswordHash : "",
-				}),
-			);
-			return this.status(id);
+			const next = this.validate({
+				bind: raw.bind,
+				port: raw.port,
+				skipStatic: raw.skipStatic,
+				maxCaptureMb: raw.maxCaptureMb,
+				authEnabled,
+				authUsername: raw.authUsername ?? previous.authUsername,
+				authSalt: authEnabled ? authSalt : "",
+				authPasswordHash: authEnabled ? authPasswordHash : "",
+			});
+			if (JSON.stringify(next) === JSON.stringify(previous)) return this.status(id);
+			if (!running) {
+				this.writeConfig(id, next);
+				return this.status(id);
+			}
+			await this.stopUnlocked(id);
+			try {
+				this.writeConfig(id, next);
+				return await this.startUnlocked(id);
+			} catch (error) {
+				this.writeConfig(id, previous);
+				try {
+					await this.stopUnlocked(id);
+					await this.startUnlocked(id);
+				} catch (recovery) {
+					throw new MitmError(
+						`配置应用失败，原配置已恢复但代理重启失败：${recovery instanceof Error ? recovery.message : String(recovery)}`,
+						502,
+					);
+				}
+				throw new MitmError(
+					`配置应用失败，已恢复原配置和代理：${error instanceof Error ? error.message : String(error)}`,
+					502,
+				);
+			}
 		});
 	}
 
 	start(id: string): Promise<MitmStatus> {
-		return this.exclusive(id, async () => {
-			this.project(id);
-			const state = await this.inspect(id);
-			if (state?.State.Running) {
-				await installProjectMitmCa(dirname(this.root), this.project(id), this.docker);
-				return this.status(id);
-			}
-			const image = await this.docker(["image", "inspect", "--format", "{{.Architecture}}", SENTINEL_IMAGE], {
-				timeoutMs: 15000,
-			});
-			if (image.code !== 0) throw new MitmError("请先在「设置 → 环境」构建工具镜像。", 409);
-			const arch = replaydArchFromUname(image.stdout.trim());
-			if (!arch) throw new MitmError("MITM 服务仅支持 Linux amd64 / arm64 工具镜像。", 409);
-			const binary = readReplaydBinary(arch);
-			if (!binary) throw new MitmError(replaydBinaryHint(arch), 409);
-			const binDirectory = join(this.root, "bin");
-			mkdirSync(binDirectory, { recursive: true, mode: 0o700 });
-			const binPath = join(binDirectory, `replayd-${arch}-${binary.sha256}`);
-			if (!existsSync(binPath)) writeFileSync(binPath, binary.bytes, { mode: 0o755 });
-			const directory = this.directory(id);
-			mkdirSync(directory, { recursive: true, mode: 0o700 });
-			const config = this.config(id);
-			this.writeConfig(id, config);
-			if (state) {
-				const removed = await this.docker(["rm", this.container(id)], { timeoutMs: 15000 });
-				if (removed.code !== 0) throw new MitmError(`无法更新 MITM 容器：${removed.stderr}`, 502);
-			}
-			// Management API stays on the container loopback; only the proxy is published.
-			const started = await this.docker(
-				[
-					"run",
-					"-d",
-					"--init",
-					"--name",
-					this.container(id),
-					"--label",
-					`sentinel.mitm.owner=${this.owner(id)}`,
-					"--cap-drop",
-					"ALL",
-					"--security-opt",
-					"no-new-privileges",
-					"--pids-limit",
-					"128",
-					"--log-opt",
-					"max-size=10m",
-					"--log-opt",
-					"max-file=2",
-					"--user",
-					`${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
-					"-e",
-					"HOME=/data",
-					"--add-host",
-					"host.docker.internal:host-gateway",
-					"-p",
-					`${config.bind}:${config.port}:8080`,
-					"-v",
-					`${directory}:/data`,
-					"-v",
-					`${binPath}:/opt/mitm/replayd:ro`,
-					"-v",
-					`${this.configPath(id)}:/opt/mitm/proxy-auth.json:ro`,
-					"--entrypoint",
-					"/opt/mitm/replayd",
-					SENTINEL_IMAGE,
-					"-data-dir",
-					"/data",
-					"-listen",
-					"127.0.0.1:8081",
-					"-proxy-listen",
-					"0.0.0.0:8080",
-					"-proxy-auth-file",
-					"/opt/mitm/proxy-auth.json",
-					`-proxy-skip-static=${config.skipStatic}`,
-					"-proxy-max-capture-bytes",
-					String(config.maxCaptureMb * 1024 * 1024),
-					"-quiet",
-					"-log-format",
-					"json",
-				],
-				{ timeoutMs: 60000 },
-			);
-			if (started.code !== 0)
-				throw new MitmError(`代理启动失败，请检查端口占用及 Docker：${started.stderr.trim().slice(-1500)}`, 502);
-			try {
-				for (let attempt = 0; attempt < 30; attempt++) {
-					this.project(id);
-					const health = await this.docker(
-						["exec", this.container(id), "curl", "-fsS", "--max-time", "2", "http://127.0.0.1:8081/api/health"],
-						{ timeoutMs: 5000 },
-					);
-					if (health.code === 0) {
-						const status = await this.status(id);
-						if (status.state === "running" && status.port && status.ca) {
-							this.writeConfig(id, { ...config, port: status.port });
-							await installProjectMitmCa(dirname(this.root), this.project(id), this.docker);
-							return { ...status, config: publicConfig({ ...config, port: status.port }) };
-						}
-					}
-					await delay(200);
-				}
-				const log = await this.docker(["logs", "--tail", "15", this.container(id)], { timeoutMs: 5000 });
-				throw new MitmError(`MITM 服务未就绪：${(log.stderr || log.stdout).slice(-1500)}`, 502);
-			} catch (error) {
-				await this.docker(["stop", "--time", "2", this.container(id)], { timeoutMs: 10000 });
-				throw error;
-			}
+		return this.exclusive(id, () => this.startUnlocked(id));
+	}
+
+	private async startUnlocked(id: string): Promise<MitmStatus> {
+		this.project(id);
+		const state = await this.inspect(id);
+		if (state?.State.Running) {
+			await installProjectMitmCa(dirname(this.root), this.project(id), this.docker);
+			return this.status(id);
+		}
+		const image = await this.docker(["image", "inspect", "--format", "{{.Architecture}}", SENTINEL_IMAGE], {
+			timeoutMs: 15000,
 		});
+		if (image.code !== 0) throw new MitmError("请先在「设置 → 环境」构建工具镜像。", 409);
+		const arch = replaydArchFromUname(image.stdout.trim());
+		if (!arch) throw new MitmError("MITM 服务仅支持 Linux amd64 / arm64 工具镜像。", 409);
+		const binary = readReplaydBinary(arch);
+		if (!binary) throw new MitmError(replaydBinaryHint(arch), 409);
+		const binDirectory = join(this.root, "bin");
+		mkdirSync(binDirectory, { recursive: true, mode: 0o700 });
+		const binPath = join(binDirectory, `replayd-${arch}-${binary.sha256}`);
+		if (!existsSync(binPath)) writeFileSync(binPath, binary.bytes, { mode: 0o755 });
+		const directory = this.directory(id);
+		mkdirSync(directory, { recursive: true, mode: 0o700 });
+		const config = this.config(id);
+		this.writeConfig(id, config);
+		if (state) {
+			const removed = await this.docker(["rm", this.container(id)], { timeoutMs: 15000 });
+			if (removed.code !== 0) throw new MitmError(`无法更新 MITM 容器：${removed.stderr}`, 502);
+		}
+		// Management API stays on the container loopback; only the proxy is published.
+		const started = await this.docker(
+			[
+				"run",
+				"-d",
+				"--init",
+				"--name",
+				this.container(id),
+				"--label",
+				`sentinel.mitm.owner=${this.owner(id)}`,
+				"--cap-drop",
+				"ALL",
+				"--security-opt",
+				"no-new-privileges",
+				"--pids-limit",
+				"128",
+				"--log-opt",
+				"max-size=10m",
+				"--log-opt",
+				"max-file=2",
+				"--user",
+				`${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
+				"-e",
+				"HOME=/data",
+				"--add-host",
+				"host.docker.internal:host-gateway",
+				"-p",
+				`${config.bind}:${config.port}:8080`,
+				"-v",
+				`${directory}:/data`,
+				"-v",
+				`${binPath}:/opt/mitm/replayd:ro`,
+				"-v",
+				`${this.configPath(id)}:/opt/mitm/proxy-auth.json:ro`,
+				"--entrypoint",
+				"/opt/mitm/replayd",
+				SENTINEL_IMAGE,
+				"-data-dir",
+				"/data",
+				"-listen",
+				"127.0.0.1:8081",
+				"-proxy-listen",
+				"0.0.0.0:8080",
+				"-proxy-auth-file",
+				"/opt/mitm/proxy-auth.json",
+				`-proxy-skip-static=${config.skipStatic}`,
+				"-proxy-max-capture-bytes",
+				String(config.maxCaptureMb * 1024 * 1024),
+				"-quiet",
+				"-log-format",
+				"json",
+			],
+			{ timeoutMs: 60000 },
+		);
+		if (started.code !== 0)
+			throw new MitmError(`代理启动失败，请检查端口占用及 Docker：${started.stderr.trim().slice(-1500)}`, 502);
+		try {
+			for (let attempt = 0; attempt < 30; attempt++) {
+				this.project(id);
+				const health = await this.docker(
+					["exec", this.container(id), "curl", "-fsS", "--max-time", "2", "http://127.0.0.1:8081/api/health"],
+					{ timeoutMs: 5000 },
+				);
+				if (health.code === 0) {
+					const status = await this.status(id);
+					if (status.state === "running" && status.port && status.ca) {
+						this.writeConfig(id, { ...config, port: status.port });
+						await installProjectMitmCa(dirname(this.root), this.project(id), this.docker);
+						return { ...status, config: publicConfig({ ...config, port: status.port }) };
+					}
+				}
+				await delay(200);
+			}
+			const log = await this.docker(["logs", "--tail", "15", this.container(id)], { timeoutMs: 5000 });
+			throw new MitmError(`MITM 服务未就绪：${(log.stderr || log.stdout).slice(-1500)}`, 502);
+		} catch (error) {
+			await this.docker(["stop", "--time", "2", this.container(id)], { timeoutMs: 10000 });
+			throw error;
+		}
 	}
 
 	stop(id: string): Promise<MitmStatus> {
+		return this.exclusive(id, () => this.stopUnlocked(id));
+	}
+
+	private async stopUnlocked(id: string): Promise<MitmStatus> {
+		this.project(id);
+		const state = await this.inspect(id);
+		if (state?.State.Running) {
+			const stopped = await this.docker(["stop", "--time", "2", this.container(id)], { timeoutMs: 15000 });
+			if (stopped.code !== 0) throw new MitmError(`停止代理失败：${stopped.stderr}`, 502);
+		}
+		return this.status(id);
+	}
+
+	deleteFlows(id: string, ids: unknown): Promise<number> {
 		return this.exclusive(id, async () => {
 			this.project(id);
-			const state = await this.inspect(id);
-			if (state?.State.Running) {
-				const stopped = await this.docker(["stop", "--time", "2", this.container(id)], { timeoutMs: 15000 });
-				if (stopped.code !== 0) throw new MitmError(`停止代理失败：${stopped.stderr}`, 502);
-			}
-			return this.status(id);
+			if (ids === undefined) throw new MitmError("请选择要删除的流量记录。");
+			return this.deleteRecords(id, ids, Boolean((await this.inspect(id))?.State.Running));
 		});
+	}
+
+	private deleteRecords(id: string, ids: unknown, running: boolean): Promise<number> {
+		return deleteMitmFlows(
+			this.directory(id),
+			ids,
+			running
+				? async (queries) => {
+						const result = await this.docker(
+							["exec", this.container(id), "python3", "-c", MITM_DELETE_SCRIPT, JSON.stringify(queries)],
+							{ timeoutMs: 30000 },
+						);
+						if (result.code !== 0) throw new MitmError("删除流量失败，请刷新重试或检查 MITM 容器日志。", 503);
+						const deleted: unknown = JSON.parse(result.stdout);
+						if (typeof deleted !== "number" || !Number.isSafeInteger(deleted) || deleted < 0)
+							throw new MitmError("删除流量返回无效结果。", 502);
+						return deleted;
+					}
+				: undefined,
+		);
 	}
 
 	clear(id: string): Promise<void> {
 		return this.exclusive(id, async () => {
 			this.project(id);
 			const state = await this.inspect(id);
-			if (state?.State.Running) throw new MitmError("清空前请先停止代理。", 409);
+			if (state?.State.Running) {
+				await this.deleteRecords(id, undefined, true);
+				return;
+			}
 			const directory = this.directory(id);
 			if (!existsSync(directory)) return;
 			if (state) {

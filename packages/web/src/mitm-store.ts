@@ -89,6 +89,71 @@ export interface MitmQuery {
 
 export type MitmReader = (queries: MitmQuery[]) => Promise<unknown[][]>;
 
+export type MitmWriter = (queries: MitmQuery[]) => Promise<number>;
+
+/** The live writer must run in the container, alongside replayd's WAL. */
+export const MITM_DELETE_SCRIPT = `import json, sqlite3, sys
+connection = sqlite3.connect("file:/data/replayd.db?mode=rw", uri=True, timeout=5)
+try:
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("BEGIN IMMEDIATE")
+    for query in json.loads(sys.argv[1]):
+        result = connection.execute(query["sql"], query["params"])
+    deleted = result.rowcount
+    connection.commit()
+    print(json.dumps(deleted))
+finally:
+    connection.close()
+`;
+
+/** Match replayd's deletion semantics: remove flows and release blob references.
+ * Do not unlink blobs while replayd may be inserting the same content hash.
+ * A stopped clear rotates the directory and reclaims the files safely.
+ */
+export async function deleteMitmFlows(directory: string, ids?: unknown, writer?: MitmWriter): Promise<number> {
+	if (
+		ids !== undefined &&
+		(!Array.isArray(ids) ||
+			ids.length === 0 ||
+			ids.length > 100 ||
+			ids.some((id) => typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(id)))
+	)
+		throw new MitmError("请选择 1–100 条有效流量记录。");
+	const selected = ids as string[] | undefined;
+	const queries: MitmQuery[] = [
+		{
+			sql: `CREATE TEMP TABLE mitm_deleted AS SELECT id, req_body_sha, req_raw_sha, resp_body_sha, resp_raw_sha FROM flows WHERE source = 'proxy'${selected ? ` AND id IN (${selected.map(() => "?").join(",")})` : ""}`,
+			params: selected ?? [],
+		},
+		{
+			sql: `CREATE TEMP TABLE mitm_refs AS SELECT sha, COUNT(*) AS n FROM (
+				SELECT req_body_sha AS sha FROM mitm_deleted UNION ALL SELECT req_raw_sha FROM mitm_deleted
+				UNION ALL SELECT resp_body_sha FROM mitm_deleted UNION ALL SELECT resp_raw_sha FROM mitm_deleted
+			) WHERE sha IS NOT NULL GROUP BY sha`,
+			params: [],
+		},
+		{ sql: "CREATE INDEX mitm_refs_sha ON mitm_refs(sha)", params: [] },
+		{
+			sql: "UPDATE blobs SET refcount = MAX(0, refcount - (SELECT n FROM mitm_refs WHERE sha = blobs.sha256)) WHERE sha256 IN (SELECT sha FROM mitm_refs)",
+			params: [],
+		},
+		{ sql: "DELETE FROM flows WHERE id IN (SELECT id FROM mitm_deleted)", params: [] },
+	];
+	if (writer) return writer(queries);
+	const path = join(directory, "replayd.db");
+	if (!existsSync(path)) return 0;
+	const db = openSqliteDatabase(path);
+	try {
+		db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; BEGIN IMMEDIATE;");
+		let deleted = 0;
+		for (const query of queries) deleted = Number(db.prepare(query.sql).run(...query.params).changes ?? 0);
+		db.exec("COMMIT");
+		return deleted;
+	} finally {
+		db.close();
+	}
+}
+
 /** Run bounded, internal read queries in the same OS as the active SQLite writer. */
 export const MITM_READ_SCRIPT = `import json, sqlite3, sys
 connection = sqlite3.connect("file:/data/replayd.db?mode=ro", uri=True, timeout=1)

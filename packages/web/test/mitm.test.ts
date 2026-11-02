@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash, pbkdf2Sync } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest, type Server } from "node:http";
@@ -8,7 +9,15 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { runDocker } from "../src/docker.ts";
 import { MitmCenter } from "../src/mitm.ts";
 import { handleMitmApi } from "../src/mitm-api.ts";
-import { getMitmFlow, listMitmFlows, MitmError, mitmBlobPath, mitmRawPath } from "../src/mitm-store.ts";
+import {
+	deleteMitmFlows,
+	getMitmFlow,
+	listMitmFlows,
+	MITM_DELETE_SCRIPT,
+	MitmError,
+	mitmBlobPath,
+	mitmRawPath,
+} from "../src/mitm-store.ts";
 import { openSqliteDatabase, type SqliteDatabase } from "../src/sqlite.ts";
 
 let root: string;
@@ -151,7 +160,70 @@ test("stopped-only clear rotates data, retains CA/token/config, and cannot touch
 	expect(existsSync(other)).toBe(true);
 });
 
-test("running or foreign containers cannot be cleared or reconfigured; unused projects delete without Docker", async () => {
+test("running clear and selective deletion use a container transaction and keep capturing", async () => {
+	db.exec("PRAGMA journal_mode = WAL");
+	const sha = blob(Buffer.from("shared"));
+	insert("selected", 200, "proxy", "a.example", sha);
+	insert("keep", 200, "proxy", "a.example", sha);
+	insert("replayed", 200, "replay", "a.example", sha);
+	db.prepare("UPDATE blobs SET refcount = 6 WHERE sha256 = ?").run(sha);
+	const owner = createHash("sha256")
+		.update(`${join(root, "mitm")}/a`)
+		.digest("hex");
+	let writes = 0;
+	const docker: typeof runDocker = async (args) => {
+		if (args[0] === "inspect")
+			return {
+				code: 0,
+				stderr: "",
+				stdout: JSON.stringify([
+					{
+						Config: { Labels: { "sentinel.mitm.owner": owner } },
+						State: { Running: true },
+						NetworkSettings: { Ports: {} },
+					},
+				]),
+			};
+		expect(args.slice(0, 4)).toEqual(["exec", "sentinel-mitm-a", "python3", "-c"]);
+		expect(args[4]).toBe(MITM_DELETE_SCRIPT);
+		writes++;
+		const script = args[4].replace("/data/replayd.db", join(directory, "replayd.db"));
+		return { code: 0, stderr: "", stdout: execFileSync("python3", ["-c", script, args[5]], { encoding: "utf8" }) };
+	};
+	const center = new MitmCenter(root, () => [{ id: "a", name: "A" }], docker);
+	expect(await center.deleteFlows("a", ["selected", "replayed", "missing", "selected"])).toBe(1);
+	expect((await listMitmFlows(directory, new URLSearchParams())).items.map((flow) => flow.id)).toEqual(["keep"]);
+	expect(db.prepare("SELECT refcount FROM blobs WHERE sha256 = ?").get(sha)).toEqual({ refcount: 4 });
+	await center.clear("a");
+	expect((await listMitmFlows(directory, new URLSearchParams())).total).toBe(0);
+	expect(db.prepare("SELECT id FROM flows").all()).toEqual([{ id: "replayed" }]);
+	expect(db.prepare("SELECT refcount FROM blobs WHERE sha256 = ?").get(sha)).toEqual({ refcount: 2 });
+	insert("after_clear");
+	expect((await listMitmFlows(directory, new URLSearchParams())).total).toBe(1);
+	expect((await center.status("a")).state).toBe("running");
+	expect(writes).toBe(2);
+});
+
+test("selective deletion validates IDs and rolls back metadata and blob references together", async () => {
+	const sha = blob(Buffer.from("shared"));
+	insert("one", 200, "proxy", "a.example", sha);
+	insert("two", 200, "proxy", "a.example", sha);
+	db.prepare("UPDATE blobs SET refcount = 4 WHERE sha256 = ?").run(sha);
+	const center = new MitmCenter(root, () => [{ id: "a", name: "A" }], missingDocker);
+	for (const ids of [undefined, null, [], [1], ["../other"], Array(101).fill("one")])
+		await expect(center.deleteFlows("a", ids)).rejects.toThrow(MitmError);
+	await expect(center.deleteFlows("b", ["one"])).rejects.toThrow(MitmError);
+	db.exec("CREATE TRIGGER reject_delete BEFORE DELETE ON flows BEGIN SELECT RAISE(ABORT, 'fixture'); END;");
+	await expect(deleteMitmFlows(directory, ["one"])).rejects.toThrow();
+	expect(db.prepare("SELECT refcount FROM blobs WHERE sha256 = ?").get(sha)).toEqual({ refcount: 4 });
+	expect((await listMitmFlows(directory, new URLSearchParams())).total).toBe(2);
+	db.exec("DROP TRIGGER reject_delete");
+	expect(await center.deleteFlows("a", ["one"])).toBe(1);
+	expect(db.prepare("SELECT refcount FROM blobs WHERE sha256 = ?").get(sha)).toEqual({ refcount: 2 });
+	expect((await getMitmFlow(directory, "two")).request.text).toBe("shared");
+});
+
+test("foreign containers cannot be cleared or reconfigured; unused projects delete without Docker", async () => {
 	const owner = createHash("sha256")
 		.update(`${join(root, "mitm")}/a`)
 		.digest("hex");
@@ -166,11 +238,11 @@ test("running or foreign containers cannot be cleared or reconfigured; unused pr
 			},
 		]),
 	});
-	const center = new MitmCenter(root, () => [{ id: "a", name: "A" }], running);
-	await expect(center.clear("a")).rejects.toMatchObject({ status: 409 });
-	await expect(center.save("a", { bind: "127.0.0.1", port: 0 })).rejects.toMatchObject({ status: 409 });
 	const foreign = new MitmCenter(root, () => [{ id: "b", name: "B" }], running);
 	await expect(foreign.start("b")).rejects.toMatchObject({ status: 409 });
+	await expect(foreign.clear("b")).rejects.toMatchObject({ status: 409 });
+	await expect(foreign.save("b", { bind: "127.0.0.1", port: 0 })).rejects.toMatchObject({ status: 409 });
+	await expect(foreign.deleteFlows("b", ["one"])).rejects.toMatchObject({ status: 409 });
 	await foreign.purge("b"); // Never used: do not require a working Docker daemon just to remove the project.
 });
 
@@ -280,7 +352,23 @@ test("HTTP API isolates projects, validates bodies, downloads raw bytes and rech
 	expect(await result).toBe(409);
 	expect((await listMitmFlows(directory, new URLSearchParams())).total).toBe(1);
 	active = "a";
+	insert("flw_two");
+	const remove = (body: Record<string, unknown>) =>
+		fetch(`${origin}/api/mitm/flows/delete`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+	expect((await remove({ projectId: "b", ids: ["flw_two"], confirm: true })).status).toBe(409);
+	expect((await remove({ projectId: "a", ids: ["flw_two"] })).status).toBe(400);
+	expect((await remove({ projectId: "a", confirm: true })).status).toBe(400);
+	expect(await (await remove({ projectId: "a", ids: ["flw_two"], confirm: true })).json()).toEqual({
+		ok: true,
+		deleted: 1,
+	});
+	expect((await listMitmFlows(directory, new URLSearchParams())).items.map((flow) => flow.id)).toEqual(["flw_one"]);
 	authorized = false;
+	expect((await remove({ projectId: "a", ids: ["flw_one"], confirm: true })).status).toBe(401);
 	expect((await fetch(`${origin}/api/mitm/flows?projectId=a`)).status).toBe(401);
 });
 
