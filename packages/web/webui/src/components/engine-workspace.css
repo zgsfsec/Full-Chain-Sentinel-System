@@ -192,10 +192,34 @@
 	font-size: 12px;
 }
 
-.engine-commander__message p {
+.engine-commander__operator-text {
 	margin: 0;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
+}
+
+.engine-commander .markdown-body {
+	min-width: 0;
+	max-width: 100%;
+	line-height: 1.65;
+	white-space: normal;
+}
+
+.engine-commander .markdown-body pre {
+	max-width: 100%;
+	max-height: 360px;
+	overflow: auto;
+	white-space: pre;
+}
+
+.engine-commander .markdown-body table {
+	display: block;
+	max-width: 100%;
+	overflow-x: auto;
+}
+
+.engine-commander__details .markdown-body pre code {
+	color: var(--ant-color-text-secondary);
 }
 
 .engine-commander__process {
@@ -321,10 +345,70 @@
 	justify-content: space-between;
 	gap: 8px;
 	padding: 0 8px 8px;
+	flex-wrap: wrap;
+}
+
+.engine-commander__composer-actions > :first-child {
+	min-width: 0;
+	max-width: 100%;
+}
+
+.engine-commander__composer-actions > .ant-btn {
+	margin-left: auto;
 }
 
 .engine-commander__composer-actions > .ant-typography {
 	font-size: 11px;
+}
+
+.engine-commander__attachments {
+	max-height: 104px;
+	margin: 0;
+	padding: 8px 10px 0;
+	overflow-y: auto;
+	list-style: none;
+}
+
+.engine-commander__attachments li {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	font-size: 12px;
+}
+
+.engine-commander__filename {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.engine-commander__upload-state {
+	color: var(--ant-color-text-tertiary);
+	font-size: 11px;
+	white-space: nowrap;
+}
+
+.engine-commander__attachments .is-error .engine-commander__upload-state {
+	color: var(--ant-color-error);
+}
+
+.engine-commander__upload-hint {
+	padding: 0 10px 8px;
+	color: var(--ant-color-text-secondary);
+	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+
+.engine-commander .engine-target-files.is-compact {
+	margin: 0;
+}
+
+.engine-commander .engine-target-files.is-compact .ant-alert {
+	max-width: 240px;
+	margin-top: 6px;
 }
 
 .engine-workspace-presets__form {
@@ -354,6 +438,9 @@
 }
 
 @container engine-workspace (max-width: 400px) {
+	.engine-commander__composer-actions > .ant-typography {
+		display: none;
+	}
 	.engine-workspace-task__heading {
 		flex-wrap: wrap;
 	}

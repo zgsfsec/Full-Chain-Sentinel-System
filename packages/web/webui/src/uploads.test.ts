@@ -6,9 +6,29 @@
  * here is the text the message carries and the decision to refuse it.
  */
 
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { formatSize } from "./transcript.ts";
-import { attachmentManifest, MAX_UPLOAD_BYTES, planAttachments, staleUploads, type UploadedFile } from "./uploads.ts";
+import { attachmentManifest, MAX_UPLOAD_BYTES, planAttachments, staleUploads, type UploadedFile, uploadFile } from "./uploads.ts";
+
+afterEach(() => vi.unstubAllGlobals());
+
+class FakeUploadRequest {
+	static latest: FakeUploadRequest | undefined;
+	url = "";
+	status = 200;
+	responseText = "";
+	headers: Record<string, string> = {};
+	upload: { onprogress?: (event: { lengthComputable: boolean; total: number; loaded: number }) => void } = {};
+	onload?: () => void;
+	onloadend?: () => void;
+	onabort?: () => void;
+	aborted = false;
+	constructor() { FakeUploadRequest.latest = this; }
+	open(_method: string, url: string) { this.url = url; }
+	setRequestHeader(name: string, value: string) { this.headers[name] = value; }
+	send() {}
+	abort() { this.aborted = true; this.onabort?.(); this.onloadend?.(); }
+}
 
 function file(name: string, path: string, size: number, projectId = "p1"): UploadedFile {
 	return { name, path, size, projectId };
@@ -63,4 +83,40 @@ test("images go to the vision path, other files are uploaded, refusals are kept"
 	expect(plans[0].kind).toBe("refused");
 	if (plans[0].kind === "refused") expect(plans[0].reason).toContain("64.0 MB");
 	expect(plans[1].kind).toBe("image");
+});
+
+test("uploads bind to the intended project and return progress and the stored path", async () => {
+	vi.stubGlobal("XMLHttpRequest", FakeUploadRequest);
+	const progress = vi.fn();
+	const transferred = uploadFile(new File(["content"], "题目.txt"), "project /1", progress);
+	const request = FakeUploadRequest.latest;
+	expect(request?.url).toBe("/api/upload?name=%E9%A2%98%E7%9B%AE.txt&projectId=project%20%2F1");
+	expect(request?.headers["content-type"]).toBe("application/octet-stream");
+	request?.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 });
+	expect(progress).toHaveBeenCalledWith(0.5);
+	if (!request) throw new Error("Missing upload request");
+	request.responseText = JSON.stringify({ name: "题目.txt", path: "/work/uploads/题目.txt", size: 7 });
+	request.onload?.();
+	request.onloadend?.();
+	await expect(transferred).resolves.toEqual({ name: "题目.txt", path: "/work/uploads/题目.txt", size: 7, projectId: "project /1" });
+});
+
+test("canceling an upload aborts the HTTP request and rejects the transfer", async () => {
+	vi.stubGlobal("XMLHttpRequest", FakeUploadRequest);
+	const controller = new AbortController();
+	const transferred = uploadFile(new File(["content"], "attachment.txt"), "p1", () => {}, controller.signal);
+	const rejected = expect(transferred).rejects.toThrow("上传已取消");
+	const request = FakeUploadRequest.latest;
+	controller.abort();
+	await rejected;
+	expect(request?.aborted).toBe(true);
+});
+
+test("an already canceled upload never opens an HTTP request", async () => {
+	vi.stubGlobal("XMLHttpRequest", FakeUploadRequest);
+	FakeUploadRequest.latest = undefined;
+	const controller = new AbortController();
+	controller.abort();
+	await expect(uploadFile(new File(["x"], "x.txt"), "p1", () => {}, controller.signal)).rejects.toThrow("上传已取消");
+	expect(FakeUploadRequest.latest).toBeUndefined();
 });

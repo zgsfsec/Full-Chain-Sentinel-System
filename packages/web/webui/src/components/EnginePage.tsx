@@ -527,6 +527,7 @@ export function EnginePage(props: EnginePageProps) {
 							key={board.id}
 							engineId={board.id}
 							status={board.status}
+							project={props.project?.id === board.projectId ? props.project : null}
 							events={props.commanderEvents[board.id] ?? []}
 							onSend={send}
 						/>

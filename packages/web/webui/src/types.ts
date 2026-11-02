@@ -1333,6 +1333,8 @@ export interface SentinelForkPoint {
 export interface SentinelStatsView {
 	tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
 	cost: number;
+	/** Historical session usage for About; top-level counters remain session-scoped. */
+	cumulative?: { tokens: SentinelStatsView["tokens"]; cost: number };
 }
 
 /** Lifecycle of the persistent goal of the viewed session. */

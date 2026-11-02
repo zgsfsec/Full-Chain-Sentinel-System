@@ -15,6 +15,8 @@ import { dirname, extname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { WebSocket, WebSocketServer } from "ws";
+import { parseAssetImport, previewAssetImport } from "./asset-import.ts";
+import { AssetInputError, AssetLibraryStore, assetLibraryDbPath } from "./asset-library.ts";
 import { readWebuiFile } from "./assets.ts";
 import {
 	changePassword,
@@ -329,12 +331,15 @@ function sendJson(response: ServerResponse, payload: unknown, status = 200): voi
 }
 
 /** Read one JSON request body; oversize or malformed bodies become null. */
-async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown> | null> {
+async function readJsonBody(request: IncomingMessage, maxBytes = 64 * 1024): Promise<Record<string, unknown> | null> {
 	const chunks: Buffer[] = [];
 	let size = 0;
-	for await (const chunk of request) {
+	for await (const chunk of request.iterator({ destroyOnReturn: false })) {
 		size += (chunk as Buffer).byteLength;
-		if (size > 64 * 1024) return null;
+		if (size > maxBytes) {
+			request.resume();
+			return null;
+		}
 		chunks.push(chunk as Buffer);
 	}
 	try {
@@ -1172,6 +1177,68 @@ export async function startSentinelServer(
 		}
 	}
 
+	async function handleAssetImport(
+		request: IncomingMessage,
+		response: ServerResponse,
+		preview: boolean,
+	): Promise<void> {
+		let store: AssetLibraryStore | undefined;
+		try {
+			if (!request.headers["content-type"]?.toLowerCase().startsWith("application/json")) {
+				sendJson(response, { error: "请使用 JSON 格式提交资产。" }, 415);
+				return;
+			}
+			const body = await readJsonBody(request, 1024 * 1024);
+			// The terminal or active project may have changed while the body arrived.
+			if (authEnabled && !hasValidSession(currentAuth(), request)) {
+				sendJson(response, { error: t("未登录") }, 401);
+				return;
+			}
+			if (!body || typeof body.text !== "string" || typeof body.projectId !== "string") {
+				sendJson(response, { error: "导入内容无效或过大，请分批导入。" }, 400);
+				return;
+			}
+			const project = runtime.snapshot().project;
+			if (!project || project.id !== body.projectId) {
+				sendJson(response, { error: "当前项目已切换，请关闭窗口后重新导入。" }, 409);
+				return;
+			}
+			if (!agentDir) {
+				sendJson(response, { error: "未配置资产库目录。" }, 503);
+				return;
+			}
+			store = new AssetLibraryStore(assetLibraryDbPath(agentDir));
+			if (preview) {
+				sendJson(response, previewAssetImport(store, project.id, body.text));
+				return;
+			}
+			const parsed = parseAssetImport(body.text);
+			if (parsed.identities.length === 0) throw new AssetInputError("没有可导入的有效资产。");
+			const result = store.upsertMany(
+				parsed.identities.map((identity) => ({
+					projectId: project.id,
+					projectName: project.name,
+					source: "手动导入",
+					identity,
+				})),
+			);
+			broadcast({ type: "assets_changed" });
+			sendJson(response, {
+				...result,
+				duplicates: parsed.preview.duplicates,
+				invalid: parsed.preview.invalid.length,
+			});
+		} catch (error) {
+			sendJson(
+				response,
+				{ error: error instanceof Error ? error.message : String(error) },
+				error instanceof AssetInputError ? 400 : 500,
+			);
+		} finally {
+			store?.close();
+		}
+	}
+
 	const requestHandler = (request: IncomingMessage, response: ServerResponse): void => {
 		const url = new URL(request.url ?? "/", "http://localhost");
 		const path = url.pathname;
@@ -1260,6 +1327,19 @@ export async function startSentinelServer(
 				void servePluginIcon(runtime, request, response);
 				return;
 			}
+			if (path === "/api/assets/import" && request.method === "GET") {
+				const project = runtime.snapshot().project;
+				sendJson(
+					response,
+					project ? { id: project.id, name: project.name } : { error: t("尚未选择项目") },
+					project ? 200 : 409,
+				);
+				return;
+			}
+			if ((path === "/api/assets/import" || path === "/api/assets/import/preview") && request.method === "POST") {
+				void handleAssetImport(request, response, path.endsWith("/preview"));
+				return;
+			}
 			if (path === "/api/pocs/import" && request.method === "POST") {
 				void handlePocImport(request, response);
 				return;
@@ -1306,6 +1386,20 @@ export async function startSentinelServer(
 				const active = runtime.snapshot();
 				if (!active.project) {
 					sendJson(response, { error: t("请先创建或选择一个项目，再上传附件") }, 409);
+					return;
+				}
+				if (url.searchParams.get("projectId") !== active.project.id) {
+					request.resume();
+					sendJson(
+						response,
+						{
+							error:
+								getServerLanguage() === "en"
+									? "Project changed; upload the file again."
+									: "项目已切换，请重新上传文件。",
+						},
+						409,
+					);
 					return;
 				}
 				void handleUpload(request, response, active.cwd);

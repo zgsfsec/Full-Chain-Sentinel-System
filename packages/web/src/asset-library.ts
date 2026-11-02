@@ -610,14 +610,16 @@ export class AssetLibraryStore {
 	}
 
 	private transaction<T>(run: () => T): T {
-		this.db.exec("BEGIN");
+		// Savepoints also allow a batch to wrap individual upserts atomically.
+		this.db.exec("SAVEPOINT asset_write");
 		try {
 			const result = run();
-			this.db.exec("COMMIT");
+			this.db.exec("RELEASE asset_write");
 			return result;
 		} catch (error) {
 			try {
-				this.db.exec("ROLLBACK");
+				this.db.exec("ROLLBACK TO asset_write");
+				this.db.exec("RELEASE asset_write");
 			} catch {
 				// The original error is the one worth reporting.
 			}
@@ -651,6 +653,23 @@ export class AssetLibraryStore {
 		return this.db
 			.prepare("SELECT * FROM asset_library WHERE project_id = ? AND dedupe_key = ?")
 			.get(projectId, dedupeKey) as unknown as AssetRow | undefined;
+	}
+
+	hasIdentity(projectId: string, identity: AssetIdentityInput): boolean {
+		return this.findByKey(projectId, resolveAssetIdentity(identity).dedupeKey) !== undefined;
+	}
+
+	/** A failed batch leaves neither partial assets nor consumed labels. */
+	upsertMany(inputs: AssetUpsertInput[]): { created: number; merged: number } {
+		return this.transaction(() => {
+			let created = 0;
+			let merged = 0;
+			for (const input of inputs) {
+				if (this.upsert(input).created) created += 1;
+				else merged += 1;
+			}
+			return { created, merged };
+		});
 	}
 
 	private entriesOf(assetId: string): SentinelAssetEntry[] {

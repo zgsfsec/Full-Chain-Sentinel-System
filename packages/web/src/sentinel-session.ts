@@ -264,6 +264,7 @@ import type {
 	SentinelPocSyncRecord,
 	SentinelSessionPresetView,
 	SentinelStateSnapshot,
+	SentinelStats,
 	SentinelSubagentEvent,
 	SentinelSubagentRun,
 	SentinelSupervisorAdvice,
@@ -303,6 +304,7 @@ import {
 	withSessionStatus,
 } from "./session-status.ts";
 import { createSessionTitleTool } from "./session-title-tool.ts";
+import { SessionUsageStore } from "./session-usage-store.ts";
 import { createSubagentTool } from "./subagent.ts";
 import { SubagentStore, subagentDbPath } from "./subagent-store.ts";
 import { SubagentRegistry } from "./subagents.ts";
@@ -574,6 +576,7 @@ export class SentinelRuntime {
 	private readonly assets: AssetStore;
 	private readonly assetLibrary: AssetLibraryStore;
 	private readonly webSearchLog: WebSearchStore;
+	private readonly sessionUsage: SessionUsageStore;
 	/** Per-key usage cache: remaining credits at `at`; -1 marks a dead probe. */
 	private readonly webUsageCache = new Map<string, { at: number; remaining: number; limit: number | null }>();
 	/** Injected once the server has built the WS device gateway (see server.ts). */
@@ -629,6 +632,7 @@ export class SentinelRuntime {
 		this.assets = new AssetStore(assetsDbPath(this.agentDir));
 		this.assetLibrary = new AssetLibraryStore(assetLibraryDbPath(this.agentDir));
 		this.webSearchLog = new WebSearchStore(websearchDbPath(this.agentDir));
+		this.sessionUsage = new SessionUsageStore(this.agentDir);
 		this.subscriptions = new PocSubscriptions(this.agentDir, this.pocs, {
 			onChange: () => this.hooks.onPocSourceChange(),
 			onPocChange: () => this.hooks.onPocChange(),
@@ -699,6 +703,7 @@ export class SentinelRuntime {
 	 * no default directory to fall back to.
 	 */
 	async init(): Promise<void> {
+		await this.sessionUsage.backfill(join(this.agentDir, "sessions"));
 		if (!this.activeProjectId) return;
 		this.activeKey = await this.createSessionInto(SessionManager.create(this.cwd, this.sessionDir || undefined));
 	}
@@ -1124,6 +1129,14 @@ export class SentinelRuntime {
 			managed.goal = this.restoreGoal(managed);
 		}
 		managed.unsubscribe = created.session.subscribe((event) => {
+			if (
+				event.type === "turn_end" ||
+				event.type === "agent_settled" ||
+				event.type === "compaction_end" ||
+				event.type === "entry_appended"
+			) {
+				this.recordSessionUsage(managed);
+			}
 			// Only the viewed session streams events; background sessions run silently.
 			if (managed.key === this.activeKey) this.hooks.onSessionEvent(event);
 			if (event.type === "tool_execution_start") {
@@ -1184,6 +1197,7 @@ export class SentinelRuntime {
 				this.hooks.onStateChange();
 			}
 		});
+		this.recordSessionUsage(managed);
 		this.sessions.set(managed.key, managed);
 		return managed.key;
 	}
@@ -4532,9 +4546,32 @@ export class SentinelRuntime {
 		};
 	}
 
-	/** Usage and cost statistics for the viewed session. */
-	getStats() {
-		return this.active?.session.getSessionStats();
+	private recordSessionUsage(managed: ManagedSession): void {
+		try {
+			this.sessionUsage.recordEntries(managed.manager.getEntries());
+		} catch (error) {
+			// Bookkeeping must not turn a successful model call into a failed run.
+			console.error(`[sentinel] Failed to retain session usage: ${String(error)}`);
+		}
+	}
+
+	/** Current-session counters for the composer and durable historical counters for About. */
+	getStats(): SentinelStats {
+		if (this.active) this.recordSessionUsage(this.active);
+		return {
+			...(this.active?.session.getSessionStats() ?? {
+				sessionFile: undefined,
+				sessionId: "",
+				userMessages: 0,
+				assistantMessages: 0,
+				toolCalls: 0,
+				toolResults: 0,
+				totalMessages: 0,
+				tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				cost: 0,
+			}),
+			cumulative: this.sessionUsage.totals(),
+		};
 	}
 
 	/**
@@ -4937,6 +4974,7 @@ export class SentinelRuntime {
 	dispose(): void {
 		this.approvals.rejectAll("shutdown");
 		for (const managed of this.sessions.values()) {
+			this.recordSessionUsage(managed);
 			managed.unsubscribe();
 			managed.session.dispose();
 		}
@@ -4952,6 +4990,7 @@ export class SentinelRuntime {
 		this.assets.close();
 		this.assetLibrary.close();
 		this.webSearchLog.close();
+		this.sessionUsage.close();
 		this.subscriptions.stop();
 		this.supervisor.close();
 		this.gateStore.close();

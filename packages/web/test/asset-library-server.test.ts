@@ -29,6 +29,7 @@ let tempRoot = "";
 let agentDir = "";
 let fakeDocker: FakeDocker | undefined;
 let closeServer: (() => void) | undefined;
+let serverUrl = "";
 let ws: WebSocket | undefined;
 let library: AssetLibraryStore | undefined;
 let hub: VulnerabilityStore | undefined;
@@ -111,6 +112,7 @@ beforeAll(async () => {
 		auth: false,
 	});
 	closeServer = started.close;
+	serverUrl = started.url;
 	ws = new WebSocket(started.url.replace("http://", "ws://").concat("/ws"));
 	ws.on("message", (data) => dispatch(JSON.parse(String(data)) as SentinelServerMessage));
 	await new Promise<void>((resolve, reject) => {
@@ -243,4 +245,68 @@ test("pages the inventory, opens a detail, updates, deletes and exports", async 
 	expect(exported.filename).toContain("asset-inventory");
 	expect(exported.markdown).toContain("资产库测试-A0003");
 	expect(exported.markdown).not.toContain("资产库测试-A0001");
+});
+
+test("HTTP paste import previews without writes, merges records and rejects stale projects", async () => {
+	const context = (await fetch(`${serverUrl}/api/assets/import`).then((response) => response.json())) as {
+		id: string;
+		name: string;
+	};
+	const existing = library?.upsert({
+		projectId: context.id,
+		projectName: context.name,
+		source: "主代理",
+		identity: { domain: "manual.example.com" },
+		tags: ["keep"],
+		record: { outcome: "clean", text: "keep record" },
+	}).asset;
+	const before = library?.countByProject(context.id);
+	const text =
+		"manual.example.com 192.168.2.10:443,https://new.example.com/login\nhttps://new.example.com/login?q=1\n*.example.com";
+	const post = (path: string, projectId = context.id, content = text) =>
+		fetch(`${serverUrl}${path}`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ projectId, text: content }),
+		});
+	const preview = await post("/api/assets/import/preview");
+	expect(preview.status).toBe(200);
+	expect(await preview.json()).toMatchObject({
+		created: 2,
+		merged: 1,
+		duplicates: 1,
+		invalid: [{ input: "*.example.com" }],
+	});
+	expect(library?.countByProject(context.id)).toBe(before);
+	expect((await post("/api/assets/import", "other-project")).status).toBe(409);
+	expect((await post("/api/assets/import", context.id, "invalid")).status).toBe(400);
+	const imported = await post("/api/assets/import");
+	expect(imported.status).toBe(200);
+	expect(await imported.json()).toEqual({ created: 2, merged: 1, duplicates: 1, invalid: 1 });
+	await waitFor((message) => message.type === "assets_changed");
+	expect(library?.countByProject(context.id)).toBe((before ?? 0) + 2);
+	expect(library?.get(existing?.id ?? "")).toMatchObject({
+		status: "tested",
+		source: "主代理",
+		tags: ["keep"],
+		testCount: 1,
+		entries: [{ text: "keep record" }],
+	});
+	expect(await (await post("/api/assets/import")).json()).toEqual({
+		created: 0,
+		merged: 3,
+		duplicates: 1,
+		invalid: 1,
+	});
+	const malformed = await fetch(`${serverUrl}/api/assets/import`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: "not-json",
+	});
+	expect(malformed.status).toBe(400);
+	expect((await fetch(`${serverUrl}/api/assets/import`, { method: "POST", body: "example.com" })).status).toBe(415);
+	// An oversize request receives a normal error instead of dropping the socket.
+	expect((await post("/api/assets/import/preview", context.id, "a".repeat(1024 * 1024))).status).toBe(400);
+	expect((await post("/api/assets/import/preview", context.id, "a".repeat(200001))).status).toBe(400);
+	expect(library?.countByProject(context.id)).toBe((before ?? 0) + 2);
 });

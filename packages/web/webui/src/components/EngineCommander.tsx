@@ -1,9 +1,11 @@
-import { Badge, Button, Empty, Input, Typography } from "antd";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Badge, Empty, Typography } from "antd";
+import { useEffect, useMemo, useRef } from "react";
 import { commanderEntries } from "../commander-process.ts";
 import { t } from "../i18n.ts";
 import { formatMs, toolSummary } from "../subagent-process.ts";
-import type { SentinelEngine, SentinelSubagentEvent } from "../types.ts";
+import type { SentinelEngine, SentinelProjectInfo, SentinelSubagentEvent } from "../types.ts";
+import { CommanderComposer } from "./EngineCommanderComposer.tsx";
+import { MarkdownText } from "./MessageView.tsx";
 
 const { Text } = Typography;
 
@@ -22,29 +24,22 @@ function clock(at: number): string {
 export function CommanderFeed({
 	engineId,
 	status,
+	project,
 	events,
 	onSend,
 }: {
 	engineId: string;
 	status: SentinelEngine["status"];
+	project: SentinelProjectInfo | null;
 	events: SentinelSubagentEvent[];
 	onSend: (message: unknown) => void;
 }) {
-	const canChat = status === "running" || status === "completed";
-	const [draft, setDraft] = useState("");
 	const feed = useRef<HTMLDivElement>(null);
 	const follow = useRef(true);
 	const entries = useMemo(() => commanderEntries(events), [events]);
 	useEffect(() => {
 		if (feed.current && follow.current) feed.current.scrollTop = feed.current.scrollHeight;
 	}, [entries]);
-	const sendDraft = (): void => {
-		const text = draft.trim();
-		if (!text || !canChat) return;
-		onSend({ type: "engine_steer_commander", id: engineId, text });
-		setDraft("");
-		follow.current = true;
-	};
 	return (
 		<section className="engine-commander" aria-label={t("指挥官")}>
 			<div className="engine-workspace__panel-head">
@@ -125,7 +120,7 @@ export function CommanderFeed({
 									</span>
 								</summary>
 								<div className="engine-commander__details">
-									<pre>{event.text}</pre>
+									<MarkdownText text={event.text ?? ""} />
 								</div>
 							</details>
 						);
@@ -142,7 +137,7 @@ export function CommanderFeed({
 									<span>{event.from === "operator" ? t("你") : t("指挥官")}</span>
 									<time>{clock(event.at)}</time>
 								</div>
-								<p>{event.text}</p>
+								{event.from === "operator" ? <div className="engine-commander__operator-text">{event.text}</div> : <MarkdownText text={event.text ?? ""} />}
 							</div>
 						);
 					}
@@ -156,35 +151,10 @@ export function CommanderFeed({
 					);
 				})}
 			</div>
-			<div className="engine-commander__composer">
-				<Input.TextArea
-					autoSize={{ minRows: 2, maxRows: 5 }}
-					variant="borderless"
-					aria-label={t("给指挥官的指令")}
-					value={draft}
-					disabled={!canChat}
-					placeholder={
-						status === "running"
-							? t("向指挥官补充目标或调整方向…")
-							: status === "completed"
-								? t("工程已完成，向指挥官追问报告细节…")
-								: t("工程未运行，暂时不能对话")
-					}
-					onChange={(event) => setDraft(event.target.value)}
-					onKeyDown={(event) => {
-						if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
-							event.preventDefault();
-							sendDraft();
-						}
-					}}
-				/>
-				<div className="engine-commander__composer-actions">
-					<Text type="secondary">{t("Enter 发送 · Shift+Enter 换行")}</Text>
-					<Button size="small" type="primary" disabled={!canChat || !draft.trim()} onClick={sendDraft}>
-						{t("发送")}
-					</Button>
-				</div>
-			</div>
+			<CommanderComposer key={`${engineId}:${project?.id ?? "no-project"}`} status={status} project={project} onSubmit={(text) => {
+				onSend({ type: "engine_steer_commander", id: engineId, text });
+				follow.current = true;
+			}} />
 		</section>
 	);
 }

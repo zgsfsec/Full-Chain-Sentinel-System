@@ -37,6 +37,7 @@ export function AboutPage({
 	project: SentinelProjectInfo | null;
 	connected: boolean;
 }) {
+	const cumulative = stats?.cumulative;
 	const items = [
 		{ key: "console", label: t("控制台"), children: t("{name} Web 控制台", { name: PROJECT_NAME }) },
 		{
@@ -113,10 +114,10 @@ export function AboutPage({
 				</div>
 
 				<div className="about-stats">
-					<Statistic title={t("Token 输入")} value={stats?.tokens.input ?? 0} groupSeparator="," />
-					<Statistic title={t("Token 输出")} value={stats?.tokens.output ?? 0} groupSeparator="," />
-					<Statistic title={t("Token 合计")} value={stats?.tokens.total ?? 0} groupSeparator="," />
-					<Statistic title={t("累计花费")} value={stats?.cost ?? 0} precision={4} prefix="$" />
+					<Statistic title={t("Token 输入")} value={cumulative?.tokens.input ?? "—"} groupSeparator="," />
+					<Statistic title={t("Token 输出")} value={cumulative?.tokens.output ?? "—"} groupSeparator="," />
+					<Statistic title={t("Token 合计")} value={cumulative?.tokens.total ?? "—"} groupSeparator="," />
+					<Statistic title={t("累计花费")} value={cumulative?.cost ?? "—"} precision={4} prefix="$" />
 				</div>
 			</div>
 

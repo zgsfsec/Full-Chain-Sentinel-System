@@ -28,6 +28,7 @@ import { writeTestModel } from "./model-fixtures.ts";
 let tempRoot = "";
 let workDir = "";
 let baseUrl = "";
+let projectId = "";
 let fakeDocker: FakeDocker | undefined;
 let closeServer: (() => void) | undefined;
 let socket: WebSocket | undefined;
@@ -37,11 +38,14 @@ async function upload(
 	name: string,
 	body: string | Buffer,
 ): Promise<{ status: number; payload: Record<string, unknown> }> {
-	const response = await fetch(`${baseUrl}/api/upload?name=${encodeURIComponent(name)}`, {
-		method: "POST",
-		headers: { "content-type": "application/octet-stream" },
-		body,
-	});
+	const response = await fetch(
+		`${baseUrl}/api/upload?name=${encodeURIComponent(name)}&projectId=${encodeURIComponent(projectId)}`,
+		{
+			method: "POST",
+			headers: { "content-type": "application/octet-stream" },
+			body,
+		},
+	);
 	return { status: response.status, payload: (await response.json()) as Record<string, unknown> };
 }
 
@@ -77,6 +81,7 @@ beforeAll(async () => {
 	baseUrl = started.url;
 	closeServer = started.close;
 	workDir = created.project.workDir;
+	projectId = created.project.id;
 	// The route refuses while no project is selected, so the test starts from the
 	// state a reloaded console is in: one project, already switched to.
 	const snapshot = await firstSnapshot(started.url);
@@ -142,6 +147,17 @@ test("a second upload of the same name does not overwrite the first", async () =
 	expect(second.payload.name).toBe("dup-2.txt");
 	expect(readFileSync(join(workDir, "uploads", "dup.txt"), "utf-8")).toBe("first");
 	expect(readFileSync(join(workDir, "uploads", "dup-2.txt"), "utf-8")).toBe("second");
+});
+
+test("uploads for a stale or missing project are rejected before writing files", async () => {
+	for (const query of ["", "&projectId=other-project"]) {
+		const response = await fetch(`${baseUrl}/api/upload?name=wrong-project.txt${query}`, {
+			method: "POST",
+			body: "private attachment",
+		});
+		expect(response.status).toBe(409);
+		expect(existsSync(join(workDir, "uploads", "wrong-project.txt"))).toBe(false);
+	}
 });
 
 test("a body over the cap is refused and leaves nothing behind", async () => {

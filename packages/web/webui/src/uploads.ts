@@ -34,10 +34,18 @@ export function uploadFile(
 	file: File,
 	projectId: string,
 	onProgress: (ratio: number) => void,
+	signal?: AbortSignal,
 ): Promise<UploadedFile> {
 	return new Promise((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(new Error(t("上传已取消")));
+			return;
+		}
 		const request = new XMLHttpRequest();
-		request.open("POST", `/api/upload?name=${encodeURIComponent(file.name)}`);
+		const abort = (): void => request.abort();
+		signal?.addEventListener("abort", abort, { once: true });
+		request.onloadend = () => signal?.removeEventListener("abort", abort);
+		request.open("POST", `/api/upload?name=${encodeURIComponent(file.name)}&projectId=${encodeURIComponent(projectId)}`);
 		request.setRequestHeader("content-type", "application/octet-stream");
 		request.upload.onprogress = (event) => {
 			if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);

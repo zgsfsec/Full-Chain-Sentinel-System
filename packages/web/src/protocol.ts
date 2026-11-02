@@ -24,6 +24,11 @@ import type { SentinelSessionListEntry, SentinelSessionStatus } from "./session-
  */
 export type SentinelMode = "review" | "ai" | "auto";
 
+/** Usage retained across sessions, projects and service restarts. */
+export type SentinelUsageTotals = Pick<SessionStats, "tokens" | "cost">;
+
+export type SentinelStats = SessionStats & { cumulative: SentinelUsageTotals };
+
 /** The modes a session may carry; the order the console lists them in. */
 export const SENTINEL_MODES: readonly SentinelMode[] = ["review", "ai", "auto"];
 
@@ -2072,7 +2077,7 @@ export type SentinelServerMessage =
 	  }
 	| { type: "notify_config"; config: SentinelNotifyConfig; status: SentinelNotifyStatus }
 	| { type: "notify_test_result"; result: SentinelTestResult }
-	| { type: "stats"; stats: SessionStats }
+	| { type: "stats"; stats: SentinelStats }
 	| { type: "projects"; projects: SentinelProjectInfo[]; activeProjectId: string | null }
 	| { type: "files"; path: string; entries: SentinelFileEntry[] }
 	| { type: "file_preview"; preview: SentinelFilePreview }
