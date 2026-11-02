@@ -44,10 +44,18 @@
 	display: flex;
 	align-items: center;
 	min-width: 0;
+	min-height: 36px;
+	padding: 2px;
 }
 .webfuzz-tabs .ant-typography-edit-content {
 	width: 150px;
 	margin: 0;
+	/* Keep the editor and its focus ring inside the clipped tab label. */
+	inset-block-start: 0;
+	inset-inline-start: 0;
+}
+.webfuzz-tabs .ant-typography-edit-content textarea {
+	display: block;
 }
 .webfuzz-tab-title:not(.ant-typography-edit-content) {
 	min-width: 0;
