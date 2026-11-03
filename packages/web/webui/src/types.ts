@@ -2670,6 +2670,7 @@ export interface SentinelEngineSchedule {
 	pauseAt: number | null;
 	resumeAt: number | null;
 	deadlineAt: number | null;
+	repeatDaily: boolean;
 	phase: SentinelEngineSchedulePhase;
 	applied: SentinelEngineScheduleAction[];
 	finishedReason: SentinelEngineScheduleFinishReason | null;
@@ -2682,6 +2683,7 @@ export interface SentinelEngineScheduleInput {
 	pauseAt?: number | null;
 	resumeAt?: number | null;
 	deadlineAt?: number | null;
+	repeatDaily?: boolean;
 }
 
 export interface SentinelEngineLimits {

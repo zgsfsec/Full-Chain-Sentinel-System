@@ -1175,6 +1175,8 @@ export interface SentinelEngineSchedule {
 	pauseAt: number | null;
 	resumeAt: number | null;
 	deadlineAt: number | null;
+	/** Start a fresh engineering run each day after the prior run completes. */
+	repeatDaily: boolean;
 	phase: SentinelEngineSchedulePhase;
 	/** Actions already applied, so a restarted scheduler never repeats them. */
 	applied: SentinelEngineScheduleAction[];
@@ -1189,6 +1191,7 @@ export interface SentinelEngineScheduleInput {
 	pauseAt?: number | null;
 	resumeAt?: number | null;
 	deadlineAt?: number | null;
+	repeatDaily?: boolean;
 }
 
 /** Per-engine knobs; per-task limits derive from these unless overridden. */

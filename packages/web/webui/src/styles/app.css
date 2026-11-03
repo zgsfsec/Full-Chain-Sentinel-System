@@ -4333,6 +4333,12 @@ body {
 	margin-top: 4px;
 }
 
+.enginehub-schedule__repeat,
+.enginehub-scheduleform__repeat-hint {
+	display: block;
+	margin-top: 8px;
+}
+
 .enginehub-scheduleform__row {
 	margin-top: 8px;
 }

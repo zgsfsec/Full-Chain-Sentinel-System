@@ -71,11 +71,63 @@ export function normalizeSchedule(input: SentinelEngineScheduleInput, now: numbe
 		pauseAt,
 		resumeAt,
 		deadlineAt,
+		repeatDaily: input.repeatDaily === true,
 		phase: "waiting_start",
 		applied: [],
 		finishedReason: null,
 		finishedAt: null,
 	};
+}
+
+/** Find the next local-calendar day at the same wall-clock time. */
+export function nextDailyOccurrence(
+	schedule: Pick<SentinelEngineSchedule, "startAt" | "timezone">,
+	after: number,
+): number {
+	const format = new Intl.DateTimeFormat("en-CA", {
+		timeZone: schedule.timezone,
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+		hourCycle: "h23",
+	});
+	const partsOf = (at: number): Record<string, number> => {
+		const values: Record<string, number> = {};
+		for (const part of format.formatToParts(at)) {
+			if (part.type !== "literal") values[part.type] = Number(part.value);
+		}
+		return values;
+	};
+	const anchor = partsOf(schedule.startAt);
+	const afterLocal = partsOf(after);
+	const targetDay = new Date(Date.UTC(afterLocal.year, afterLocal.month - 1, afterLocal.day + 1));
+	const target = {
+		year: targetDay.getUTCFullYear(),
+		month: targetDay.getUTCMonth() + 1,
+		day: targetDay.getUTCDate(),
+		hour: anchor.hour,
+		minute: anchor.minute,
+	};
+	// Search a bounded UTC window for the matching local minute. This handles
+	// timezone offsets and DST transitions without changing the configured clock.
+	const firstMinute = Math.floor(after / 60_000) * 60_000 + 60_000;
+	let firstAfterTargetDay: number | null = null;
+	for (let at = firstMinute; at <= firstMinute + 48 * 60 * 60_000; at += 60_000) {
+		const local = partsOf(at);
+		if (local.year !== target.year || local.month !== target.month || local.day !== target.day) continue;
+		if (local.hour === target.hour && local.minute === target.minute) return at;
+		if (
+			firstAfterTargetDay === null &&
+			(local.hour > target.hour || (local.hour === target.hour && local.minute > target.minute))
+		)
+			firstAfterTargetDay = at;
+	}
+	// A spring DST jump can remove the configured wall-clock minute (for example
+	// 02:30). Run at the first valid local minute after the gap on that date.
+	if (firstAfterTargetDay !== null) return firstAfterTargetDay;
+	throw new Error(t("无法计算下一次每日运行时间"));
 }
 
 function applied(schedule: SentinelEngineSchedule, action: SentinelEngineScheduleAction): boolean {

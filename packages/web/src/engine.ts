@@ -34,6 +34,7 @@ import {
 	applyScheduleAction,
 	dueScheduleAction,
 	finishSchedule,
+	nextDailyOccurrence,
 	nextScheduleAt,
 	normalizeSchedule,
 	SCHEDULE_START_GRACE_MS,
@@ -1083,6 +1084,7 @@ export class EngineManager {
 						}),
 					};
 				}
+				const completedSchedule = entry.engine.schedule;
 				this.disableActiveSchedule(entry, "completed");
 				this.store.setEngineReport(entry.engine.id, report);
 				this.store.setEngineStatus(entry.engine.id, "completed", null, Date.now());
@@ -1091,6 +1093,17 @@ export class EngineManager {
 				entry.reportSettled = true;
 				this.hooks.onChange(entry.engine);
 				this.notifyEngineDone(entry.engine);
+				if (completedSchedule?.repeatDaily) {
+					try {
+						this.scheduleNextDailyRun(entry.engine, completedSchedule);
+					} catch (error) {
+						this.pushCommanderEvent(entry, {
+							kind: "status",
+							status: "error",
+							note: t("下一轮每日工程计划创建失败：{error}", { error: errorText(error) }),
+						});
+					}
+				}
 				return { ok: true };
 			},
 		};
@@ -1596,6 +1609,39 @@ export class EngineManager {
 
 	private commanderContainerOf(entry: EngineLive): string {
 		return this.projectOf(entry.engine).container ?? "";
+	}
+
+	/** Each daily recurrence is a fresh engine row so completed runs remain reviewable. */
+	private scheduleNextDailyRun(engine: SentinelEngine, prior: NonNullable<SentinelEngine["schedule"]>): void {
+		const nextStart = nextDailyOccurrence(prior, Date.now());
+		const schedule = normalizeSchedule(
+			{
+				timezone: prior.timezone,
+				startAt: nextStart,
+				pauseAt: prior.pauseAt === null ? null : nextStart + (prior.pauseAt - prior.startAt),
+				resumeAt: prior.resumeAt === null ? null : nextStart + (prior.resumeAt - prior.startAt),
+				deadlineAt: prior.deadlineAt === null ? null : nextStart + (prior.deadlineAt - prior.startAt),
+				repeatDaily: true,
+			},
+			Date.now(),
+		);
+		const stored = this.store.createEngine({
+			projectId: engine.projectId,
+			projectName: engine.projectName,
+			name: engine.name,
+			targets: engine.targets,
+			doctrines: engine.doctrines,
+			presetIds: engine.presetIds,
+			presetOptional: engine.presetOptional,
+			limits: engine.limits,
+			gateMode: engine.gateMode,
+			status: "scheduled",
+			startedAt: null,
+			schedule,
+		});
+		this.live.set(stored.id, this.emptyLive(stored));
+		this.hooks.onChange(stored);
+		this.armScheduler();
 	}
 
 	private projectOf(engine: SentinelEngine): SentinelProjectInfo {

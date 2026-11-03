@@ -582,6 +582,7 @@ function scheduleFromRow(raw: string | null): SentinelEngineSchedule | null {
 		pauseAt: typeof value.pauseAt === "number" ? value.pauseAt : null,
 		resumeAt: typeof value.resumeAt === "number" ? value.resumeAt : null,
 		deadlineAt: typeof value.deadlineAt === "number" ? value.deadlineAt : null,
+		repeatDaily: value.repeatDaily === true,
 		phase,
 		applied: Array.isArray(value.applied)
 			? value.applied.filter(

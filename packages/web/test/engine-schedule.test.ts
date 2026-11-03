@@ -10,6 +10,7 @@ import {
 	applyScheduleAction,
 	dueScheduleAction,
 	finishSchedule,
+	nextDailyOccurrence,
 	nextScheduleAt,
 	normalizeSchedule,
 	SCHEDULE_START_GRACE_MS,
@@ -35,6 +36,14 @@ test("normalizeSchedule attaches a waiting plan and preserves null options", () 
 	expect(schedule.resumeAt).toBeNull();
 	expect(schedule.deadlineAt).toBe(now + 4 * HOUR);
 	expect(schedule.finishedReason).toBeNull();
+});
+
+test("daily recurrence keeps the same local wall-clock time across daylight saving", () => {
+	const startAt = Date.parse("2026-03-07T14:30:00Z"); // 09:30 in New York before DST.
+	const next = nextDailyOccurrence({ startAt, timezone: "America/New_York" }, startAt);
+	expect(new Date(next).toISOString()).toBe("2026-03-08T13:30:00.000Z"); // 09:30 after DST.
+	const schedule = normalizeSchedule({ timezone: "UTC", startAt: now + HOUR, repeatDaily: true }, now);
+	expect(schedule.repeatDaily).toBe(true);
 });
 
 test("normalizeSchedule accepts a pause/resume pair after the start", () => {

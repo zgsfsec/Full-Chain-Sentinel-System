@@ -188,6 +188,7 @@ function parseLocalInput(value: string): number | null {
 
 interface ScheduleDraft {
 	startAt: string;
+	repeatDaily: boolean;
 	pauseEnabled: boolean;
 	pauseAt: string;
 	resumeAt: string;
@@ -199,6 +200,7 @@ function emptyScheduleDraft(now = Date.now()): ScheduleDraft {
 	const start = now + 30 * 60_000;
 	return {
 		startAt: toLocalInputValue(start),
+		repeatDaily: false,
 		pauseEnabled: false,
 		pauseAt: toLocalInputValue(start + 4 * 60 * 60_000),
 		resumeAt: toLocalInputValue(start + 8 * 60 * 60_000),
@@ -210,6 +212,7 @@ function emptyScheduleDraft(now = Date.now()): ScheduleDraft {
 function draftFromSchedule(schedule: SentinelEngineSchedule): ScheduleDraft {
 	return {
 		startAt: toLocalInputValue(schedule.startAt),
+		repeatDaily: schedule.repeatDaily,
 		pauseEnabled: schedule.pauseAt !== null,
 		pauseAt: schedule.pauseAt !== null ? toLocalInputValue(schedule.pauseAt) : "",
 		resumeAt: schedule.resumeAt !== null ? toLocalInputValue(schedule.resumeAt) : "",
@@ -241,6 +244,7 @@ function parseScheduleDraft(draft: ScheduleDraft): { schedule?: SentinelEngineSc
 		schedule: {
 			timezone: browserTimezone(),
 			startAt,
+		repeatDaily: draft.repeatDaily,
 			pauseAt,
 			resumeAt,
 			deadlineAt,
@@ -1086,6 +1090,7 @@ function ScheduleStrip({ schedule }: { schedule: SentinelEngineSchedule }) {
 							? SCHEDULE_FINISH_LABELS[schedule.finishedReason ?? "manual"]
 							: ""}
 			</Text>
+			{schedule.repeatDaily ? <Text type="secondary" className="enginehub-schedule__repeat">{t("工程完成后，将在次日相同时区时间新建下一轮；未完成或手动干预时不会重叠启动。")}</Text> : null}
 			<Space size={16} wrap className="enginehub-schedule__steps">
 				{steps.map((step) => {
 					const done = schedule.applied.includes(step.action);
@@ -1136,6 +1141,14 @@ function ScheduleFields({
 					</Form.Item>
 				</Col>
 			</Row>
+			<Checkbox checked={draft.repeatDaily} onChange={(event) => set("repeatDaily", event.target.checked)}>
+				{t("工程完成后每天循环新建一轮")}
+			</Checkbox>
+			{draft.repeatDaily ? (
+				<Text type="secondary" className="enginehub-scheduleform__repeat-hint">
+					{t("每轮都会创建独立工程记录；当天这一轮未完成时，不会并发启动下一轮。暂停、终止、启动失败或服务重启会停止后续计划。")}
+				</Text>
+			) : null}
 			<Checkbox checked={draft.pauseEnabled} onChange={(event) => set("pauseEnabled", event.target.checked)}>
 				{t("中途暂停，并在指定时间自动恢复")}
 			</Checkbox>
