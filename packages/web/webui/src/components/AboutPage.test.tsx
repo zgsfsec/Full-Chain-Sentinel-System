@@ -3,7 +3,7 @@ import { expect, test, vi } from "vitest";
 import { AboutPage } from "./AboutPage.tsx";
 
 vi.mock("../branding.ts", () => ({
-	CONSOLE_VERSION: "2.2.11",
+	CONSOLE_VERSION: "2.2.12",
 	PROJECT_LICENSE: "MIT",
 	PROJECT_LICENSE_URL: "https://example.com/license",
 	PROJECT_NAME: "Sentinel",

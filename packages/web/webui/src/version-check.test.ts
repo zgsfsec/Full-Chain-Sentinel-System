@@ -2,22 +2,22 @@ import { expect, test, vi } from "vitest";
 import { isNewerRelease, VERSION_CHECK_INTERVAL_MS, VersionChecker } from "./version-check.ts";
 
 vi.mock("./branding.ts", () => ({
-	CONSOLE_VERSION: "2.2.11",
+	CONSOLE_VERSION: "2.2.12",
 	PROJECT_LATEST_RELEASE_API: "https://api.github.com/repos/zgsfsec/Full-Chain-Sentinel-System/releases/latest",
 }));
 
-function release(version = "v2.2.12") {
+function release(version = "v2.2.13") {
 	return new Response(JSON.stringify({ tag_name: version, draft: false, prerelease: false }), { status: 200 });
 }
 
 test.each([
-	["2.2.11", "v2.2.12", true],
+	["2.2.12", "v2.2.13", true],
 	["2.9.0", "v2.10.0", true],
-	["2.2.11", "2.2.11", false],
-	["2.2.12", "v2.2.11", false],
+	["2.2.12", "2.2.12", false],
+	["2.2.13", "v2.2.12", false],
 	["3.0.0", "v2.99.99", false],
-	["2.2.11-beta.1", "v2.2.11", true],
-	["2.2.11+local", "v2.2.11+release", false],
+	["2.2.12-beta.1", "v2.2.12", true],
+	["2.2.12+local", "v2.2.12+release", false],
 ])("compares versions numerically: %s -> %s", (current, latest, available) => {
 	expect(isNewerRelease(current, latest)).toBe(available);
 });
@@ -25,7 +25,7 @@ test.each([
 test.each(["latest", "v2.2", "v2.02.12", "v2.3.0-beta.1", "<script>"])(
 	"rejects invalid or preview release tag %s",
 	(tag) => {
-		expect(() => isNewerRelease("2.2.11", tag)).toThrow();
+		expect(() => isNewerRelease("2.2.12", tag)).toThrow();
 	},
 );
 
@@ -39,7 +39,7 @@ test("checks only the fixed public version endpoint, caches for six hours and su
 		},
 	};
 	const fetchRelease = vi.fn<typeof fetch>().mockImplementation(async () => release());
-	const checker = new VersionChecker("2.2.11", { fetch: fetchRelease, storage, now: () => now });
+	const checker = new VersionChecker("2.2.12", { fetch: fetchRelease, storage, now: () => now });
 	const listener = vi.fn();
 	const unsubscribe = checker.subscribe(listener);
 	await Promise.all([checker.check(), checker.check(), checker.check()]);
@@ -51,7 +51,7 @@ test("checks only the fixed public version endpoint, caches for six hours and su
 	expect(checker.getSnapshot()).toMatchObject({
 		checking: false,
 		error: null,
-		result: { latestVersion: "2.2.12", updateAvailable: true },
+		result: { latestVersion: "2.2.13", updateAvailable: true },
 	});
 	expect(listener).toHaveBeenCalledTimes(2);
 	await checker.check();
@@ -59,7 +59,7 @@ test("checks only the fixed public version endpoint, caches for six hours and su
 	await checker.check(true);
 	expect(fetchRelease).toHaveBeenCalledTimes(2);
 	// Reloads reuse metadata, but upgrading the local installation recalculates availability.
-	const upgraded = new VersionChecker("2.2.12", { fetch: fetchRelease, storage, now: () => now });
+	const upgraded = new VersionChecker("2.2.13", { fetch: fetchRelease, storage, now: () => now });
 	await upgraded.check();
 	expect(upgraded.getSnapshot().result?.updateAvailable).toBe(false);
 	expect(fetchRelease).toHaveBeenCalledTimes(2);
@@ -74,7 +74,7 @@ test("network/rate-limit failures do not claim to be up to date, and manual retr
 		.fn<typeof fetch>()
 		.mockResolvedValueOnce(new Response("limit", { status: 403 }))
 		.mockImplementation(async () => release());
-	const checker = new VersionChecker("2.2.11", { fetch: fetchRelease, now: () => 100000 });
+	const checker = new VersionChecker("2.2.12", { fetch: fetchRelease, now: () => 100000 });
 	await checker.check();
 	expect(checker.getSnapshot()).toMatchObject({ checking: false, result: null, error: "network" });
 	await checker.check();
@@ -91,7 +91,7 @@ test.each([
 	new Response(JSON.stringify({ tag_name: "latest", draft: false, prerelease: false })),
 	new Response("not json"),
 ])("unpublished or malformed metadata cannot produce a version notification", async (response) => {
-	const checker = new VersionChecker("2.2.11", { fetch: vi.fn<typeof fetch>().mockResolvedValue(response) });
+	const checker = new VersionChecker("2.2.12", { fetch: vi.fn<typeof fetch>().mockResolvedValue(response) });
 	await checker.check();
 	expect(checker.getSnapshot().result).toBeNull();
 	expect(checker.getSnapshot().error).not.toBeNull();
@@ -99,11 +99,11 @@ test.each([
 
 test.each([
 	"bad json",
-	JSON.stringify({ latestVersion: "2.2.12", checkedAt: 9999999 }),
+	JSON.stringify({ latestVersion: "2.2.13", checkedAt: 9999999 }),
 	JSON.stringify({ latestVersion: "invalid", checkedAt: 1000 }),
 ])("invalid browser cache falls back to a fresh lookup", async (cached) => {
 	const fetchRelease = vi.fn<typeof fetch>().mockImplementation(async () => release());
-	const checker = new VersionChecker("2.2.11", {
+	const checker = new VersionChecker("2.2.12", {
 		fetch: fetchRelease,
 		storage: {
 			getItem: () => cached,
