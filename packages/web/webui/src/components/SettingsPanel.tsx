@@ -4,7 +4,6 @@ import type { ProColumns } from "@ant-design/pro-components";
 import {
 	Alert,
 	Button,
-	Card,
 	Checkbox,
 	Col,
 	Drawer,
@@ -14,6 +13,7 @@ import {
 	Popconfirm,
 	Row,
 	Select,
+	Segmented,
 	Space,
 	Tabs,
 	Tag,
@@ -28,14 +28,17 @@ import type {
 	SentinelBuiltinChannel,
 	SentinelBuiltinModelDefaults,
 	SentinelBuiltinModelPreset,
+	SentinelGatekeeperConfig,
 	SentinelModelCapabilities,
 	SentinelModelCostRates,
 	SentinelModelEntryView,
 	SentinelModelLibraryView,
 	SentinelModelRoleName,
+	SentinelResolvedModelView,
 	SentinelTestResult,
 } from "../types.ts";
 import { ModelRolePicker } from "./ModelRolePicker.tsx";
+import { GatekeeperPanel } from "./GatekeeperPanel.tsx";
 import {
 	capabilityChips,
 	hostOf,
@@ -241,11 +244,7 @@ function capabilitiesOf(draft: Draft): { capabilities: SentinelModelCapabilities
 	};
 }
 
-/**
- * 设置 → 模型: roles first, because the operator thinks in jobs, and the model
- * library is maintenance. Assignment is a small picker; changing an endpoint's
- * connection or capabilities happens in a drawer so the cockpit stays visible.
- */
+/** 设置 → 模型. Library, role mapping, and AI approval have separate work areas. */
 export function SettingsPanel({
 	library,
 	onSaveEntry,
@@ -257,6 +256,10 @@ export function SettingsPanel({
 	onLookupDefaults,
 	onListChannels,
 	onListChannelModels,
+	gatekeeperConfig,
+	judgeResolved,
+	onSaveGatekeeperConfig,
+	onTestJudge,
 }: {
 	library: SentinelModelLibraryView | null;
 	onSaveEntry: (entry: {
@@ -275,9 +278,14 @@ export function SettingsPanel({
 	onLookupDefaults: (modelId: string, baseUrl: string) => Promise<SentinelBuiltinModelDefaults[] | null>;
 	onListChannels: (query: string) => Promise<SentinelBuiltinChannel[] | null>;
 	onListChannelModels: (provider: string) => Promise<SentinelBuiltinModelPreset[] | null>;
+	gatekeeperConfig: SentinelGatekeeperConfig;
+	judgeResolved: SentinelResolvedModelView | null;
+	onSaveGatekeeperConfig: (settings: SentinelGatekeeperConfig) => void;
+	onTestJudge: () => Promise<{ result: SentinelTestResult; raw?: string } | null>;
 }) {
 	const [draft, setDraft] = useState<Draft | null>(null);
-	const [drawerTab, setDrawerTab] = useState<"conn" | "cap">("conn");
+	const [activeSection, setActiveSection] = useState<"models" | "roles" | "gatekeeper">("models");
+	const [activeDraftTab, setActiveDraftTab] = useState<"connection" | "capabilities" | "pricing">("connection");
 	const [deleteWarn, setDeleteWarn] = useState(false);
 	const [pickerRole, setPickerRole] = useState<SentinelModelRoleName | null>(null);
 	const [search, setSearch] = useState("");
@@ -457,7 +465,7 @@ export function SettingsPanel({
 
 	const openDraft = (next: Draft): void => {
 		setDraft(next);
-		setDrawerTab("conn");
+		setActiveDraftTab("connection");
 		setDeleteWarn(false);
 		setDefaultsMatches(null);
 		setDefaultsNote("");
@@ -526,7 +534,7 @@ export function SettingsPanel({
 		setDraft((current) => (current ? applyDefaults(current, defaults) : current));
 		setDefaultsNote(t("已按内置库「{provider}」填充，可继续修改。", { provider: defaults.providerName }));
 		setCapsSource("catalog");
-		setDrawerTab("cap");
+		setActiveDraftTab("capabilities");
 	};
 
 	/** A typed name survives a selection; one that came from a model is replaced. */
@@ -703,14 +711,6 @@ export function SettingsPanel({
 				: capsSource === "manual"
 					? t("需手动填写")
 					: t("选择模型后自动填入");
-	const contextValue = draft?.contextWindow.trim() ?? "";
-	const contextTokens = Number(contextValue);
-	const capContext = contextValue && Number.isFinite(contextTokens) ? contextText(contextTokens) : "—";
-	const outputValue = draft?.maxTokens.trim() ?? "";
-	const outputTokens = Number(outputValue);
-	const capOutput = outputValue && Number.isFinite(outputTokens) ? contextText(outputTokens) : "—";
-	const hasPrice = Boolean(draft && (draft.costInput.trim() || draft.costOutput.trim()));
-	const capPrice = hasPrice ? `$${draft?.costInput.trim() || "0"} / $${draft?.costOutput.trim() || "0"}` : "—";
 	/** null means the probe produced no result at all; undefined means "not tested yet". */
 	const drawerTest = editingEntry ? results[editingEntry.id] : undefined;
 
@@ -814,37 +814,6 @@ export function SettingsPanel({
 		/>
 	);
 
-	const capabilityCard = () => (
-		<SettingsSection
-			className="modelhub-caps"
-			title={t("能力概览")}
-			description={capsSourceLabel}
-		>
-			<Space size={18} wrap>
-				<Text type="secondary">
-					{t("上下文")} <Text strong>{capContext}</Text>
-				</Text>
-				<Text type="secondary">
-					{t("输出")} <Text strong>{capOutput}</Text>
-				</Text>
-				<Text type="secondary">
-					{t("思考")} <Text strong>{draft?.reasoning ? "✓" : "—"}</Text>
-				</Text>
-				<Text type="secondary">
-					{t("图片")} <Text strong>{draft?.imageInput ? "✓" : "—"}</Text>
-				</Text>
-				<Text type="secondary">
-					{t("价格")} <Text strong>{capPrice}</Text>
-				</Text>
-			</Space>
-			<SettingsNote>
-				{customChannel
-					? t("自定义渠道的能力沿用当前填写，请自行核对。")
-					: t("端点与协议跟随渠道；能力可在「能力与价格」里改。")}
-			</SettingsNote>
-		</SettingsSection>
-	);
-
 	const columns: ProColumns<SentinelModelEntryView>[] = [
 		{
 			title: t("模型"),
@@ -866,8 +835,20 @@ export function SettingsPanel({
 			),
 		},
 		{
+			title: t("状态"),
+			key: "state",
+			width: 110,
+			render: (_, entry) => (
+				<ModelStatusTag
+					state={testState(testing === entry.id, results[entry.id])}
+					detail={testDetail(results[entry.id])}
+				/>
+			),
+		},
+		{
 			title: t("能力"),
 			key: "caps",
+			width: 230,
 			render: (_, entry) => (
 				<Space size={4} wrap>
 					{capabilityChips(entry).map((chip) => (
@@ -881,22 +862,11 @@ export function SettingsPanel({
 		{
 			title: t("角色"),
 			key: "roles",
-			width: 220,
+			width: 180,
 			render: (_, entry) => (
 				<Space size={4} wrap>
 					<UsageTags roles={entry.roles} />
 				</Space>
-			),
-		},
-		{
-			title: t("状态"),
-			key: "state",
-			width: 120,
-			render: (_, entry) => (
-				<ModelStatusTag
-					state={testState(testing === entry.id, results[entry.id])}
-					detail={testDetail(results[entry.id])}
-				/>
 			),
 		},
 		{
@@ -933,116 +903,29 @@ export function SettingsPanel({
 
 	return (
 		<>
-			<SettingsSection
-				className="settings-panel"
-				title={t("角色")}
-				description={t("{assigned} / {total} 已分配 · 点击「更换」选择模型", {
-					assigned,
-					total: ROLE_ORDER.length,
-				})}
-				extra={
-					<Button
-						icon={<ReloadOutlined />}
-						loading={testingAll}
-						disabled={testingAll || library.entries.length === 0}
-						onClick={() => void runAllTests()}
-					>
-						{t("全部测试")}
-					</Button>
-				}
-			>
-				<Row gutter={[12, 12]}>
-					{ROLE_ORDER.map((role) => {
-						const resolved = library.resolved[role];
-						const roleRef = role === "main" ? library.roles.main : library.roles[role];
-						const entry =
-							library.entries.find((candidate) => candidate.id === (resolved?.entryId ?? roleRef)) ?? null;
-						const state = testState(testing === entry?.id, entry ? results[entry.id] : undefined);
-						return (
-							<Col xs={24} md={12} xl={8} key={role}>
-								<Card
-									size="small"
-									className="modelhub-role"
-									title={
-										<Space size={6} wrap>
-											<Tag color={role === "main" ? "blue" : undefined} variant="filled">
-												{ROLE_LABELS[role]}
-											</Tag>
-											{entry ? (
-												<ModelStatusTag state={state} detail={testDetail(results[entry.id])} />
-											) : (
-												<Tag variant="filled">{t("未绑定")}</Tag>
-											)}
-										</Space>
-									}
-								>
-									<Text strong ellipsis title={resolved?.modelId ?? ""}>
-										{entry?.name ?? t("未选择模型")}
-									</Text>
-									<Text type="secondary" className="modelhub-role__sub" title={entry?.baseUrl ?? ROLE_HINTS[role]}>
-										{entry ? `${entry.modelId} · ${hostOf(entry.baseUrl)}` : ROLE_HINTS[role]}
-									</Text>
-									<Space size={4} wrap className="modelhub-role__chips">
-										{entry ? (
-											capabilityChips(entry).map((chip) => (
-												<Tag key={chip} variant="filled">
-													{chip}
-												</Tag>
-											))
-										) : (
-											<Tag variant="filled">{t("尚未解析到可用端点")}</Tag>
-										)}
-									</Space>
-									{role === "reviewer" ? (
-										<Space size={6} className="modelhub-role__auto">
-											<Tag
-												color={library.reviewerAuto ? "green" : "default"}
-												variant="filled"
-												role="button"
-												onClick={() => onSetReviewerAuto(!library.reviewerAuto)}
-												title={t("关闭后新记录不再排队，已排队的也会停止")}
-											>
-												{t("自动评审")}
-											</Tag>
-										</Space>
-									) : null}
-									<Space size={10} className="modelhub-role__foot">
-										<Button size="small" type="link" onClick={() => setPickerRole(role)}>
-											{t("更换")}
-										</Button>
-										{entry ? (
-											<Button
-												size="small"
-												type="link"
-												loading={testing === entry.id}
-												onClick={() => void runTest(entry.id)}
-											>
-												{t("测试")}
-											</Button>
-										) : null}
-										<Text type="secondary">
-											{resolved?.followedMain ? t("跟随主模型") : ROLE_SHORT[role]}
-										</Text>
-									</Space>
-								</Card>
-							</Col>
-						);
-					})}
-				</Row>
-			</SettingsSection>
-
-			<SettingsSection
+			<div className="modelhub-section-nav" role="tablist" aria-label={t("模型设置分区")}>
+				<Segmented
+					block
+					value={activeSection}
+					onChange={(value) => setActiveSection(value as typeof activeSection)}
+					options={[
+						{ value: "models", label: <span>{t("模型库")} <small>{library.entries.length}</small></span> },
+						{ value: "roles", label: t("角色分配") },
+						{ value: "gatekeeper", label: t("守门设置（AI 审批）") },
+					]}
+				/>
+			</div>
+			{activeSection === "models" ? <SettingsSection
 				className="settings-panel"
 				title={t("模型库")}
 				description={
 					<>
-						{t("{count} 个模型", { count: library.entries.length })} ·{" "}
-						{unused === 0 ? t("全部已使用") : t("{count} 个未使用", { count: unused })}
+						{t("{count} 个模型", { count: library.entries.length })} · {unused === 0 ? t("全部已使用") : t("{count} 个未使用", { count: unused })} · {t("{assigned} / {total} 个角色已分配", { assigned, total: ROLE_ORDER.length })}
 						{keyword ? ` · ${t("匹配 {count} 个", { count: shown.length })}` : ""}
 					</>
 				}
 				extra={
-					<>
+					<Space size={8} wrap>
 						<Input
 							allowClear
 							style={{ width: 220 }}
@@ -1051,10 +934,18 @@ export function SettingsPanel({
 							placeholder={t("搜索名称、模型 ID、端点")}
 							spellCheck={false}
 						/>
+						<Button
+							icon={<ReloadOutlined />}
+							loading={testingAll}
+							disabled={testingAll || library.entries.length === 0}
+							onClick={() => void runAllTests()}
+						>
+							{t("全部测试")}
+						</Button>
 						<Button type="primary" icon={<PlusOutlined />} onClick={() => openDraft({ ...EMPTY_DRAFT })}>
 							{t("添加模型")}
 						</Button>
-					</>
+					</Space>
 				}
 			>
 				<ProTable<SentinelModelEntryView>
@@ -1083,7 +974,90 @@ export function SettingsPanel({
 							),
 					}}
 				/>
-			</SettingsSection>
+			</SettingsSection> : null}
+
+			{activeSection === "roles" ? <SettingsSection
+				className="settings-panel modelhub-role-section"
+				title={t("角色分配")}
+				description={t("为每个工作角色选择模型，修改后立即生效")}
+			>
+				<div className="modelhub-role-list">
+					{ROLE_ORDER.map((role) => {
+						const resolved = library.resolved[role];
+						const roleRef = role === "main" ? library.roles.main : library.roles[role];
+						const entry =
+							library.entries.find((candidate) => candidate.id === (resolved?.entryId ?? roleRef)) ?? null;
+						const state = testState(testing === entry?.id, entry ? results[entry.id] : undefined);
+						return (
+							<div className="modelhub-role-row" key={role}>
+								<div className="modelhub-role-row__name">
+									<Tag color={role === "main" ? "blue" : undefined} variant="filled">
+										{ROLE_LABELS[role]}
+									</Tag>
+									<Text type="secondary">{ROLE_SHORT[role]}</Text>
+								</div>
+								<div className="modelhub-role-row__model">
+									<Text strong ellipsis title={entry?.name ?? t("未选择模型")}>
+										{entry?.name ?? t("未选择模型")}
+									</Text>
+									<Text type="secondary" ellipsis title={entry?.baseUrl ?? ROLE_HINTS[role]}>
+										{entry ? `${entry.modelId} · ${hostOf(entry.baseUrl)}` : ROLE_HINTS[role]}
+									</Text>
+								</div>
+								<div className="modelhub-role-row__caps">
+									{entry ? (
+										capabilityChips(entry).map((chip) => (
+											<Tag key={chip} variant="filled">
+												{chip}
+											</Tag>
+										))
+									) : (
+										<Tag variant="filled">{t("未绑定")}</Tag>
+									)}
+								</div>
+								<div className="modelhub-role-row__status">
+									<ModelStatusTag state={state} detail={testDetail(entry ? results[entry.id] : undefined)} />
+									{role === "reviewer" ? (
+										<Tag
+											color={library.reviewerAuto ? "green" : "default"}
+											variant="filled"
+											role="button"
+											onClick={() => onSetReviewerAuto(!library.reviewerAuto)}
+											title={t("关闭后新记录不再排队，已排队的也会停止")}
+										>
+											{t("自动评审")}
+										</Tag>
+									) : null}
+								</div>
+								<div className="modelhub-role-row__actions">
+									<Button size="small" type="link" onClick={() => setPickerRole(role)}>
+										{t("更换")}
+									</Button>
+									{entry ? (
+										<Button
+											size="small"
+											type="link"
+											loading={testing === entry.id}
+											onClick={() => void runTest(entry.id)}
+										>
+											{t("测试")}
+										</Button>
+									) : null}
+								</div>
+							</div>
+						);
+					})}
+				</div>
+			</SettingsSection> : null}
+
+			{activeSection === "gatekeeper" ? (
+				<GatekeeperPanel
+					gatekeeperConfig={gatekeeperConfig}
+					judgeResolved={judgeResolved}
+					onSave={onSaveGatekeeperConfig}
+					onTestJudge={onTestJudge}
+				/>
+			) : null}
 
 			{pickerRole ? (
 				<ModelRolePicker
@@ -1102,7 +1076,7 @@ export function SettingsPanel({
 			{draft ? (
 				<Drawer
 					open
-					width={620}
+					width="min(760px, calc(100vw - 24px))"
 					onClose={closeDraft}
 					destroyOnHidden
 					className="modelhub-drawer"
@@ -1195,12 +1169,12 @@ export function SettingsPanel({
 					{drawerWarn}
 
 					<Tabs
-						activeKey={drawerTab}
-						onChange={(key) => setDrawerTab(key as "conn" | "cap")}
+						activeKey={activeDraftTab}
+						onChange={(key) => setActiveDraftTab(key as typeof activeDraftTab)}
 						items={[
 							{
-								key: "conn",
-								label: t("连接"),
+								key: "connection",
+								label: t("连接配置"),
 								children: (
 									<Form layout="vertical" requiredMark={false} className="modelhub-form">
 										{capabilityError ? <Alert type="warning" showIcon title={capabilityError} /> : null}
@@ -1314,7 +1288,6 @@ export function SettingsPanel({
 														spellCheck={false}
 													/>
 												</Form.Item>
-												{capabilityCard()}
 											</>
 										) : channel ? (
 											<>
@@ -1392,7 +1365,6 @@ export function SettingsPanel({
 														spellCheck={false}
 													/>
 												</Form.Item>
-												{capabilityCard()}
 											</>
 										) : (
 											<Text type="secondary">
@@ -1408,10 +1380,11 @@ export function SettingsPanel({
 								),
 							},
 							{
-								key: "cap",
-								label: t("能力与价格"),
+								key: "capabilities",
+								label: t("模型能力"),
 								children: (
 									<Form layout="vertical" requiredMark={false} className="modelhub-form">
+										<Text type="secondary">{capsSourceLabel}</Text>
 										<Row gutter={12}>
 											<Col span={12}>
 												<Form.Item label={t("上下文窗口（tokens）")}>
@@ -1444,7 +1417,16 @@ export function SettingsPanel({
 												<Text type="secondary">{t("关闭后截图不会发给该模型")}</Text>
 											</div>
 										</Form.Item>
-										<Text strong>{t("价格（美元 / 百万 token）")}</Text>
+										{capabilityError ? <Alert type="warning" showIcon title={capabilityError} /> : null}
+									</Form>
+								),
+							},
+							{
+								key: "pricing",
+								label: t("价格与缓存"),
+								children: (
+									<Form layout="vertical" requiredMark={false} className="modelhub-form">
+										<Text type="secondary">{t("价格单位：美元 / 百万 token。留空表示未声明。")}</Text>
 										<Row gutter={12}>
 											<Col span={12}>
 												<Form.Item label={t("输入")}>

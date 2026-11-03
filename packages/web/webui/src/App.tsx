@@ -20,7 +20,6 @@ import { FilePanel, type FilePanelState, type FolderArchiveState, saveDownload }
 import { TerminalPanel } from "./components/TerminalPanel.tsx";
 import { publishTerminal } from "./terminal-bus.ts";
 import { GateAuditPage } from "./components/GateAuditPage.tsx";
-import { GatekeeperPanel } from "./components/GatekeeperPanel.tsx";
 import { GoalBar } from "./components/GoalBar.tsx";
 import { GoalStartDialog } from "./components/GoalStartDialog.tsx";
 import { AgentEntry, formatTime, MarkdownText, MessageView } from "./components/MessageView.tsx";
@@ -3339,11 +3338,9 @@ export function App() {
 										}, 10000);
 									});
 								}}
-							/>
-							<GatekeeperPanel
 								gatekeeperConfig={gatekeeperConfig}
 								judgeResolved={modelLibrary?.resolved.judge ?? null}
-								onSave={(settings) => send({ type: "save_gatekeeper_config", config: settings })}
+								onSaveGatekeeperConfig={(config) => send({ type: "save_gatekeeper_config", config })}
 								onTestJudge={async () => {
 									const result = await new Promise<{ result: SentinelTestResult; raw?: string } | null>(
 										(resolve) => {

@@ -3727,6 +3727,71 @@ body {
 
 /* ---------- Model settings ---------- */
 
+.modelhub-section-nav {
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	padding: 4px;
+	border: 1px solid var(--console-border);
+	border-radius: 10px;
+	background: var(--card);
+}
+
+.modelhub-section-nav .ant-segmented {
+	width: 100%;
+}
+
+.modelhub-section-nav .ant-segmented-group {
+	width: 100%;
+}
+
+.modelhub-section-nav .ant-segmented-item {
+	flex: 1;
+	text-align: center;
+}
+
+.modelhub-section-nav small {
+	margin-left: 5px;
+	color: var(--dim);
+	font-size: 11px;
+}
+
+.modelhub-explainer {
+	padding: 9px 12px;
+	border: 1px solid var(--console-border);
+	border-radius: 7px;
+	background: #f8fafc;
+}
+
+.modelhub-explainer summary {
+	color: var(--console-text);
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.modelhub-explainer .settings-note {
+	margin-top: 8px;
+}
+
+.modelhub-gatekeeper .settings-section__body {
+	gap: 14px;
+}
+
+.modelhub-gatekeeper > .settings-section__body > .settings-field:first-of-type {
+	padding: 10px 12px;
+	border: 1px solid var(--console-border);
+	border-radius: 8px;
+	background: #f8fafc;
+}
+
+.settings-panel .ant-pro-table {
+	margin: -4px -8px;
+}
+
+.settings-panel .ant-table-thead > tr > th {
+	white-space: nowrap;
+}
+
 .modelhub-role .ant-card-head {
 	min-height: 38px;
 }
@@ -3752,6 +3817,74 @@ body {
 
 .modelhub-role__foot {
 	margin-top: 4px;
+}
+
+.modelhub-role-list {
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--console-border);
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.modelhub-role-section .settings-section__body {
+	padding-top: 8px;
+}
+
+.modelhub-role-row {
+	display: grid;
+	grid-template-columns: minmax(150px, 1.1fr) minmax(220px, 1.8fr) minmax(150px, 1fr) minmax(150px, 1fr) auto;
+	align-items: center;
+	gap: 12px;
+	min-height: 58px;
+	padding: 9px 12px;
+	border-bottom: 1px solid var(--console-border);
+}
+
+.modelhub-role-row:last-child {
+	border-bottom: 0;
+}
+
+.modelhub-role-row:hover {
+	background: #f8fafc;
+}
+
+.modelhub-role-row__name,
+.modelhub-role-row__model,
+.modelhub-role-row__status,
+.modelhub-role-row__actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.modelhub-role-row__name {
+	flex-wrap: wrap;
+}
+
+.modelhub-role-row__model {
+	flex-direction: column;
+	align-items: flex-start;
+}
+
+.modelhub-role-row__model .ant-typography {
+	max-width: 100%;
+}
+
+.modelhub-role-row__caps {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	min-width: 0;
+}
+
+.modelhub-role-row__status {
+	flex-wrap: wrap;
+}
+
+.modelhub-role-row__actions {
+	justify-content: flex-end;
 }
 
 .modelhub-name {
@@ -3807,7 +3940,83 @@ body {
 }
 
 .modelhub-drawer .ant-drawer-body {
-	padding-top: 8px;
+	padding: 8px 24px 20px;
+}
+
+.modelhub-drawer .ant-drawer-header {
+	padding: 16px 24px;
+}
+
+.modelhub-drawer .ant-drawer-footer {
+	padding: 12px 24px;
+}
+
+.modelhub-drawer .ant-drawer-footer .ant-space {
+	width: 100%;
+	justify-content: flex-end;
+}
+
+.modelhub-drawer .ant-tabs-nav {
+	position: sticky;
+	top: -8px;
+	z-index: 1;
+	padding-top: 4px;
+	background: var(--card);
+}
+
+.modelhub-drawer .modelhub-form > .ant-typography {
+	display: block;
+	margin-bottom: 14px;
+}
+
+@media (max-width: 900px) {
+	.modelhub-role-row {
+		grid-template-columns: minmax(130px, 1fr) minmax(180px, 1.5fr) minmax(130px, 1fr) auto;
+	}
+
+	.modelhub-role-row__status {
+		grid-column: 3;
+	}
+}
+
+@media (max-width: 680px) {
+	.modelhub-section-nav .ant-segmented-item-label {
+		padding-inline: 5px;
+		font-size: 12px;
+	}
+
+	.modelhub-section-nav small {
+		display: none;
+	}
+
+	.modelhub-role-row {
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 6px 10px;
+	}
+
+	.modelhub-role-row__model,
+	.modelhub-role-row__caps,
+	.modelhub-role-row__status {
+		grid-column: 1 / -1;
+	}
+
+	.modelhub-role-row__actions {
+		grid-column: 2;
+		grid-row: 1;
+	}
+
+	.modelhub-drawer .ant-drawer-body {
+		padding: 8px 16px 16px;
+	}
+
+	.modelhub-drawer .ant-drawer-header,
+	.modelhub-drawer .ant-drawer-footer {
+		padding-inline: 16px;
+	}
+
+	.modelhub-drawer .ant-drawer-extra {
+		display: none;
+	}
 }
 
 /* ---------- Proxy dialogs ---------- */

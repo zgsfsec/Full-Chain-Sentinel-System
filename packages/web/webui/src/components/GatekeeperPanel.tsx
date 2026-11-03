@@ -89,9 +89,9 @@ export function GatekeeperPanel({
 
 	return (
 		<SettingsSection
-			className="settings-panel"
+			className="settings-panel modelhub-gatekeeper"
 			title={t("守门设置（AI 审批）")}
-			description={t("全局默认 · 判定端点取「守门模型」")}
+			description={t("全局默认模式、判定超时与工具范围")}
 			extra={
 				<Space size={8} wrap>
 					<Button
@@ -107,12 +107,15 @@ export function GatekeeperPanel({
 				</Space>
 			}
 		>
-			<SettingsNote>
-				{t("AI 审批模式下每条命令都先交给「守门模型」判定：返回")} <Text code>ALLOW</Text>{" "}
-				{t("才执行，返回")} <Text code>{t("BLOCK: 理由")}</Text>{" "}
-				{t("则拒绝并把理由回给 Agent。判定失败（超时、报错、返回无法解析）一律放行，并在审计页记为「请求失败」。")}{" "}
-				{t("端点在上面「角色 → 守门模型」里选。")}
-			</SettingsNote>
+			<details className="modelhub-explainer">
+				<summary>{t("AI 审批如何判定")}</summary>
+				<SettingsNote>
+					{t("AI 审批模式下每条命令都先交给「守门模型」判定：返回")} <Text code>ALLOW</Text>{" "}
+					{t("才执行，返回")} <Text code>{t("BLOCK: 理由")}</Text>{" "}
+					{t("则拒绝并把理由回给 Agent。判定失败（超时、报错、返回无法解析）一律放行，并在审计页记为「请求失败」。")}{" "}
+					{t("端点在「角色分配 → 守门模型」里选择。")}
+				</SettingsNote>
+			</details>
 
 			<div className="settings-field">
 				<span className="settings-field__label">{t("当前生效端点")}</span>
@@ -191,12 +194,15 @@ export function GatekeeperPanel({
 
 			<div className="settings-field">
 				<span className="settings-field__label">{t("MCP 工具判定")}</span>
-				<SettingsNote>
-					{t("bash 命令在任何模式下都由上面的模式决定；这一段管的是另外一类调用：MCP 与插件工具。")}{" "}
-					{t("打开后，AI 审批模式下每一次这类调用也会先交给守门模型，被拦时把理由回给 Agent。")}
-					<Text strong>{t("每次调用都要多花一次模型往返")}</Text>
-					{t("，高频只读工具（列目录、查资产）会明显变慢。")}
-				</SettingsNote>
+				<details className="modelhub-explainer">
+					<summary>{t("了解 MCP 判定的影响")}</summary>
+					<SettingsNote>
+						{t("bash 命令在任何模式下都由上面的模式决定；这一段管的是另外一类调用：MCP 与插件工具。")}{" "}
+						{t("打开后，AI 审批模式下每一次这类调用也会先交给守门模型，被拦时把理由回给 Agent。")}
+						<Text strong>{t("每次调用都要多花一次模型往返")}</Text>
+						{t("，高频只读工具（列目录、查资产）会明显变慢。")}
+					</SettingsNote>
+				</details>
 				<div className="gatekeeper__options">
 					<Checkbox
 						checked={mcpTools.enabled}
