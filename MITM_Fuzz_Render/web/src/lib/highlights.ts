@@ -149,7 +149,7 @@ export function segmentText(text: string, list: Highlight[]): Segment[] {
 /* 请求编辑器（textarea）的几何计算                                            */
 /*                                                                             */
 /* textarea 内部无法给选区上色，所以用"底层色块 + 上层透明 textarea"的方案。    */
-/* 编辑器是等宽字体 + wrap=off，因此字符宽度与行高固定，可以直接算矩形。        */
+/* 编辑器使用等宽字体；按可视列数处理软换行，计算高亮矩形。                 */
 /* -------------------------------------------------------------------------- */
 
 export interface EditorMetrics {
@@ -157,6 +157,7 @@ export interface EditorMetrics {
   lineHeight: number;
   paddingLeft: number;
   paddingTop: number;
+  columns: number;
 }
 
 export interface HighlightRect {
@@ -176,11 +177,15 @@ export function measureEditor(element: HTMLTextAreaElement): EditorMetrics | nul
   ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
   const charWidth = ctx.measureText("M").width;
   const lineHeight = Number.parseFloat(style.lineHeight);
+  const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
+  const paddingRight = Number.parseFloat(style.paddingRight) || 0;
+  const contentWidth = element.clientWidth - paddingLeft - paddingRight;
   return {
     charWidth: charWidth > 0 ? charWidth : 7,
     lineHeight: Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 24,
-    paddingLeft: Number.parseFloat(style.paddingLeft) || 0,
+    paddingLeft,
     paddingTop: Number.parseFloat(style.paddingTop) || 0,
+    columns: Math.max(1, Math.floor(contentWidth / (charWidth > 0 ? charWidth : 7))),
   };
 }
 
@@ -205,46 +210,58 @@ export function highlightRects(
   metrics: EditorMetrics,
 ): HighlightRect[] {
   const rects: HighlightRect[] = [];
+  const columns = Math.max(1, metrics.columns);
+  const lines = text.split("\n").map((line) => line.replace(/\r$/, ""));
   for (const item of normalize(list)) {
     const start = Math.max(0, Math.min(item.start, text.length));
     const end = Math.max(start, Math.min(item.end, text.length));
     const from = lineColumn(text, start);
     const to = lineColumn(text, end);
+    let visualLine = lines
+      .slice(0, from.line)
+      .reduce((total, line) => total + Math.max(1, Math.ceil(line.length / columns)), 0);
     for (let line = from.line; line <= to.line; line++) {
       const columnStart = line === from.line ? from.column : 0;
       const columnEnd = line === to.line ? to.column : Number.POSITIVE_INFINITY;
-      const segments = splitLineColumns(text, line, columnStart, columnEnd);
+      const content = lines[line] ?? "";
+      const segments = splitLineColumns(content, columnStart, columnEnd, columns);
       for (const seg of segments) {
         rects.push({
           x: metrics.paddingLeft + seg.from * metrics.charWidth,
-          y: metrics.paddingTop + line * metrics.lineHeight,
+          y: metrics.paddingTop + (visualLine + seg.row) * metrics.lineHeight,
           width: Math.max((seg.to - seg.from) * metrics.charWidth, 2),
           height: metrics.lineHeight,
           color: item.color,
         });
       }
+      visualLine += Math.max(1, Math.ceil(content.length / columns));
     }
   }
   return rects;
 }
 
-/** 取某一行在 [from,to) 列范围内的可见片段（自动裁剪到行尾）。 */
+/** 把逻辑行中的列范围切成软换行后的可视行片段。 */
 function splitLineColumns(
-  text: string,
-  line: number,
+  content: string,
   fromColumn: number,
   toColumn: number,
-): Array<{ from: number; to: number }> {
-  const lines = text.split("\n");
-  const content = lines[line] ?? "";
-  const width = content.replace(/\r$/, "").length;
+  columns: number,
+): Array<{ row: number; from: number; to: number }> {
+  const width = content.length;
   const from = Math.max(0, Math.min(fromColumn, width));
   const to = Math.max(from, Math.min(toColumn, width));
   if (to <= from) {
     // 空行或整行高亮时给一个可见的最小宽度
-    return width === 0 ? [{ from: 0, to: 1 }] : [];
+    return width === 0 ? [{ row: 0, from: 0, to: 1 }] : [];
   }
-  return [{ from, to }];
+  const segments: Array<{ row: number; from: number; to: number }> = [];
+  for (let start = from; start < to; ) {
+    const row = Math.floor(start / columns);
+    const rowEnd = Math.min(to, (row + 1) * columns);
+    segments.push({ row, from: start - row * columns, to: rowEnd - row * columns });
+    start = rowEnd;
+  }
+  return segments;
 }
 
 /** 从 DOM 选区算出它在某个容器纯文本里的偏移。 */

@@ -410,8 +410,13 @@ export default function RepeaterPage() {
     if (el === null) return;
     const update = () => setMetrics(measureEditor(el));
     update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
     window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
   }, [activeTab?.id]);
 
   const persistHighlights = useCallback(async (next: Highlights) => {
@@ -733,7 +738,7 @@ export default function RepeaterPage() {
               data-testid="repeater-request-editor"
               aria-label="原始请求编辑器"
               spellCheck={false}
-              wrap="off"
+              wrap="soft"
               disabled={activeTab === null}
               value={activeTab?.rawRequest ?? ""}
               onChange={(event) => updateActiveRaw(event.target.value)}
@@ -743,7 +748,7 @@ export default function RepeaterPage() {
               onScroll={(event) =>
                 setEditorScroll({ top: event.currentTarget.scrollTop, left: event.currentTarget.scrollLeft })
               }
-              className="relative min-h-0 flex-1 resize-none bg-transparent px-3 py-3 font-mono text-[12px] leading-6 text-ink outline-none placeholder:text-muted/40"
+              className="relative min-h-0 flex-1 resize-none overflow-x-hidden bg-transparent px-3 py-3 font-mono text-[12px] leading-6 break-all text-ink outline-none placeholder:text-muted/40"
               placeholder={"GET / HTTP/1.1\nHost: example.com\n\n"}
             />
           </div>
