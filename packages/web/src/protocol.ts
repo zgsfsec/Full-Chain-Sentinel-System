@@ -2321,7 +2321,16 @@ export type SentinelClientMessage =
 			scheduleKind: SentinelCodeScheduleKind;
 			intervalMinutes?: number;
 			cronExpression?: string | null;
-	  };
+	  }
+	/** Batch-apply auto-dispatch settings; an omitted field keeps its current value. */
+	| {
+			type: "set_code_monitors_dispatch";
+			ids: string[];
+			autoDispatch?: boolean;
+			autoDispatchCategories?: SentinelVulnCategory[] | null;
+	  }
+	/** Project-wide check and queue logs, for the troubleshooting tab. */
+	| { type: "list_code_monitor_logs"; projectId: string };
 
 /** Server-to-client messages. */
 export type SentinelServerMessage =
@@ -2425,6 +2434,12 @@ export type SentinelServerMessage =
 	| { type: "code_monitor_import"; state: SentinelCodeImportState | null }
 	| { type: "code_activity"; view: SentinelCodeActivityView }
 	| { type: "code_monitor_detail"; detail: SentinelCodeMonitorDetail }
+	/** Answer to `list_code_monitor_logs`: project-wide check and queue history. */
+	| {
+			type: "code_monitor_logs";
+			checks: SentinelCodeCheckLog[];
+			jobs: SentinelCodeCheckJob[];
+	  }
 	/** Answer to `code_monitor_branches`; `error` is set when the probe failed. */
 	| { type: "code_monitor_branches"; requestId: number; branches?: string[]; error?: string }
 	| {

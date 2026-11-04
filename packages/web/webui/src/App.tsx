@@ -79,6 +79,8 @@ import type {
 	SentinelAssetPlatform,
 	SentinelClientMessage,
 	SentinelCodeActivityFilter,
+	SentinelCodeCheckJob,
+	SentinelCodeCheckLog,
 	SentinelVulnCategory,
 	SentinelCodeActivityView,
 	SentinelCodeImportState,
@@ -487,6 +489,10 @@ export function App() {
 	const [codeImport, setCodeImport] = useState<SentinelCodeImportState | null>(null);
 	const [codeActivity, setCodeActivity] = useState<SentinelCodeActivityView | null>(null);
 	const [codeActivityLoading, setCodeActivityLoading] = useState(false);
+	const [codeMonitorLogs, setCodeMonitorLogs] = useState<{
+		checks: SentinelCodeCheckLog[];
+		jobs: SentinelCodeCheckJob[];
+	} | null>(null);
 	const codeMonitorDetailRef = useRef<SentinelCodeMonitorDetail | null>(null);
 	/** Android devices: the device page's gateway state. */
 	const [droidState, setDroidState] = useState<{
@@ -1437,6 +1443,9 @@ export function App() {
 					break;
 				case "code_monitor_detail":
 					setCodeMonitorDetail(message.detail);
+					break;
+				case "code_monitor_logs":
+					setCodeMonitorLogs({ checks: message.checks, jobs: message.jobs });
 					break;
 				case "code_monitor_branches":
 					setCodeBranchProbes((prev) =>
@@ -3287,6 +3296,18 @@ export function App() {
 								send({ type: "set_code_monitors_schedule", ids, ...schedule });
 							}}
 							onRefresh={() => send({ type: "list_code_monitors" })}
+						logs={codeMonitorLogs}
+						onLoadLogs={(projectId) => send({ type: "list_code_monitor_logs", projectId })}
+						onSetDispatch={(ids, patch) => {
+							send({
+								type: "set_code_monitors_dispatch",
+								ids,
+								...(patch.autoDispatch === undefined ? {} : { autoDispatch: patch.autoDispatch }),
+								...(patch.autoDispatchCategories === undefined
+									? {}
+									: { autoDispatchCategories: patch.autoDispatchCategories }),
+							});
+						}}
 							onOpen={(id) => send({ type: "get_code_monitor", id })}
 							onCloseDetail={() => setCodeMonitorDetail(null)}
 							importState={codeImport}

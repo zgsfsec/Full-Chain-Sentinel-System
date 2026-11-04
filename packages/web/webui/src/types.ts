@@ -1772,6 +1772,13 @@ export type SentinelClientMessage =
 			intervalMinutes?: number;
 			cronExpression?: string | null;
 	  }
+	| {
+			type: "set_code_monitors_dispatch";
+			ids: string[];
+			autoDispatch?: boolean;
+			autoDispatchCategories?: SentinelVulnCategory[] | null;
+	  }
+	| { type: "list_code_monitor_logs"; projectId: string }
 	| { type: "get_environment" }
 	| { type: "check_environment" }
 	| { type: "build_image" }
@@ -2074,6 +2081,7 @@ export type SentinelServerMessage =
 	| { type: "code_monitor_import"; state: SentinelCodeImportState | null }
 	| { type: "code_activity"; view: SentinelCodeActivityView }
 	| { type: "code_monitor_detail"; detail: SentinelCodeMonitorDetail }
+	| { type: "code_monitor_logs"; checks: SentinelCodeCheckLog[]; jobs: SentinelCodeCheckJob[] }
 	| { type: "code_monitor_branches"; requestId: number; branches?: string[]; error?: string }
 	| {
 			type: "code_monitor_result";

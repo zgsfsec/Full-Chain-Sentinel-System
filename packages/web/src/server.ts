@@ -3668,6 +3668,46 @@ export async function startSentinelServer(
 						);
 					return;
 				}
+				case "set_code_monitors_dispatch": {
+					if (!codeMonitors) {
+						sendError(socket, t("未配置配置目录，无法使用开源监测"));
+						return;
+					}
+					try {
+						const count = codeMonitors.setDispatch(message.ids, {
+							...(message.autoDispatch === undefined ? {} : { autoDispatch: message.autoDispatch }),
+							...(message.autoDispatchCategories === undefined
+								? {}
+								: { autoDispatchCategories: message.autoDispatchCategories }),
+						});
+						sendTo(socket, {
+							type: "code_monitor_result",
+							action: "批量复现设置",
+							ok: true,
+							detail: t("已更新 {count} 个监控", { count }),
+						});
+					} catch (error) {
+						sendTo(socket, {
+							type: "code_monitor_result",
+							action: "批量复现设置",
+							ok: false,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					return;
+				}
+				case "list_code_monitor_logs": {
+					if (!codeMonitors) {
+						sendError(socket, t("未配置配置目录，无法使用开源监测"));
+						return;
+					}
+					try {
+						sendTo(socket, { type: "code_monitor_logs", ...codeMonitors.projectLogs(message.projectId) });
+					} catch (error) {
+						sendError(socket, error instanceof Error ? error.message : String(error));
+					}
+					return;
+				}
 				case "list_engines":
 					broadcastEngines(socket);
 					return;

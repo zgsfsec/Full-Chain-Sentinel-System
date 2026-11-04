@@ -35,6 +35,7 @@ import {
 	Modal,
 	Pagination,
 	Progress,
+	Radio,
 	Segmented,
 	Select,
 	Space,
@@ -208,6 +209,13 @@ export interface CodeIntelPageProps {
 		page: number,
 		pageSize: number,
 		category?: SentinelVulnCategory | null,
+	) => void;
+	/** Project-wide check and queue logs for the log tab; null until first load. */
+	logs: { checks: SentinelCodeCheckLog[]; jobs: SentinelCodeCheckJob[] } | null;
+	onLoadLogs: (projectId: string) => void;
+	onSetDispatch: (
+		ids: string[],
+		patch: { autoDispatch?: boolean; autoDispatchCategories?: SentinelVulnCategory[] | null },
 	) => void;
 	onUpdate: (id: string, input: SentinelCodeMonitorInput) => void;
 	onDelete: (id: string) => void;
@@ -431,6 +439,9 @@ export function CodeIntelPage({
 	onImport,
 	onDismissImport,
 	onLoadActivity,
+	logs,
+	onLoadLogs,
+	onSetDispatch,
 	onUpdate,
 	onDelete,
 	onDeleteMany,
@@ -454,7 +465,7 @@ export function CodeIntelPage({
 	const [selectedIds, setSelectedIds] = useState<string[]>([]);
 	const [monitorPage, setMonitorPage] = useState(1);
 	const [monitorPageSize, setMonitorPageSize] = useState(20);
-	const [view, setView] = useState<"activity" | "monitors">("activity");
+	const [view, setView] = useState<"activity" | "monitors" | "logs">("activity");
 	const [activityFilter, setActivityFilter] = useState<SentinelCodeActivityFilter>("attention");
 	const [activityCategory, setActivityCategory] = useState<SentinelVulnCategory | null>(null);
 	const [activityPage, setActivityPage] = useState(1);
@@ -464,6 +475,11 @@ export function CodeIntelPage({
 	const [batchKind, setBatchKind] = useState<SentinelCodeScheduleKind>("interval");
 	const [batchInterval, setBatchInterval] = useState(60);
 	const [batchCron, setBatchCron] = useState("");
+	const [dispatchOpen, setDispatchOpen] = useState(false);
+	const [dispatchAll, setDispatchAll] = useState(false);
+	const [dispatchSwitch, setDispatchSwitch] = useState<"keep" | "on" | "off">("on");
+	const [dispatchCats, setDispatchCats] = useState<"keep" | "all" | "custom">("keep");
+	const [dispatchCategoryList, setDispatchCategoryList] = useState<SentinelVulnCategory[]>([]);
 	const probeSeq = useRef(0);
 	/** requestId → address, so queued probes land on the right row. */
 	const probeRequests = useRef(new Map<number, string>());
@@ -636,6 +652,31 @@ export function CodeIntelPage({
 		setBatchInterval(first?.intervalMinutes ?? 60);
 		setBatchCron(first?.cronExpression ?? "");
 		setBatchOpen(true);
+	};
+
+	const openBatchDispatch = () => {
+		// With nothing selected the only sensible target is every monitor.
+		setDispatchAll(selectedIds.length === 0);
+		setDispatchSwitch("on");
+		setDispatchCats("keep");
+		setDispatchCategoryList([]);
+		setDispatchOpen(true);
+	};
+
+	const applyBatchDispatch = () => {
+		const ids = dispatchAll ? rows.map((row) => row.id) : selectedIds;
+		if (ids.length === 0) return;
+		const patch: { autoDispatch?: boolean; autoDispatchCategories?: SentinelVulnCategory[] | null } = {};
+		if (dispatchSwitch !== "keep") patch.autoDispatch = dispatchSwitch === "on";
+		if (dispatchCats === "all") patch.autoDispatchCategories = null;
+		else if (dispatchCats === "custom" && dispatchCategoryList.length > 0)
+			patch.autoDispatchCategories = dispatchCategoryList;
+		if (patch.autoDispatch === undefined && patch.autoDispatchCategories === undefined) {
+			setDispatchOpen(false);
+			return;
+		}
+		onSetDispatch(ids, patch);
+		setDispatchOpen(false);
 	};
 
 	const batchCronError =
@@ -1291,34 +1332,6 @@ export function CodeIntelPage({
 
 	const renderActivity = () => (
 		<Space direction="vertical" size={12} style={{ width: "100%" }}>
-			{activityAnomalies.length > 0 ? (
-				<Alert
-					type="warning"
-					showIcon
-					message={t("有 {n} 个监控检查异常", { n: activityAnomalies.length })}
-					description={
-						<Space direction="vertical" size={4} style={{ width: "100%" }}>
-							{activityAnomalies.slice(0, 3).map((monitor) => (
-								<div key={monitor.id} className="code-intel-line">
-									<Text strong>{monitor.name}</Text>
-									<Text type="danger" className="code-intel-line__text">
-										{monitor.lastError}
-									</Text>
-									<Button size="small" onClick={() => onCheck(monitor.id)}>
-										{t("检查")}
-									</Button>
-								</div>
-							))}
-							{activityAnomalies.length > 3 ? (
-								<Text type="secondary">
-									{t("另有 {n} 个异常", { n: activityAnomalies.length - 3 })}
-								</Text>
-							) : null}
-						</Space>
-					}
-				/>
-			) : null}
-
 			<div className="code-intel-activity-bar">
 				<Segmented
 					size="small"
@@ -1445,6 +1458,73 @@ export function CodeIntelPage({
 		</Space>
 	);
 
+	const logRepoColumn = <T extends { monitorId: string }>(
+		width: number,
+	): TableColumnsType<T>[number] => ({
+		title: t("仓库"),
+		key: "repo",
+		width,
+		render: (_value, row) => (
+			<Text className="code-intel-line__text">
+				{monitorById.get(row.monitorId)?.name ?? row.monitorId}
+			</Text>
+		),
+	});
+
+	const renderLogs = () => (
+		<Space direction="vertical" size={16} style={{ width: "100%" }}>
+			{activityAnomalies.length > 0 ? (
+				<Alert
+					type="warning"
+					showIcon
+					message={t("有 {n} 个监控检查异常", { n: activityAnomalies.length })}
+					description={
+						<Space direction="vertical" size={4} style={{ width: "100%" }}>
+							{activityAnomalies.map((monitor) => (
+								<div key={monitor.id} className="code-intel-line">
+									<Text strong>{monitor.name}</Text>
+									<Text type="danger" className="code-intel-line__text">
+										{monitor.lastError}
+									</Text>
+									<Button
+										size="small"
+										loading={checkingIds.includes(monitor.id) || monitor.checkState === "running"}
+										disabled={monitor.checkState !== "idle"}
+										onClick={() => onCheck(monitor.id)}
+									>
+										{t("检查")}
+									</Button>
+								</div>
+							))}
+						</Space>
+					}
+				/>
+			) : null}
+
+			<Table
+				rowKey="id"
+				size="small"
+				columns={[logRepoColumn<SentinelCodeCheckLog>(180), ...checkColumns]}
+				dataSource={logs?.checks ?? []}
+				locale={{ emptyText: <Empty description={t("还没有检查记录")} /> }}
+				pagination={{ pageSize: 20, showSizeChanger: false }}
+				tableLayout="fixed"
+				scroll={{ x: 1100 }}
+			/>
+
+			<Table
+				rowKey="id"
+				size="small"
+				columns={[logRepoColumn<SentinelCodeCheckJob>(180), ...jobColumns]}
+				dataSource={logs?.jobs ?? []}
+				locale={{ emptyText: <Empty description={t("队列为空")} /> }}
+				pagination={{ pageSize: 20, showSizeChanger: false }}
+				tableLayout="fixed"
+				scroll={{ x: 1200 }}
+			/>
+		</Space>
+	);
+
 	return (
 		<Page
 			title={t("开源情报")}
@@ -1461,6 +1541,7 @@ export function CodeIntelPage({
 							if (!project) return;
 							if (view === "activity")
 								onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory);
+							else if (view === "logs") onLoadLogs(project.id);
 							else onRefresh();
 						}}
 					>
@@ -1474,13 +1555,17 @@ export function CodeIntelPage({
 		>
 			<Tabs
 				activeKey={view}
-				onChange={(key) => setView(key as "activity" | "monitors")}
+				onChange={(key) => {
+					setView(key as "activity" | "monitors" | "logs");
+					if (key === "logs" && project) onLoadLogs(project.id);
+				}}
 				items={[
 					{
 						key: "activity",
 						label: t("动态（{n}）", { n: activityCounts.attention + activityCounts.anomalies }),
 					},
 					{ key: "monitors", label: t("监控仓库") },
+					{ key: "logs", label: t("日志（{n}）", { n: activityAnomalies.length }) },
 				]}
 			/>
 			{importState ? (
@@ -1556,6 +1641,8 @@ export function CodeIntelPage({
 				/>
 			) : view === "activity" ? (
 				renderActivity()
+			) : view === "logs" ? (
+				renderLogs()
 			) : rows.length === 0 ? (
 				<Card>
 					<Empty description={t("还没有监控的仓库")}>
@@ -1606,17 +1693,25 @@ export function CodeIntelPage({
 								<Button size="small" type="text" onClick={() => setSelectedIds([])}>
 									{t("取消选择")}
 								</Button>
+								<Button size="small" icon={<ExperimentOutlined />} onClick={openBatchDispatch}>
+									{t("批量复现设置")}
+								</Button>
 							</Space>
 						) : (
-							<Button
-								size="small"
-								icon={<ReloadOutlined />}
-								disabled={checkingIds.length > 0}
-								loading={rows.some((row) => checkingIds.includes(row.id))}
-								onClick={() => onCheckMany(rows.map((row) => row.id))}
-							>
-								{t("检查全部")}
-							</Button>
+							<Space size={6} wrap>
+								<Button
+									size="small"
+									icon={<ReloadOutlined />}
+									disabled={checkingIds.length > 0}
+									loading={rows.some((row) => checkingIds.includes(row.id))}
+									onClick={() => onCheckMany(rows.map((row) => row.id))}
+								>
+									{t("检查全部")}
+								</Button>
+								<Button size="small" icon={<ExperimentOutlined />} onClick={openBatchDispatch}>
+									{t("批量复现设置")}
+								</Button>
+							</Space>
 						)}
 					</div>
 					<Table
@@ -1902,6 +1997,63 @@ export function CodeIntelPage({
 						}}
 					/>
 				</Space>
+			</Modal>
+
+			<Modal
+				open={dispatchOpen}
+				title={t("批量设置自动复现")}
+				onCancel={() => setDispatchOpen(false)}
+				onOk={applyBatchDispatch}
+				okText={t("应用")}
+				cancelText={t("取消")}
+				width={520}
+				destroyOnHidden
+			>
+				<Form layout="vertical">
+					<Form.Item label={t("应用范围")}>
+						<Radio.Group
+							value={dispatchAll ? "all" : "selected"}
+							onChange={(event) => setDispatchAll(event.target.value === "all")}
+						>
+							{selectedIds.length > 0 ? (
+								<Radio value="selected">{t("选中的监控（{n}）", { n: selectedIds.length })}</Radio>
+							) : null}
+							<Radio value="all">{t("全部监控（{n}）", { n: rows.length })}</Radio>
+						</Radio.Group>
+					</Form.Item>
+					<Form.Item label={t("自动下发开关")}>
+						<Radio.Group
+							value={dispatchSwitch}
+							onChange={(event) => setDispatchSwitch(event.target.value as "keep" | "on" | "off")}
+						>
+							<Radio value="on">{t("开启")}</Radio>
+							<Radio value="off">{t("关闭")}</Radio>
+							<Radio value="keep">{t("保持不变")}</Radio>
+						</Radio.Group>
+					</Form.Item>
+					<Form.Item label={t("复现类别")}>
+						<Space direction="vertical" size={8} style={{ width: "100%" }}>
+							<Radio.Group
+								value={dispatchCats}
+								onChange={(event) => setDispatchCats(event.target.value as "keep" | "all" | "custom")}
+							>
+								<Radio value="keep">{t("保持不变")}</Radio>
+								<Radio value="all">{t("全部类别")}</Radio>
+								<Radio value="custom">{t("仅所选类别")}</Radio>
+							</Radio.Group>
+							{dispatchCats === "custom" ? (
+								<Select
+									mode="multiple"
+									style={{ width: "100%" }}
+									value={dispatchCategoryList}
+									options={CATEGORY_OPTIONS}
+									placeholder={t("选择要自动复现的类别")}
+									onChange={(value) => setDispatchCategoryList(value as SentinelVulnCategory[])}
+								/>
+							) : null}
+						</Space>
+					</Form.Item>
+				</Form>
 			</Modal>
 
 			<Drawer

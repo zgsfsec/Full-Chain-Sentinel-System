@@ -805,6 +805,17 @@ export class CodeMonitorStore {
 		return rows.map(toJob);
 	}
 
+	/** All monitors' queue rows in one project, newest first, for the log tab. */
+	listJobsByProject(projectId: string, limit = 200): SentinelCodeCheckJob[] {
+		const rows = this.db
+			.prepare(
+				`SELECT * FROM code_monitor_jobs WHERE project_id = ?
+				 ORDER BY created_at DESC, id DESC LIMIT ?`,
+			)
+			.all(projectId, limit) as unknown as JobRow[];
+		return rows.map(toJob);
+	}
+
 	dueJobs(now: number, limit = 50): SentinelCodeCheckJob[] {
 		const rows = this.db
 			.prepare(
@@ -920,6 +931,17 @@ export class CodeMonitorStore {
 				 ORDER BY started_at DESC, id DESC LIMIT ?`,
 			)
 			.all(monitorId, limit) as unknown as CheckRow[];
+		return rows.map(toCheck);
+	}
+
+	/** All monitors' check rows in one project, newest first, for the log tab. */
+	listChecksByProject(projectId: string, limit = 200): SentinelCodeCheckLog[] {
+		const rows = this.db
+			.prepare(
+				`SELECT * FROM code_monitor_checks WHERE project_id = ?
+				 ORDER BY started_at DESC, id DESC LIMIT ?`,
+			)
+			.all(projectId, limit) as unknown as CheckRow[];
 		return rows.map(toCheck);
 	}
 

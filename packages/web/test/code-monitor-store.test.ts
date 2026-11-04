@@ -164,6 +164,7 @@ describe("CodeMonitorStore", () => {
 		store.finishJob(first.id, "failed", 5_000, "boom", null);
 		expect(store.activeJobs()).toHaveLength(0);
 		expect(store.listJobs(monitor.id)[0]).toMatchObject({ status: "failed", error: "boom" });
+		expect(store.listJobsByProject("p1")).toHaveLength(1);
 	});
 
 	it("records check runs and closes interrupted ones", () => {
@@ -188,6 +189,7 @@ describe("CodeMonitorStore", () => {
 			error: "服务重启，检查中断",
 			endedAt: 4_000,
 		});
+		expect(store.listChecksByProject("p1")).toHaveLength(2);
 	});
 
 	it("builds the project activity inbox from actionable commits", () => {

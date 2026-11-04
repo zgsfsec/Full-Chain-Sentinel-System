@@ -43,6 +43,7 @@ import type {
 	SentinelCodeActivityFilter,
 	SentinelCodeActivityView,
 	SentinelCodeCheckJob,
+	SentinelCodeCheckLog,
 	SentinelCodeCheckTrigger,
 	SentinelCodeCommit,
 	SentinelCodeImportState,
@@ -1247,6 +1248,34 @@ export class CodeMonitorManager {
 		}
 		this.hooks.onChange();
 		return updated;
+	}
+
+	/**
+	 * Batch-apply auto-dispatch settings; an omitted field keeps its current
+	 * value. Returns how many monitors were updated.
+	 */
+	setDispatch(
+		ids: string[],
+		patch: { autoDispatch?: boolean; autoDispatchCategories?: SentinelVulnCategory[] | null },
+	): number {
+		const unique = [...new Set(ids)].filter(Boolean);
+		if (unique.length === 0) throw new Error("请选择要修改的监控");
+		let updated = 0;
+		for (const id of unique) {
+			if (!this.store.getMonitor(id)) continue;
+			this.store.updateMonitor(id, patch);
+			updated += 1;
+		}
+		this.hooks.onChange();
+		return updated;
+	}
+
+	/** Project-wide check and queue history for the troubleshooting tab. */
+	projectLogs(projectId: string): { checks: SentinelCodeCheckLog[]; jobs: SentinelCodeCheckJob[] } {
+		return {
+			checks: this.store.listChecksByProject(projectId),
+			jobs: this.store.listJobsByProject(projectId),
+		};
 	}
 
 	/** Which monitor a commit belongs to, for a post-dispatch detail refresh. */
