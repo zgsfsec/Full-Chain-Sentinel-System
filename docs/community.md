@@ -15,9 +15,9 @@
 
 加群的，一定要在“打招呼内容”备注“全链哨兵”。
 
-<img src="../images/Pasted%20image%2020261017125335.png" width="294" alt="Pasted image 20261017125335.png" />
+<img src="../images/community-contact-1.png" width="294" alt="全链哨兵交流群入口一" />
 
-<img src="../images/Pasted%20image%2020261017125351.png" width="340" alt="Pasted image 20261017125351.png" />
+<img src="../images/community-contact-2.png" width="340" alt="全链哨兵交流群入口二" />
 
 <a id="section-2"></a>
 

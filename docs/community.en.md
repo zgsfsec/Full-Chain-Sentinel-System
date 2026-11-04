@@ -15,9 +15,9 @@
 
 When joining the group, include "全链哨兵" in your greeting.
 
-<img src="../images/Pasted%20image%2020261017125335.png" width="294" alt="Community group QR code" />
+<img src="../images/community-contact-1.png" width="294" alt="Community group QR code" />
 
-<img src="../images/Pasted%20image%2020261017125351.png" width="340" alt="Community group QR code" />
+<img src="../images/community-contact-2.png" width="340" alt="Community group QR code" />
 
 <a id="section-2"></a>
 

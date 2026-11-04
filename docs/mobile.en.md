@@ -15,11 +15,11 @@
 
 You need a rooted device (a virtual machine is also fine) with the companion app installed.
 
-![](../images/Pasted%20image%2020261017124555.png)
+![Android device setup](../images/screenshots/android.png)
 
 Rooting the phone is outside the scope of this document; the Coolapk community is a good place to learn more. The Android device is the primary reverse-connection platform, so you can deploy the main program on a public server.
 
-<img src="../images/Pasted%20image%2020261017124518.png" width="295" alt="Android device configuration" />
+<img src="../images/android-droidbridge.png" width="295" alt="Android device configuration" />
 
 <a id="section-2"></a>
 
@@ -35,9 +35,9 @@ Add the package source (use the lowercase repository URL):
 https://zgsfsec.github.io/sentinel-ios-repo/
 ```
 
-<img src="../images/IMG_0002.png" width="298" alt="Add the SentinelBridge source in Sileo" />
+<img src="../images/ios-sileo-source.png" width="298" alt="Add the SentinelBridge source in Sileo" />
 
-<img src="../images/IMG_0003.png" width="294" alt="Install SentinelBridge in Sileo" />
+<img src="../images/ios-sentinelbridge-install.png" width="294" alt="Install SentinelBridge in Sileo" />
 
 Then open the following address in Safari on the iPhone:
 
@@ -45,8 +45,10 @@ Then open the following address in Safari on the iPhone:
 http://127.0.0.1:9945/setup
 ```
 
+![iOS device setup](../images/screenshots/ios.png)
+
 Create a token on the console's iOS devices page, enter the console wss URL and the token, verify the certificate fingerprint, and save. The local control page stays available and can connect, stop, or reload the bridge at any time.
 
-<img src="../images/IMG_0004.png" width="304" alt="SentinelBridge local control page" />
+<img src="../images/ios-sentinelbridge-setup.png" width="304" alt="SentinelBridge local control page" />
 
 See also: [iOS implementation](../packages/web/ios/README.md) · [iOS QA](ios-agent-qa.md).

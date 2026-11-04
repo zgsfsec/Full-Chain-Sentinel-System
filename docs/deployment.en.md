@@ -55,13 +55,15 @@ Console release assets: `sentinel-web-linux-x64.tar.gz`, `sentinel-web-linux-arm
 
 The first run requires creating an account and password.
 
-![](../images/Pasted%20image%2020261017122835.png)
+![Create the administrator account](../images/screenshots/setup.png)
+
+![Authorized-use consent](../images/screenshots/consent.png)
+
 Make sure all testing is local or covered by proper legal penetration-testing authorization, and accept the risks of generative AI, or you cannot enter the platform.
 
-After entering the platform, deploy the container first:
-![](../images/Pasted%20image%2020261017123006.png)
-Wait for it to finish:
-![](../images/Pasted%20image%2020261017123905.png)
+After entering the platform, open Settings → Environment. Check Docker and the tool image; use “Build image” if the image is missing. The screenshot below shows the actual checks in the local capture environment.
+
+![Environment checks and image settings](../images/screenshots/environment.png)
 
 Full Chain Sentinel isolates work by project. Each new project has a Kali work container and a persistent gateway. Changing proxies does not recreate either container. See [Project gateway](../packages/web/docs/project-gateway.md) (Chinese) for listener and migration limits.
 
@@ -88,7 +90,7 @@ First-visit flow:
 
 1. Set the console password (scrypt hash, stored in the local configuration directory).
 2. Read and accept the authorized-use consent.
-3. Configure an endpoint (Base URL / API Key / model ID) under "Model settings" in the left sidebar.
+3. Add an endpoint (Base URL / API Key / model ID) under Settings → Models and assign the main model role.
 
 <a id="section-3"></a>
 
@@ -141,7 +143,5 @@ Notes:
 ## How to run persistently
 
 `screen -R sentinel` is recommended.
-
-![](../images/Pasted%20image%2020261017133338.png)
 
 Then press Ctrl+A, type `d`, and detach. Learn more about screen as needed.

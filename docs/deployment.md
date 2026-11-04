@@ -46,13 +46,15 @@ Windows（需要 Docker Desktop，PowerShell 中运行）：
 
 首次访问需设置账号密码。
 
-![](../images/Pasted%20image%2020261017122835.png)
+![创建管理员账号](../images/screenshots/setup.png)
+
+![授权与风险承诺](../images/screenshots/consent.png)
+
 请确保你的所有测试在本地，或者有正规合法的渗透测试授权，并且同意AI 生成式风险，否则无法进入平台。
 
-进入平台后请先部署好容器：
-![](../images/Pasted%20image%2020261017123006.png)
-等待即可
-![](../images/Pasted%20image%2020261017123905.png)
+进入平台后打开「设置 → 环境」，检查 Docker 与工具镜像；缺少镜像时点「构建镜像」。下图为本次本地截图环境的真实检查结果。
+
+![环境检查与镜像配置](../images/screenshots/environment.png)
 
 全链哨兵以项目为单位组织工作，新项目创建一个 Kali 工作容器和一个常驻网关容器。切换代理无需重建容器，入站监听与旧项目迁移限制见 [项目网关](../packages/web/docs/project-gateway.md)。
 
@@ -85,7 +87,7 @@ npm run start:web
 
 1. 设置控制台密码（scrypt 哈希，保存在本机配置目录）。
 2. 阅读并勾选授权使用承诺。
-3. 在左侧「模型设置」配置端点（Base URL / API Key / 模型 ID）。
+3. 在「设置 → 模型」添加端点（Base URL / API Key / 模型 ID），并分配主模型角色。
 
 <a id="section-4"></a>
 
@@ -138,7 +140,5 @@ npm run start:web
 ## 如何持久化运行？
 
 在终端运行 `screen -R sentinel`，然后在该会话中启动 `./sentinel-web`。
-
-![](../images/Pasted%20image%2020261017133338.png)
 
 按 `Ctrl+A`，再按 `D` 脱离会话，进程继续运行。再次执行 `screen -R sentinel` 可回到会话。

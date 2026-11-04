@@ -15,11 +15,11 @@
 
 你需要有一台 root 后的设备（虚拟机亦可），并且安装配套的 app 即可
 
-![](../images/Pasted%20image%2020261017124555.png)
+![安卓设备接入页](../images/screenshots/android.png)
 
 关于手机 root，这里就不再讲解，有兴趣可以去酷安社区逛逛,安卓机为反连主平台，所以你可以将主程序部署在公网服务器。
 
-<img src="../images/Pasted%20image%2020261017124518.png" width="295" alt="Pasted image 20261017124518.png" />
+<img src="../images/android-droidbridge.png" width="295" alt="DroidBridge 设备端配置" />
 
 <a id="section-2"></a>
 
@@ -35,9 +35,9 @@
 https://zgsfsec.github.io/sentinel-ios-repo/
 ```
 
-<img src="../images/IMG_0002.png" width="298" alt="Sileo 添加 SentinelBridge 源" />
+<img src="../images/ios-sileo-source.png" width="298" alt="Sileo 添加 SentinelBridge 源" />
 
-<img src="../images/IMG_0003.png" width="294" alt="Sileo 安装 SentinelBridge" />
+<img src="../images/ios-sentinelbridge-install.png" width="294" alt="Sileo 安装 SentinelBridge" />
 
 然后在 iPhone 的 Safari 打开：
 
@@ -45,8 +45,10 @@ https://zgsfsec.github.io/sentinel-ios-repo/
 http://127.0.0.1:9945/setup
 ```
 
+![iOS 设备接入页](../images/screenshots/ios.png)
+
 在控制台「iOS 设备」页创建 token，填入控制台 wss 地址、token，检测并核对证书指纹后保存。控制页会常驻，可随时连接、停止和重载。
 
-<img src="../images/IMG_0004.png" width="304" alt="SentinelBridge 本地控制页" />
+<img src="../images/ios-sentinelbridge-setup.png" width="304" alt="SentinelBridge 本地控制页" />
 
 补充文档：[iOS 构建与实现](../packages/web/ios/README.md) · [iOS 测试清单](ios-agent-qa.md)。
