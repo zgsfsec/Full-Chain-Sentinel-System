@@ -12,12 +12,13 @@ import {
 	DeleteOutlined,
 	EditOutlined,
 	ExperimentOutlined,
-	EyeOutlined,
 	MoreOutlined,
 	PlusOutlined,
 	QuestionCircleOutlined,
+	RadarChartOutlined,
 	ReloadOutlined,
 	ScheduleOutlined,
+	SearchOutlined,
 	StopOutlined,
 	WarningOutlined,
 } from "@ant-design/icons";
@@ -26,11 +27,13 @@ import {
 	Badge,
 	Button,
 	Card,
+	Collapse,
 	Descriptions,
 	Drawer,
 	Dropdown,
 	Empty,
 	Form,
+	Grid,
 	Input,
 	Modal,
 	Pagination,
@@ -39,6 +42,7 @@ import {
 	Segmented,
 	Select,
 	Space,
+	Steps,
 	Switch,
 	Table,
 	Tabs,
@@ -67,7 +71,7 @@ import type {
 	SentinelProjectInfo,
 	SentinelVulnCategory,
 } from "../types.ts";
-import { Page } from "../ui/Page.tsx";
+import { Page, Section } from "../ui/Page.tsx";
 import { CronGrid } from "./CronGrid.tsx";
 import "./code-intel.css";
 
@@ -90,14 +94,7 @@ const VERDICT_LABELS: Record<SentinelCodeCommit["verdict"], string> = {
 	pending: t("待判断"),
 	security: t("安全更新"),
 	not_security: t("非安全"),
-	failed: t("判断失败"),
-};
-
-const STATUS_LABELS: Record<SentinelCodeCommit["status"], string> = {
-	new: t("待处理"),
-	dispatching: t("复现中"),
-	dispatched: t("已下发工程"),
-	ignored: t("已忽略"),
+	failed: t("判定失败"),
 };
 
 const CHECK_TRIGGER_LABELS: Record<SentinelCodeCheckTrigger, string> = {
@@ -131,12 +128,6 @@ const CATEGORY_LABELS: Record<SentinelVulnCategory, string> = {
 	web: t("Web 漏洞"),
 	memory: t("内存漏洞"),
 	other: t("其他漏洞"),
-};
-
-const CATEGORY_COLORS: Record<SentinelVulnCategory, string> = {
-	web: "geekblue",
-	memory: "volcano",
-	other: "default",
 };
 
 const CATEGORY_OPTIONS = [
@@ -286,7 +277,11 @@ function TokenHelp({ host }: { host: string }) {
 	const tokenUrl = `https://${host}/settings/personal-access-tokens/new`;
 	return (
 		<div style={{ maxWidth: 380, fontSize: 12, lineHeight: 1.7 }}>
-			<div>{t("GitHub：Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token。")}</div>
+			<div>
+				{t(
+					"GitHub：Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token。",
+				)}
+			</div>
 			<div style={{ marginTop: 4 }}>
 				{t(
 					"Repository access 选择目标仓库；Repository permissions → Contents 设为 Read-only，Metadata 会自动只读；生成后复制 github_pat_ 开头的令牌。",
@@ -406,10 +401,7 @@ function ScheduleFields({
 						{t("按服务器本地时区执行；5 个字段：分 时 日 月 周，例如 0 9 * * 1-5。")}
 					</Text>
 					{showGrid ? (
-						<CronGrid
-							expression={cronExpression}
-							onChange={(value) => onChange({ cronExpression: value })}
-						/>
+						<CronGrid expression={cronExpression} onChange={(value) => onChange({ cronExpression: value })} />
 					) : null}
 				</>
 			)}
@@ -421,6 +413,15 @@ function ScheduleFields({
 function scheduleText(monitor: SentinelCodeMonitor): string {
 	if (monitor.scheduleKind === "cron") return monitor.cronExpression ?? "—";
 	return monitor.intervalMinutes > 0 ? t("每 {n} 分钟", { n: monitor.intervalMinutes }) : t("仅手动");
+}
+
+function nextCheckText(monitor: SentinelCodeMonitor): string {
+	if (!monitor.enabled) return t("已暂停");
+	if (monitor.scheduleKind === "interval" && monitor.intervalMinutes === 0) return t("仅手动");
+	if (!monitor.nextCheckAt) return t("待首次检查");
+	return monitor.nextCheckAt <= Date.now()
+		? t("即将检查")
+		: t("下次 {time}", { time: formatWhen(monitor.nextCheckAt) });
 }
 
 export function CodeIntelPage({
@@ -453,6 +454,7 @@ export function CodeIntelPage({
 	onRejudge,
 	onProbeBranches,
 }: CodeIntelPageProps) {
+	const screens = Grid.useBreakpoint();
 	const [editor, setEditor] = useState<EditorState | null>(null);
 	/** Create mode: the textarea, and per-address branch choices (default main). */
 	const [bulkUrls, setBulkUrls] = useState("");
@@ -465,6 +467,8 @@ export function CodeIntelPage({
 	const [selectedIds, setSelectedIds] = useState<string[]>([]);
 	const [monitorPage, setMonitorPage] = useState(1);
 	const [monitorPageSize, setMonitorPageSize] = useState(20);
+	const [monitorQuery, setMonitorQuery] = useState("");
+	const [monitorFilter, setMonitorFilter] = useState("all");
 	const [view, setView] = useState<"activity" | "monitors" | "logs">("activity");
 	const [activityFilter, setActivityFilter] = useState<SentinelCodeActivityFilter>("attention");
 	const [activityCategory, setActivityCategory] = useState<SentinelVulnCategory | null>(null);
@@ -494,9 +498,29 @@ export function CodeIntelPage({
 		[monitors, project],
 	);
 	const monitorById = useMemo(() => new Map(rows.map((monitor) => [monitor.id, monitor] as const)), [rows]);
+	const filteredMonitors = useMemo(() => {
+		const query = monitorQuery.trim().toLowerCase();
+		return rows.filter((monitor) => {
+			const matchesQuery = [monitor.name, monitor.host, shortRepo(monitor), ...monitor.branches]
+				.join(" ")
+				.toLowerCase()
+				.includes(query);
+			const matchesStatus =
+				monitorFilter === "all" ||
+				(monitorFilter === "enabled" && monitor.enabled) ||
+				(monitorFilter === "paused" && !monitor.enabled) ||
+				(monitorFilter === "error" && Boolean(monitor.lastError)) ||
+				monitor.checkState === monitorFilter;
+			return matchesQuery && matchesStatus;
+		});
+	}, [rows, monitorQuery, monitorFilter]);
+	const checkableMonitors = filteredMonitors.filter(
+		(monitor) => monitor.checkState === "idle" && !checkingIds.includes(monitor.id),
+	);
+	const checkableSelected = checkableMonitors.filter((monitor) => selectedIds.includes(monitor.id));
 	const activityRows = activity?.items ?? [];
 	const activityCounts =
-		activity?.counts ??
+		(rows.length > 0 ? activity?.counts : null) ??
 		({ attention: 0, review: 0, failed: 0, dispatchFailed: 0, pending: 0, anomalies: 0 } as const);
 	const activityAnomalies = rows.filter((monitor) => Boolean(monitor.lastError));
 	const editingMonitor = editor?.monitor ?? null;
@@ -511,17 +535,19 @@ export function CodeIntelPage({
 		setRepoPage((page) => Math.min(page, lastPage));
 	}, [createRepos.length]);
 	useEffect(() => {
-		const lastPage = Math.max(1, Math.ceil(rows.length / monitorPageSize));
+		const lastPage = Math.max(1, Math.ceil(filteredMonitors.length / monitorPageSize));
 		setMonitorPage((page) => Math.min(page, lastPage));
-	}, [monitorPageSize, rows.length]);
+	}, [monitorPageSize, filteredMonitors.length]);
 	useEffect(() => {
-		if (view !== "activity" || !project) return;
+		if (!project) return;
 		onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory);
-	}, [view, project?.id, activityFilter, activityCategory, activityPage, activityPageSize, monitors, onLoadActivity]);
+	}, [project?.id, activityFilter, activityCategory, activityPage, activityPageSize, monitors, onLoadActivity]);
 	useEffect(() => {
-		setActivitySelectedIds((prev) =>
-			prev.filter((id) => (activity?.items ?? []).some((item) => item.id === id)),
-		);
+		if (view === "logs" && project) onLoadLogs(project.id);
+		// The parent supplies an inline callback; load only when the scope or tab changes.
+	}, [view, project?.id]);
+	useEffect(() => {
+		setActivitySelectedIds((prev) => prev.filter((id) => (activity?.items ?? []).some((item) => item.id === id)));
 	}, [activity]);
 	useEffect(() => {
 		if (!activity) return;
@@ -533,12 +559,27 @@ export function CodeIntelPage({
 	// Selection follows the visible rows: a project switch or a deleted monitor
 	// must not leave an invisible id selected for the next batch check.
 	useEffect(() => {
-		setSelectedIds((prev) => prev.filter((id) => rows.some((row) => row.id === id)));
-	}, [rows]);
+		setSelectedIds((prev) => prev.filter((id) => filteredMonitors.some((row) => row.id === id)));
+	}, [filteredMonitors]);
 	useEffect(() => {
 		setSelectedIds([]);
 		setMonitorPage(1);
+		setMonitorQuery("");
+		setMonitorFilter("all");
+		setActivitySelectedIds([]);
+		setActivityPage(1);
+		setActivityFilter("attention");
+		setActivityCategory(null);
+		setEditor(null);
+		setBatchOpen(false);
+		setDispatchOpen(false);
 	}, [project?.id]);
+	useEffect(
+		() => () => {
+			if (probeTimer.current) clearTimeout(probeTimer.current);
+		},
+		[],
+	);
 
 	const startNextProbe = useCallback(() => {
 		if (probeTimer.current) {
@@ -567,6 +608,7 @@ export function CodeIntelPage({
 		setProbing(false);
 		setProbeProgress(null);
 	}, []);
+	useEffect(() => resetProbes(), [project?.id, resetProbes]);
 
 	useEffect(() => {
 		const mode = editor?.mode;
@@ -587,12 +629,7 @@ export function CodeIntelPage({
 				if (mode === "create") {
 					setRepoBranches((prev) => {
 						const current = prev[url] ?? ["main"];
-						if (
-							current.length === 1 &&
-							current[0] === "main" &&
-							branches.length > 0 &&
-							!branches.includes("main")
-						) {
+						if (current.length === 1 && current[0] === "main" && branches.length > 0 && !branches.includes("main")) {
 							return { ...prev, [url]: [branches[0] ?? "main"] };
 						}
 						return prev;
@@ -612,6 +649,13 @@ export function CodeIntelPage({
 	const closeEditor = () => {
 		resetProbes();
 		setEditor(null);
+	};
+	const showActivity = (filter: SentinelCodeActivityFilter) => {
+		setView("activity");
+		setActivityFilter(filter);
+		setActivityCategory(null);
+		setActivityPage(1);
+		setActivitySelectedIds([]);
 	};
 
 	const openCreate = () => {
@@ -665,7 +709,7 @@ export function CodeIntelPage({
 
 	const applyBatchDispatch = () => {
 		const ids = dispatchAll ? rows.map((row) => row.id) : selectedIds;
-		if (ids.length === 0) return;
+		if (ids.length === 0 || (dispatchCats === "custom" && dispatchCategoryList.length === 0)) return;
 		const patch: { autoDispatch?: boolean; autoDispatchCategories?: SentinelVulnCategory[] | null } = {};
 		if (dispatchSwitch !== "keep") patch.autoDispatch = dispatchSwitch === "on";
 		if (dispatchCats === "all") patch.autoDispatchCategories = null;
@@ -723,7 +767,8 @@ export function CodeIntelPage({
 			scheduleKind: editor.scheduleKind,
 			cronExpression: editor.scheduleKind === "cron" ? editor.cronExpression.trim() : null,
 			autoDispatch: editor.autoDispatch,
-			autoDispatchCategories: editor.autoDispatch && editor.autoDispatchCategories.length > 0 ? editor.autoDispatchCategories : null,
+			autoDispatchCategories:
+				editor.autoDispatch && editor.autoDispatchCategories.length > 0 ? editor.autoDispatchCategories : null,
 			enabled: editor.enabled,
 		};
 		if (editor.mode === "create") {
@@ -752,35 +797,77 @@ export function CodeIntelPage({
 				? createRepos.length > 0 && createRepos.every((url) => branchesFor(url).length > 0)
 				: Boolean(editor.url.trim()) && editor.branches.length > 0
 		: false;
+	const dispatchTargetCount = dispatchAll ? rows.length : selectedIds.length;
+	const canApplyDispatch =
+		dispatchTargetCount > 0 &&
+		(dispatchSwitch !== "keep" || dispatchCats !== "keep") &&
+		(dispatchCats !== "custom" || dispatchCategoryList.length > 0);
+
+	const renderMonitorActions = (monitor: SentinelCodeMonitor) => (
+		<div className="code-intel-actions">
+			<Button size="small" type="link" onClick={() => onOpen(monitor.id)}>
+				{t("详情")}
+			</Button>
+			<Button
+				size="small"
+				type="text"
+				icon={<ReloadOutlined />}
+				loading={checkingIds.includes(monitor.id) || monitor.checkState === "running"}
+				disabled={monitor.checkState !== "idle" || checkingIds.includes(monitor.id)}
+				onClick={() => onCheck(monitor.id)}
+			>
+				{monitor.checkState === "queued" ? t("排队中") : t("检查")}
+			</Button>
+			<Dropdown
+				trigger={["click"]}
+				placement="bottomRight"
+				menu={{
+					items: [
+						{ key: "edit", icon: <EditOutlined />, label: t("编辑"), onClick: () => openEdit(monitor) },
+						{ type: "divider" },
+						{
+							key: "delete",
+							icon: <DeleteOutlined />,
+							danger: true,
+							label: t("删除"),
+							onClick: () =>
+								Modal.confirm({
+									title: t("删除这个监控？"),
+									content: t("已记录的提交与发现会一起删除，工程不受影响。"),
+									okButtonProps: { danger: true },
+									okText: t("删除"),
+									cancelText: t("取消"),
+									onOk: () => onDelete(monitor.id),
+								}),
+						},
+					],
+				}}
+			>
+				<Button
+					size="small"
+					type="text"
+					icon={<MoreOutlined />}
+					aria-label={`${monitor.name} · ${t("更多操作")}`}
+					title={t("更多操作")}
+					aria-haspopup="menu"
+				/>
+			</Dropdown>
+		</div>
+	);
 
 	const columns: TableColumnsType<SentinelCodeMonitor> = [
 		{
 			title: t("仓库"),
 			key: "repo",
-			width: 320,
+			width: 250,
 			ellipsis: true,
 			render: (_value, monitor) => (
-				<Tooltip
-					title={
-						<div>
-							<div>{monitor.name}</div>
-							<div>
-								{monitor.host}/{monitor.owner}/{monitor.repo}
-							</div>
-						</div>
-					}
-				>
+				<Tooltip title={`${monitor.name} · ${monitor.host}/${shortRepo(monitor)}`}>
 					<div className="code-intel-line">
 						<Text strong className="code-intel-line__text">
 							{monitor.name}
 						</Text>
-						{!monitor.enabled ? <Tag>{t("已暂停")}</Tag> : null}
 						{monitor.autoDispatch ? <Tag color="purple">{t("自动复现")}</Tag> : null}
-						{monitor.checkState === "running" ? (
-							<Tag color="processing">{t("检查中")}</Tag>
-						) : monitor.checkState === "queued" ? (
-							<Tag color="gold">{t("排队中")}</Tag>
-						) : null}
 					</div>
 				</Tooltip>
 			),
@@ -788,73 +875,86 @@ export function CodeIntelPage({
 		{
 			title: t("监控分支"),
 			key: "branches",
-			width: 170,
+			width: 150,
+			ellipsis: true,
 			render: (_value, monitor) => (
 				<Tooltip title={monitor.branches.join("、")}>
-					<span className="code-intel-line">
-						<span className="code-intel-line__tags">
-							{monitor.branches.slice(0, 2).map((branch) => (
-								<Tag key={branch}>{branch}</Tag>
-							))}
-							{monitor.branches.length > 2 ? <Tag>+{monitor.branches.length - 2}</Tag> : null}
-						</span>
-					</span>
+					<span className="code-intel-line__text code-intel-repo">{monitor.branches.join(", ")}</span>
 				</Tooltip>
+			),
+		},
+		{
+			title: t("状态"),
+			key: "state",
+			width: 100,
+			render: (_value, monitor) => (
+				<Tag
+					color={
+						monitor.checkState === "running"
+							? "processing"
+							: monitor.checkState === "queued"
+								? "gold"
+								: monitor.lastError
+									? "red"
+									: monitor.enabled
+										? "green"
+										: "default"
+					}
+				>
+					{monitor.checkState === "running"
+						? t("检查中")
+						: monitor.checkState === "queued"
+							? t("排队中")
+							: monitor.lastError
+								? t("失败")
+								: monitor.enabled
+									? t("已启用")
+									: t("已暂停")}
+				</Tag>
 			),
 		},
 		{
 			title: t("策略"),
 			key: "schedule",
-			width: 170,
+			width: 130,
 			ellipsis: true,
 			render: (_value, monitor) => (
 				<Tooltip title={scheduleText(monitor)}>
-					<span className="code-intel-line">
-						<Text type="secondary" className="code-intel-line__text">
-							{scheduleText(monitor)}
-						</Text>
-					</span>
+					<Text type="secondary">{scheduleText(monitor)}</Text>
 				</Tooltip>
 			),
 		},
 		{
 			title: t("最近检查"),
-			dataIndex: "lastCheckAt",
 			key: "lastCheckAt",
-			width: 200,
-			render: (_value, monitor) => {
-				const next = monitor.nextCheckAt
-					? monitor.nextCheckAt <= Date.now()
-						? t("即将检查")
-						: t("下次 {time}", { time: formatWhen(monitor.nextCheckAt) })
-					: null;
-				const detail = [scheduleText(monitor), next, monitor.lastError ?? ""].filter(Boolean).join(" · ");
-				return (
-					<Tooltip title={detail}>
-						<span className="code-intel-line">
-							<Text className="code-intel-line__text">{formatWhen(monitor.lastCheckAt)}</Text>
-							{next ? (
-								<Text type="secondary" className="code-intel-line__text">
-									{next}
-								</Text>
-							) : null}
-							{monitor.lastError ? <WarningOutlined className="code-intel-probe-error" /> : null}
-						</span>
-					</Tooltip>
-				);
-			},
+			width: 180,
+			render: (_value, monitor) => (
+				<Tooltip title={monitor.lastError ?? undefined}>
+					<span className="code-intel-line">
+						<Text>{monitor.lastCheckAt ? formatWhen(monitor.lastCheckAt) : t("待首次检查")}</Text>
+						{monitor.lastError ? <WarningOutlined className="code-intel-probe-error" /> : null}
+					</span>
+				</Tooltip>
+			),
+		},
+		{
+			title: t("下次检查"),
+			key: "nextCheckAt",
+			width: 180,
+			ellipsis: true,
+			render: (_value, monitor) => (
+				<Tooltip title={nextCheckText(monitor)}>
+					<Text type="secondary">{nextCheckText(monitor)}</Text>
+				</Tooltip>
+			),
 		},
 		{
 			title: t("发现"),
 			key: "findings",
-			width: 120,
+			width: 100,
 			render: (_value, monitor) => (
 				<span className="code-intel-line">
-					<Badge
-						count={monitor.pendingCount}
-						title={t("待复现")}
-						style={{ backgroundColor: monitor.pendingCount > 0 ? "#fa8c16" : undefined }}
-					/>
+					<Badge count={monitor.pendingCount} title={t("待复现")} color="orange" />
 					<Text type="secondary">{t("共 {n} 个", { n: monitor.findingCount })}</Text>
 				</span>
 			),
@@ -862,48 +962,9 @@ export function CodeIntelPage({
 		{
 			title: t("操作"),
 			key: "actions",
-			width: 190,
-			render: (_value, monitor) => (
-				<Space size={4} wrap={false}>
-					<Button size="small" icon={<EyeOutlined />} onClick={() => onOpen(monitor.id)}>
-						{t("详情")}
-					</Button>
-					<Button
-						size="small"
-						icon={<ReloadOutlined />}
-						loading={checkingIds.includes(monitor.id) || monitor.checkState === "running"}
-						disabled={monitor.checkState !== "idle"}
-						onClick={() => onCheck(monitor.id)}
-					>
-						{t("检查")}
-					</Button>
-					<Dropdown
-						menu={{
-							items: [
-								{ key: "edit", icon: <EditOutlined />, label: t("编辑") },
-								{ key: "delete", icon: <DeleteOutlined />, danger: true, label: t("删除") },
-							],
-							onClick: ({ key }) => {
-								if (key === "edit") {
-									openEdit(monitor);
-								} else if (key === "delete") {
-									Modal.confirm({
-										title: t("删除这个监控？"),
-										content: t("已记录的提交与发现会一起删除，工程不受影响。"),
-										okButtonProps: { danger: true },
-										okText: t("删除"),
-										cancelText: t("取消"),
-										onOk: () => onDelete(monitor.id),
-									});
-								}
-							},
-						}}
-						trigger={["click"]}
-					>
-						<Button size="small" icon={<MoreOutlined />} />
-					</Dropdown>
-				</Space>
-			),
+			width: 174,
+			fixed: screens.lg ? "right" : undefined,
+			render: (_value, monitor) => renderMonitorActions(monitor),
 		},
 	];
 
@@ -999,13 +1060,7 @@ export function CodeIntelPage({
 			render: (status: SentinelCodeJobStatus) => (
 				<Tag
 					color={
-						status === "queued"
-							? "gold"
-							: status === "running"
-								? "processing"
-								: status === "done"
-									? "green"
-									: "red"
+						status === "queued" ? "gold" : status === "running" ? "processing" : status === "done" ? "green" : "red"
 					}
 				>
 					{JOB_STATUS_LABELS[status]}
@@ -1064,165 +1119,113 @@ export function CodeIntelPage({
 		commit.status !== "ignored" &&
 		!commit.duplicateOf;
 	const canIgnore = (commit: SentinelCodeCommit): boolean =>
-		commit.status !== "dispatching" && commit.status !== "dispatched" && !commit.engineId;
+		commit.status !== "dispatching" &&
+		commit.status !== "dispatched" &&
+		commit.status !== "ignored" &&
+		!commit.engineId;
+	const canRejudge = (commit: SentinelCodeCommit): boolean =>
+		commit.status !== "dispatching" && commit.verdict !== "pending" && busyId !== commit.id;
+
+	const renderCommitActions = (commit: SentinelCodeCommit, showDetail: boolean) => {
+		const rejudge = commit.verdict === "failed";
+		return (
+			<div className="code-intel-actions">
+				{showDetail ? (
+					<Button size="small" type="link" onClick={() => onOpen(commit.monitorId)}>
+						{t("详情")}
+					</Button>
+				) : null}
+				<Tooltip title={rejudge ? t("重判") : t("准备源码并新建工程复现")}>
+					<Button
+						size="small"
+						type="link"
+						icon={rejudge ? <ReloadOutlined /> : <ExperimentOutlined />}
+						loading={busyId === commit.id}
+						disabled={rejudge ? !canRejudge(commit) : !canDispatch(commit)}
+						onClick={() => (rejudge ? onRejudge(commit.id) : onDispatch(commit.id))}
+					>
+						{rejudge ? t("重判") : t("复现")}
+					</Button>
+				</Tooltip>
+				<Dropdown
+					trigger={["click"]}
+					placement="bottomRight"
+					menu={{
+						items: [
+							{
+								key: "rejudge",
+								label: t("重判"),
+								icon: <ReloadOutlined />,
+								disabled: !canRejudge(commit),
+								onClick: () => onRejudge(commit.id),
+							},
+							{ type: "divider" },
+							{
+								key: "ignore",
+								label: t("忽略"),
+								icon: <StopOutlined />,
+								disabled: !canIgnore(commit),
+								onClick: () => onIgnore(commit.id),
+							},
+						],
+					}}
+				>
+					<Button
+						size="small"
+						type="text"
+						icon={<MoreOutlined />}
+						aria-label={`${commit.shortSha} · ${t("更多操作")}`}
+						title={t("更多操作")}
+						aria-haspopup="menu"
+					/>
+				</Dropdown>
+			</div>
+		);
+	};
 
 	const activityColumns: TableColumnsType<SentinelCodeCommit> = [
 		{
-			title: t("时间"),
-			dataIndex: "authoredAt",
-			key: "authoredAt",
-			width: 170,
-			render: (value: number) => <Text className="code-intel-line__text">{formatWhen(value)}</Text>,
-		},
-		{
 			title: t("仓库"),
 			key: "repo",
-			width: 200,
+			width: 180,
+			ellipsis: true,
 			render: (_value, commit) => (
-				<Text className="code-intel-line__text">
+				<Button
+					type="link"
+					className="code-intel-repo-link"
+					title={monitorById.get(commit.monitorId)?.name ?? commit.monitorId}
+					onClick={() => onOpen(commit.monitorId)}
+				>
 					{monitorById.get(commit.monitorId)?.name ?? commit.monitorId}
-				</Text>
+				</Button>
 			),
 		},
 		{
 			title: t("分支"),
-			dataIndex: "branch",
 			key: "branch",
-			width: 100,
-			render: (branch: string) => <Tag>{branch}</Tag>,
+			width: 110,
+			ellipsis: true,
+			render: (_value, commit) => (
+				<Tooltip title={commit.branch}>
+					<Text className="code-intel-repo">{commit.branch}</Text>
+				</Tooltip>
+			),
 		},
 		{
 			title: t("提交"),
 			key: "commit",
-			width: 360,
-			render: (_value, commit) => (
-				<div className="code-intel-line">
-					<Anchor href={commit.url} target="_blank" rel="noreferrer">
-						{commit.shortSha}
-					</Anchor>
-					<Text className="code-intel-line__text">{commit.title}</Text>
-				</div>
-			),
-		},
-		{
-			title: t("判定"),
-			key: "verdict",
-			width: 140,
-			render: (_value, commit) => (
-				<span className="code-intel-line">
-					<Tag
-						color={
-							commit.verdict === "security" ? "red" : commit.verdict === "failed" ? "orange" : "default"
-						}
-					>
-						{VERDICT_LABELS[commit.verdict]}
-					</Tag>
-					{commit.vulnCategory ? (
-						<Tag color={CATEGORY_COLORS[commit.vulnCategory]}>{CATEGORY_LABELS[commit.vulnCategory]}</Tag>
-					) : null}
-					{commit.cve ? <Tag color="magenta">{commit.cve}</Tag> : null}
-					{commit.severity ? (
-						<Tag color={SEVERITY_COLORS[commit.severity]}>{commit.severity}</Tag>
-					) : null}
-				</span>
-			),
-		},
-		{
-			title: t("状态"),
-			key: "status",
-			width: 130,
-			render: (_value, commit) => {
-				if (commit.error) {
-					return (
-						<Tooltip title={commit.error}>
-							<Tag color="red">{t("下发失败")}</Tag>
-						</Tooltip>
-					);
-				}
-				if (commit.status === "dispatching") return <Tag color="processing">{t("复现中")}</Tag>;
-				if (commit.verdict === "pending") return <Tag color="processing">{t("判定中")}</Tag>;
-				if (commit.status === "ignored") return <Tag>{t("已忽略")}</Tag>;
-				if (commit.engineId) return <Tag color="blue">{t("已复现")}</Tag>;
-				if (commit.verdict === "failed") return <Tag color="orange">{t("判定失败")}</Tag>;
-				if (commit.verdict === "security") return <Tag color="gold">{t("待复现")}</Tag>;
-				return <Tag>{t("非安全")}</Tag>;
-			},
-		},
-		{
-			title: t("操作"),
-			key: "actions",
-			width: 280,
-			render: (_value, commit) => (
-				<Space size={4} wrap={false}>
-					<Tooltip title={t("准备源码并新建工程复现")}>
-						<Button
-							size="small"
-							type="primary"
-							icon={<ExperimentOutlined />}
-							disabled={!canDispatch(commit)}
-							loading={busyId === commit.id}
-							onClick={() => onDispatch(commit.id)}
-						>
-							{t("复现")}
-						</Button>
-					</Tooltip>
-					<Button
-						size="small"
-						icon={<ReloadOutlined />}
-						loading={busyId === commit.id}
-						onClick={() => onRejudge(commit.id)}
-					>
-						{t("重判")}
-					</Button>
-					<Button
-						size="small"
-						icon={<StopOutlined />}
-						disabled={!canIgnore(commit)}
-						onClick={() => onIgnore(commit.id)}
-					/>
-					<Button size="small" type="link" onClick={() => onOpen(commit.monitorId)}>
-						{t("详情")}
-					</Button>
-				</Space>
-			),
-		},
-	];
-
-	const commitColumns: TableColumnsType<SentinelCodeCommit> = [
-		{
-			title: t("提交"),
-			key: "commit",
-			width: 520,
+			width: 300,
+			ellipsis: true,
 			render: (_value, commit) => (
 				<Tooltip
 					placement="topLeft"
-					title={
-						<div style={{ maxWidth: 460 }}>
-							<div>{commit.message.split("\n")[0] || commit.shortSha}</div>
-							<div style={{ marginTop: 4 }}>
-								{commit.author} · {formatWhen(commit.authoredAt)} · +{commit.additions} -
-								{commit.deletions}
-							</div>
-						</div>
-					}
+					title={`${commit.message || commit.title} · ${commit.author} · +${commit.additions} -${commit.deletions}`}
 				>
 					<div className="code-intel-line">
-						<Anchor href={commit.url} target="_blank" rel="noreferrer">
+						<Anchor className="code-intel-repo" href={commit.url} target="_blank" rel="noreferrer">
 							{commit.shortSha}
 						</Anchor>
-						<span className="code-intel-line__tags">
-							<Tag>{commit.branch}</Tag>
-							{commit.vulnCategory ? (
-								<Tag color={CATEGORY_COLORS[commit.vulnCategory]}>
-									{CATEGORY_LABELS[commit.vulnCategory]}
-								</Tag>
-							) : null}
-							{commit.cve ? <Tag color="magenta">{commit.cve}</Tag> : null}
-							{commit.severity ? (
-								<Tag color={SEVERITY_COLORS[commit.severity]}>{commit.severity}</Tag>
-							) : null}
-						</span>
-						<Text className="code-intel-line__text code-intel-commit-title">{commit.title}</Text>
+						<Text className="code-intel-line__text">{commit.title}</Text>
 					</div>
 				</Tooltip>
 			),
@@ -1230,105 +1233,109 @@ export function CodeIntelPage({
 		{
 			title: t("判定"),
 			key: "verdict",
-			width: 160,
+			width: 180,
 			render: (_value, commit) => (
 				<span className="code-intel-line">
-					<Tag
-						color={
-							commit.verdict === "security" ? "red" : commit.verdict === "failed" ? "orange" : "default"
-						}
-					>
+					<Tag color={commit.verdict === "security" ? "red" : commit.verdict === "failed" ? "orange" : "default"}>
 						{VERDICT_LABELS[commit.verdict]}
 					</Tag>
-					{commit.confidence !== null ? (
-						<Text type="secondary">{Math.round(commit.confidence * 100)}%</Text>
-					) : null}
+					{commit.confidence !== null ? <Text type="secondary">{Math.round(commit.confidence * 100)}%</Text> : null}
 					{commit.duplicateOf ? <Tag>{t("重复")}</Tag> : null}
 				</span>
 			),
 		},
 		{
-			title: t("状态"),
-			key: "status",
-			width: 170,
+			title: t("漏洞"),
+			key: "vulnerability",
+			width: 270,
+			ellipsis: true,
 			render: (_value, commit) => (
-				<span className="code-intel-line">
-					<Tag
-						color={
-							commit.status === "dispatched"
-								? "blue"
-								: commit.status === "dispatching"
-									? "processing"
-									: commit.status === "ignored"
-										? "default"
-										: "gold"
-						}
-					>
-						{STATUS_LABELS[commit.status]}
-					</Tag>
-					{commit.engineId ? (
-						<Text type="secondary" copyable={{ text: commit.engineId }}>
-							{commit.engineId.slice(0, 8)}
+				<Tooltip
+					title={[
+						commit.vulnCategory ? CATEGORY_LABELS[commit.vulnCategory] : null,
+						commit.cve,
+						commit.severity,
+						commit.vulnType,
+						commit.duplicateOf ? t("重复") : null,
+					]
+						.filter(Boolean)
+						.join(" · ")}
+				>
+					<span className="code-intel-line">
+						<span className="code-intel-line__tags">
+							{commit.severity ? <Tag color={SEVERITY_COLORS[commit.severity]}>{commit.severity}</Tag> : null}
+						</span>
+						<Text className="code-intel-line__text">
+							{[commit.cve, commit.vulnCategory ? CATEGORY_LABELS[commit.vulnCategory] : null]
+								.filter(Boolean)
+								.join(" · ") || "—"}
 						</Text>
-					) : null}
-					{commit.error ? (
-						<Tooltip title={commit.error}>
-							<WarningOutlined className="code-intel-probe-error" />
-						</Tooltip>
-					) : null}
-				</span>
+					</span>
+				</Tooltip>
 			),
 		},
 		{
+			title: t("状态"),
+			key: "status",
+			width: 120,
+			render: (_value, commit) => {
+				if (commit.error)
+					return (
+						<Tooltip title={commit.error}>
+							<Tag color="red">{t("下发失败")}</Tag>
+						</Tooltip>
+					);
+				if (commit.status === "dispatching") return <Tag color="processing">{t("复现中")}</Tag>;
+				if (commit.verdict === "pending") return <Tag color="processing">{t("判定中")}</Tag>;
+				if (commit.status === "ignored") return <Tag>{t("已忽略")}</Tag>;
+				if (commit.engineId || commit.status === "dispatched")
+					return (
+						<Tooltip title={commit.engineId}>
+							<Tag color="blue">{t("已下发工程")}</Tag>
+						</Tooltip>
+					);
+				if (commit.verdict === "failed") return <Tag color="orange">{t("判定失败")}</Tag>;
+				if (commit.verdict === "security") return <Tag color="gold">{t("待复现")}</Tag>;
+				return <Tag>{t("非安全")}</Tag>;
+			},
+		},
+		{
+			title: t("时间"),
+			key: "authoredAt",
+			width: 180,
+			render: (_value, commit) => formatWhen(commit.authoredAt),
+		},
+		{
 			title: t("操作"),
-			key: "commit-actions",
-			width: 230,
-			render: (_value, commit) => (
-				<Space size={4} wrap={false}>
-					<Tooltip title={t("准备源码并新建工程复现")}>
-						<Button
-							size="small"
-							type="primary"
-							icon={<ExperimentOutlined />}
-							disabled={
-								commit.verdict !== "security" ||
-								Boolean(commit.engineId) ||
-								commit.status === "dispatching" ||
-								commit.status === "ignored" ||
-								Boolean(commit.duplicateOf)
-							}
-							loading={busyId === commit.id}
-							onClick={() => onDispatch(commit.id)}
-						>
-							{t("复现")}
-						</Button>
-					</Tooltip>
-					<Button
-						size="small"
-						icon={<ReloadOutlined />}
-						loading={busyId === commit.id}
-						onClick={() => onRejudge(commit.id)}
-					>
-						{t("重判")}
-					</Button>
-					<Button
-						size="small"
-						icon={<StopOutlined />}
-						disabled={
-						commit.status === "dispatching" ||
-						commit.status === "dispatched" ||
-						Boolean(commit.engineId)
-					}
-						onClick={() => onIgnore(commit.id)}
-					/>
-				</Space>
-			),
+			key: "actions",
+			width: 166,
+			fixed: screens.lg ? "right" : undefined,
+			render: (_value, commit) => renderCommitActions(commit, true),
+		},
+	];
+
+	const commitColumns: TableColumnsType<SentinelCodeCommit> = [
+		...activityColumns.filter((column) => column.key !== "repo" && column.key !== "actions"),
+		{
+			title: t("工程"),
+			key: "engine",
+			width: 130,
+			render: (_value, commit) =>
+				commit.engineId ? <Text copyable={{ text: commit.engineId }}>{commit.engineId.slice(0, 8)}</Text> : "—",
+		},
+		{
+			title: t("操作"),
+			key: "actions",
+			width: 114,
+			fixed: screens.lg ? "right" : undefined,
+			render: (_value, commit) => renderCommitActions(commit, false),
 		},
 	];
 
 	const activitySelected = activityRows.filter((commit) => activitySelectedIds.includes(commit.id));
 	const dispatchableSelected = activitySelected.filter(canDispatch);
 	const ignorableSelected = activitySelected.filter(canIgnore);
+	const rejudgeableSelected = activitySelected.filter(canRejudge);
 
 	const renderActivity = () => (
 		<Space direction="vertical" size={12} style={{ width: "100%" }}>
@@ -1359,6 +1366,7 @@ export function CodeIntelPage({
 				<Select
 					size="small"
 					style={{ minWidth: 120 }}
+					aria-label={t("复现类别")}
 					value={activityCategory}
 					options={ACTIVITY_CATEGORY_OPTIONS}
 					onChange={(value) => {
@@ -1386,12 +1394,13 @@ export function CodeIntelPage({
 						</Button>
 						<Button
 							size="small"
+							disabled={rejudgeableSelected.length === 0}
 							onClick={() => {
-								for (const commit of activitySelected) onRejudge(commit.id);
+								for (const commit of rejudgeableSelected) onRejudge(commit.id);
 								setActivitySelectedIds([]);
 							}}
 						>
-							{t("重判所选（{n}）", { n: activitySelected.length })}
+							{t("重判所选（{n}）", { n: rejudgeableSelected.length })}
 						</Button>
 						<Button
 							size="small"
@@ -1412,12 +1421,25 @@ export function CodeIntelPage({
 			) : null}
 
 			<Table
+				className="code-intel-table"
 				rowKey="id"
 				size="middle"
 				columns={activityColumns}
 				dataSource={activityRows}
 				loading={activityLoading}
-				locale={{ emptyText: <Empty description={t("没有需要处理的动态")} /> }}
+				locale={{
+					emptyText: (
+						<Empty
+							description={
+								activityFilter === "attention" && !activityCategory ? t("没有需要处理的动态") : t("没有符合条件的记录")
+							}
+						>
+							{activityFilter !== "all" || activityCategory ? (
+								<Button onClick={() => showActivity("all")}>{t("清空筛选")}</Button>
+							) : null}
+						</Empty>
+					),
+				}}
 				pagination={{
 					current: activityPage,
 					pageSize: activityPageSize,
@@ -1444,6 +1466,7 @@ export function CodeIntelPage({
 								<br />
 								{commit.reason ?? "—"}
 							</Paragraph>
+							{commit.error ? <Alert type="error" showIcon message={commit.error} /> : null}
 							{commit.diff ? (
 								<pre className="code-intel-diff">{commit.diff}</pre>
 							) : (
@@ -1453,84 +1476,114 @@ export function CodeIntelPage({
 					),
 				}}
 				tableLayout="fixed"
-				scroll={{ x: 1400 }}
+				scroll={{ x: 1586 }}
 			/>
 		</Space>
 	);
 
-	const logRepoColumn = <T extends { monitorId: string }>(
-		width: number,
-	): TableColumnsType<T>[number] => ({
+	const logRepoColumn = <T extends { monitorId: string }>(width: number): TableColumnsType<T>[number] => ({
 		title: t("仓库"),
 		key: "repo",
 		width,
 		render: (_value, row) => (
-			<Text className="code-intel-line__text">
-				{monitorById.get(row.monitorId)?.name ?? row.monitorId}
-			</Text>
+			<Tooltip title={monitorById.get(row.monitorId)?.name ?? row.monitorId}>
+				<Text className="code-intel-line__text">{monitorById.get(row.monitorId)?.name ?? row.monitorId}</Text>
+			</Tooltip>
 		),
 	});
 
 	const renderLogs = () => (
 		<Space direction="vertical" size={16} style={{ width: "100%" }}>
 			{activityAnomalies.length > 0 ? (
-				<Alert
-					type="warning"
-					showIcon
-					message={t("有 {n} 个监控检查异常", { n: activityAnomalies.length })}
-					description={
-						<Space direction="vertical" size={4} style={{ width: "100%" }}>
-							{activityAnomalies.map((monitor) => (
-								<div key={monitor.id} className="code-intel-line">
-									<Text strong>{monitor.name}</Text>
-									<Text type="danger" className="code-intel-line__text">
-										{monitor.lastError}
-									</Text>
-									<Button
-										size="small"
-										loading={checkingIds.includes(monitor.id) || monitor.checkState === "running"}
-										disabled={monitor.checkState !== "idle"}
-										onClick={() => onCheck(monitor.id)}
-									>
-										{t("检查")}
-									</Button>
-								</div>
-							))}
+				<Section
+					title={
+						<Space size={8}>
+							<span>{t("最近检查有错误")}</span>
+							<Tag color="error">{activityAnomalies.length}</Tag>
 						</Space>
 					}
-				/>
+				>
+					<Table
+						className="code-intel-table"
+						rowKey="id"
+						size="middle"
+						dataSource={activityAnomalies}
+						columns={[
+							...columns.filter((column) => ["repo", "state", "lastCheckAt"].includes(String(column.key))),
+							{
+								title: t("错误"),
+								key: "error",
+								ellipsis: true,
+								render: (_value, monitor) => (
+									<Tooltip title={monitor.lastError}>
+										<Text type="danger" className="code-intel-line__text">
+											{monitor.lastError}
+										</Text>
+									</Tooltip>
+								),
+							},
+							...columns.filter((column) => column.key === "actions"),
+						]}
+						pagination={{
+							defaultPageSize: 10,
+							showSizeChanger: true,
+							pageSizeOptions: [10, 20, 50],
+							showTotal: (total) => t("共 {n} 条", { n: total }),
+						}}
+						tableLayout="fixed"
+						scroll={{ x: 1050 }}
+					/>
+				</Section>
 			) : null}
 
-			<Table
-				rowKey="id"
-				size="small"
-				columns={[logRepoColumn<SentinelCodeCheckLog>(180), ...checkColumns]}
-				dataSource={logs?.checks ?? []}
-				locale={{ emptyText: <Empty description={t("还没有检查记录")} /> }}
-				pagination={{ pageSize: 20, showSizeChanger: false }}
-				tableLayout="fixed"
-				scroll={{ x: 1100 }}
-			/>
+			<Section title={t("检查日志（{n}）", { n: logs?.checks.length ?? 0 })}>
+				<Table
+					className="code-intel-table"
+					rowKey="id"
+					size="middle"
+					columns={[logRepoColumn<SentinelCodeCheckLog>(180), ...checkColumns]}
+					dataSource={logs?.checks ?? []}
+					locale={{ emptyText: <Empty description={t("还没有检查记录")} /> }}
+					pagination={{ pageSize: 20, showSizeChanger: false }}
+					tableLayout="fixed"
+					scroll={{ x: 1100 }}
+				/>
+			</Section>
 
-			<Table
-				rowKey="id"
-				size="small"
-				columns={[logRepoColumn<SentinelCodeCheckJob>(180), ...jobColumns]}
-				dataSource={logs?.jobs ?? []}
-				locale={{ emptyText: <Empty description={t("队列为空")} /> }}
-				pagination={{ pageSize: 20, showSizeChanger: false }}
-				tableLayout="fixed"
-				scroll={{ x: 1200 }}
-			/>
+			<Section title={t("队列（{n}）", { n: logs?.jobs.length ?? 0 })}>
+				<Table
+					className="code-intel-table"
+					rowKey="id"
+					size="middle"
+					columns={[logRepoColumn<SentinelCodeCheckJob>(180), ...jobColumns]}
+					dataSource={logs?.jobs ?? []}
+					locale={{ emptyText: <Empty description={t("队列为空")} /> }}
+					pagination={{ pageSize: 20, showSizeChanger: false }}
+					tableLayout="fixed"
+					scroll={{ x: 1200 }}
+				/>
+			</Section>
 		</Space>
 	);
 
 	return (
 		<Page
+			className="code-intel-page"
 			title={t("开源情报")}
-			description={t(
-				"监控仓库分支上的新提交，由监测模型判断是否为安全修复；确认后交给工程复现漏洞。仓库凭据只存本机，源码准备时短暂传给容器内的 git。",
-			)}
+			description={
+				<Space size={8} wrap>
+					<span>
+						{t("监控仓库")} → {t("安全更新")} → {t("复现")}
+					</span>
+					<Tooltip
+						title={t(
+							"监控仓库分支上的新提交，由监测模型判断是否为安全修复；确认后交给工程复现漏洞。仓库凭据只存本机，源码准备时短暂传给容器内的 git。",
+						)}
+					>
+						<QuestionCircleOutlined aria-label={t("监控详情")} />
+					</Tooltip>
+				</Space>
+			}
 			extra={
 				<Space>
 					<Button
@@ -1539,222 +1592,349 @@ export function CodeIntelPage({
 						disabled={!project}
 						onClick={() => {
 							if (!project) return;
-							if (view === "activity")
-								onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory);
-							else if (view === "logs") onLoadLogs(project.id);
-							else onRefresh();
+							onRefresh();
+							if (view === "logs") onLoadLogs(project.id);
 						}}
 					>
 						{t("刷新")}
 					</Button>
-					<Button type="primary" icon={<PlusOutlined />} disabled={!project} onClick={openCreate}>
+					<Button
+						type="primary"
+						icon={<PlusOutlined />}
+						disabled={!project || importState?.running}
+						onClick={openCreate}
+					>
 						{t("新增监控")}
 					</Button>
 				</Space>
 			}
 		>
-			<Tabs
-				activeKey={view}
-				onChange={(key) => {
-					setView(key as "activity" | "monitors" | "logs");
-					if (key === "logs" && project) onLoadLogs(project.id);
-				}}
-				items={[
-					{
-						key: "activity",
-						label: t("动态（{n}）", { n: activityCounts.attention + activityCounts.anomalies }),
-					},
-					{ key: "monitors", label: t("监控仓库") },
-					{ key: "logs", label: t("日志（{n}）", { n: activityAnomalies.length }) },
-				]}
-			/>
-			{importState ? (
-				<Alert
-					style={{ marginBottom: 12 }}
-					type={importState.running ? "info" : importState.failed > 0 ? "warning" : "success"}
-					showIcon
-					message={
-						importState.running
-							? t("正在导入 {done}/{total} 个仓库", {
-									done: importState.processed,
-									total: importState.total,
-								})
-							: t("导入完成：成功 {ok} 个，失败 {fail} 个", {
-									ok: importState.succeeded,
-									fail: importState.failed,
-								})
-					}
-					description={
-						<Space direction="vertical" size={2} style={{ width: "100%" }}>
-							{importState.running ? (
-								<Progress
-									percent={
-										importState.total > 0
-											? Math.round((importState.processed / importState.total) * 100)
-											: 0
-									}
-									size="small"
-									showInfo={false}
-								/>
-							) : null}
-							{importState.current ? (
-								<Text type="secondary" className="code-intel-line__text">
-									{t("当前：{url}", { url: importState.current })}
-								</Text>
-							) : null}
-							{importState.errors.length > 0 ? (
-								<div className="code-intel-import-errors">
-									{importState.errors.slice(0, 3).map((item) => (
-										<div key={`${item.url}-${item.error}`}>
-											<Text type="danger" className="code-intel-line__text">
-												{item.url}
-											</Text>
-											<Text type="secondary" className="code-intel-line__text">
-												{item.error}
-											</Text>
-										</div>
-									))}
-									{importState.failed > 3 ? (
-										<Text type="secondary">
-											{t("另有 {n} 个失败", { n: importState.failed - 3 })}
-										</Text>
-									) : null}
-								</div>
-							) : null}
-						</Space>
-					}
-					action={
-						importState.running ? null : (
-							<Button size="small" onClick={onDismissImport}>
-								{t("关闭")}
-							</Button>
-						)
-					}
-				/>
+			{project && rows.length > 0 ? (
+				<div className="code-intel-overview">
+					<button
+						type="button"
+						className="code-intel-metric"
+						onClick={() => {
+							setView("monitors");
+							setMonitorQuery("");
+							setMonitorFilter("all");
+							setMonitorPage(1);
+							setSelectedIds([]);
+						}}
+					>
+						<span className="code-intel-metric__label">
+							<RadarChartOutlined />
+							{t("监控仓库")}
+						</span>
+						<strong>{rows.length}</strong>
+						<span className="code-intel-metric__hint">
+							{t("已启用")} {rows.filter((row) => row.enabled).length} · {t("检查中")}{" "}
+							{rows.filter((row) => row.checkState === "running" || checkingIds.includes(row.id)).length}
+						</span>
+					</button>
+					<button
+						type="button"
+						className="code-intel-metric code-intel-metric--warning"
+						onClick={() => showActivity("review")}
+					>
+						<span className="code-intel-metric__label">
+							<ExperimentOutlined />
+							{t("待复现")}
+						</span>
+						<strong>{activity ? activityCounts.review : "—"}</strong>
+						<span className="code-intel-metric__hint">{t("准备源码并新建工程复现")}</span>
+					</button>
+					<button type="button" className="code-intel-metric" onClick={() => showActivity("attention")}>
+						<span className="code-intel-metric__label">
+							<ScheduleOutlined />
+							{t("待处理")}
+						</span>
+						<strong>{activity ? activityCounts.attention : "—"}</strong>
+						<span className="code-intel-metric__hint">
+							{t("判定失败")} {activity ? activityCounts.failed : "—"} · {t("下发失败")}{" "}
+							{activity ? activityCounts.dispatchFailed : "—"}
+						</span>
+					</button>
+					<button
+						type="button"
+						className={`code-intel-metric${activityAnomalies.length > 0 ? " code-intel-metric--error" : ""}`}
+						onClick={() => setView("logs")}
+					>
+						<span className="code-intel-metric__label">
+							<WarningOutlined />
+							{t("最近检查有错误")}
+						</span>
+						<strong>{activityAnomalies.length}</strong>
+						<span className="code-intel-metric__hint">
+							{t("日志")} / {t("队列（{n}）", { n: rows.filter((row) => row.checkState === "queued").length })}
+						</span>
+					</button>
+				</div>
 			) : null}
-			{!project ? (
-				<Alert
-					type="info"
-					showIcon
-					message={t("请先创建或选择一个项目")}
-					description={t("监控必须绑定项目，复现会在该项目的容器里进行。")}
+			<div className="code-intel-panel">
+				<Tabs
+					activeKey={view}
+					onChange={(key) => {
+						setView(key as "activity" | "monitors" | "logs");
+					}}
+					items={[
+						{
+							key: "activity",
+							label: t("动态（{n}）", { n: activityCounts.attention }),
+						},
+						{ key: "monitors", label: `${t("监控仓库")}（${rows.length}）` },
+						{ key: "logs", label: t("日志（{n}）", { n: activityAnomalies.length }) },
+					]}
 				/>
-			) : view === "activity" ? (
-				renderActivity()
-			) : view === "logs" ? (
-				renderLogs()
-			) : rows.length === 0 ? (
-				<Card>
-					<Empty description={t("还没有监控的仓库")}>
-						<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-							{t("新增监控")}
-						</Button>
-					</Empty>
-				</Card>
-			) : (
-				<>
-					<div className="code-intel-selection-bar">
-						<Text type="secondary">
-							{selectedIds.length > 0
-								? t("已选 {n} 个", { n: selectedIds.length })
-								: t("共 {n} 个监控", { n: rows.length })}
-						</Text>
-						{selectedIds.length > 0 ? (
-							<Space size={6} wrap>
-								<Button size="small" icon={<ScheduleOutlined />} onClick={openBatchSchedule}>
-									{t("批量策略")}
+				{importState ? (
+					<Alert
+						style={{ marginBottom: 12 }}
+						type={importState.running ? "info" : importState.failed > 0 ? "warning" : "success"}
+						showIcon
+						message={
+							importState.running
+								? t("正在导入 {done}/{total} 个仓库", {
+										done: importState.processed,
+										total: importState.total,
+									})
+								: t("导入完成：成功 {ok} 个，失败 {fail} 个", {
+										ok: importState.succeeded,
+										fail: importState.failed,
+									})
+						}
+						description={
+							<Space direction="vertical" size={2} style={{ width: "100%" }}>
+								{importState.running ? (
+									<Progress
+										percent={importState.total > 0 ? Math.round((importState.processed / importState.total) * 100) : 0}
+										size="small"
+										showInfo={false}
+									/>
+								) : null}
+								{importState.current ? (
+									<Text type="secondary" className="code-intel-line__text">
+										{t("当前：{url}", { url: importState.current })}
+									</Text>
+								) : null}
+								{importState.errors.length > 0 ? (
+									<div className="code-intel-import-errors">
+										{importState.errors.map((item) => (
+											<div key={`${item.url}-${item.error}`}>
+												<Text type="danger" className="code-intel-line__text">
+													{item.url}
+												</Text>
+												<Text type="secondary" className="code-intel-line__text">
+													{item.error}
+												</Text>
+											</div>
+										))}
+									</div>
+								) : null}
+							</Space>
+						}
+						action={
+							importState.running ? null : (
+								<Button size="small" onClick={onDismissImport}>
+									{t("关闭")}
 								</Button>
+							)
+						}
+					/>
+				) : null}
+				{!project ? (
+					<Alert
+						type="info"
+						showIcon
+						message={t("请先创建或选择一个项目")}
+						description={t("监控必须绑定项目，复现会在该项目的容器里进行。")}
+					/>
+				) : rows.length === 0 ? (
+					<Card className="code-intel-onboarding" variant="borderless">
+						<Empty description={t("还没有监控的仓库")}>
+							<Button type="primary" icon={<PlusOutlined />} disabled={importState?.running} onClick={openCreate}>
+								{t("新增监控")}
+							</Button>
+						</Empty>
+						<Steps
+							size="small"
+							current={-1}
+							items={[
+								{ title: t("新增监控"), description: `${t("仓库地址")} · ${t("监控分支")}` },
+								{ title: t("安全更新"), description: t("监测模型") },
+								{ title: t("复现"), description: t("准备源码并新建工程复现") },
+							]}
+						/>
+					</Card>
+				) : view === "activity" ? (
+					renderActivity()
+				) : view === "logs" ? (
+					renderLogs()
+				) : (
+					<>
+						<div className="code-intel-monitor-filters">
+							<Input
+								allowClear
+								prefix={<SearchOutlined />}
+								placeholder={`${t("仓库")} / ${t("分支")} / ${t("主机")}`}
+								aria-label={`${t("筛选")} ${t("监控仓库")}`}
+								value={monitorQuery}
+								onChange={(event) => {
+									setMonitorQuery(event.target.value);
+									setMonitorPage(1);
+								}}
+							/>
+							<Select
+								aria-label={t("状态")}
+								value={monitorFilter}
+								options={[
+									{ value: "all", label: t("全部") },
+									{ value: "enabled", label: t("已启用") },
+									{ value: "paused", label: t("已暂停") },
+									{ value: "running", label: t("检查中") },
+									{ value: "queued", label: t("排队中") },
+									{ value: "error", label: t("最近检查有错误") },
+								]}
+								onChange={(value) => {
+									setMonitorFilter(value);
+									setMonitorPage(1);
+								}}
+							/>
+							{monitorQuery || monitorFilter !== "all" ? (
 								<Button
-									size="small"
-									icon={<ReloadOutlined />}
-									disabled={checkingIds.length > 0}
-									loading={selectedIds.some((id) => checkingIds.includes(id))}
-									onClick={() => onCheckMany(selectedIds)}
-								>
-									{t("检查所选（{n}）", { n: selectedIds.length })}
-								</Button>
-								<Button
-									size="small"
-									danger
-									icon={<DeleteOutlined />}
+									type="text"
 									onClick={() => {
-										Modal.confirm({
-											title: t("删除所选监控？"),
-											content: t("已记录的提交、检查日志和发现会一起删除，工程不受影响。"),
-											okButtonProps: { danger: true },
-											okText: t("删除"),
-											cancelText: t("取消"),
-											onOk: () => onDeleteMany(selectedIds),
-										});
+										setMonitorQuery("");
+										setMonitorFilter("all");
+										setMonitorPage(1);
 									}}
 								>
-									{t("批量删除")}
+									{t("清空筛选")}
 								</Button>
-								<Button size="small" type="text" onClick={() => setSelectedIds([])}>
-									{t("取消选择")}
-								</Button>
-								<Button size="small" icon={<ExperimentOutlined />} onClick={openBatchDispatch}>
-									{t("批量复现设置")}
-								</Button>
-							</Space>
-						) : (
-							<Space size={6} wrap>
-								<Button
-									size="small"
-									icon={<ReloadOutlined />}
-									disabled={checkingIds.length > 0}
-									loading={rows.some((row) => checkingIds.includes(row.id))}
-									onClick={() => onCheckMany(rows.map((row) => row.id))}
-								>
-									{t("检查全部")}
-								</Button>
-								<Button size="small" icon={<ExperimentOutlined />} onClick={openBatchDispatch}>
-									{t("批量复现设置")}
-								</Button>
-							</Space>
-						)}
-					</div>
-					<Table
-						rowKey="id"
-						size="middle"
-						columns={columns}
-						dataSource={rows}
-						pagination={{
-							current: monitorPage,
-							pageSize: monitorPageSize,
-							showSizeChanger: true,
-							pageSizeOptions: [20, 50, 100],
-							showTotal: (total) => t("共 {n} 条", { n: total }),
-							onChange: (page, size) => {
-								setMonitorPage(page);
-								setMonitorPageSize(size);
-							},
-						}}
-						rowSelection={{
-							selectedRowKeys: selectedIds,
-							preserveSelectedRowKeys: true,
-							onChange: (keys) => setSelectedIds(keys.map((key) => String(key))),
-						}}
-						tableLayout="fixed"
-						scroll={{ x: 1240 }}
-					/>
-				</>
-			)}
+							) : null}
+						</div>
+						<div className="code-intel-selection-bar">
+							<Text type="secondary">
+								{selectedIds.length > 0
+									? t("已选 {n} 个", { n: selectedIds.length })
+									: t("共 {n} 个监控", { n: filteredMonitors.length })}
+							</Text>
+							{selectedIds.length > 0 ? (
+								<Space size={6} wrap>
+									<Button size="small" icon={<ScheduleOutlined />} onClick={openBatchSchedule}>
+										{t("批量策略")}
+									</Button>
+									<Button
+										size="small"
+										icon={<ReloadOutlined />}
+										disabled={checkableSelected.length === 0}
+										onClick={() => onCheckMany(checkableSelected.map((monitor) => monitor.id))}
+									>
+										{t("检查所选（{n}）", { n: checkableSelected.length })}
+									</Button>
+									<Button
+										size="small"
+										danger
+										icon={<DeleteOutlined />}
+										onClick={() => {
+											Modal.confirm({
+												title: t("删除所选监控？"),
+												content: t("已记录的提交、检查日志和发现会一起删除，工程不受影响。"),
+												okButtonProps: { danger: true },
+												okText: t("删除"),
+												cancelText: t("取消"),
+												onOk: () => onDeleteMany(selectedIds),
+											});
+										}}
+									>
+										{t("批量删除")}
+									</Button>
+									<Button size="small" type="text" onClick={() => setSelectedIds([])}>
+										{t("取消选择")}
+									</Button>
+									<Button size="small" icon={<ExperimentOutlined />} onClick={openBatchDispatch}>
+										{t("批量复现设置")}
+									</Button>
+								</Space>
+							) : (
+								<Space size={6} wrap>
+									<Button
+										size="small"
+										icon={<ReloadOutlined />}
+										disabled={checkableMonitors.length === 0}
+										onClick={() => onCheckMany(checkableMonitors.map((monitor) => monitor.id))}
+									>
+										{monitorQuery || monitorFilter !== "all" ? t("检查") : t("检查全部")}（{checkableMonitors.length}）
+									</Button>
+									<Button size="small" icon={<ExperimentOutlined />} onClick={openBatchDispatch}>
+										{t("批量复现设置")}
+									</Button>
+								</Space>
+							)}
+						</div>
+						<Table
+							className="code-intel-table"
+							rowKey="id"
+							size="middle"
+							columns={columns}
+							dataSource={filteredMonitors}
+							locale={{
+								emptyText: (
+									<Empty description={t("没有符合条件的记录")}>
+										<Button
+											onClick={() => {
+												setMonitorQuery("");
+												setMonitorFilter("all");
+											}}
+										>
+											{t("清空筛选")}
+										</Button>
+									</Empty>
+								),
+							}}
+							pagination={{
+								current: monitorPage,
+								pageSize: monitorPageSize,
+								showSizeChanger: true,
+								pageSizeOptions: [20, 50, 100],
+								showTotal: (total) => t("共 {n} 条", { n: total }),
+								onChange: (page, size) => {
+									setMonitorPage(page);
+									setMonitorPageSize(size);
+								},
+							}}
+							rowSelection={{
+								selectedRowKeys: selectedIds,
+								preserveSelectedRowKeys: true,
+								onChange: (keys) => setSelectedIds(keys.map((key) => String(key))),
+							}}
+							tableLayout="fixed"
+							scroll={{ x: 1396 }}
+						/>
+					</>
+				)}
+			</div>
 
 			<Modal
 				open={editor !== null}
 				title={editor?.mode === "edit" ? t("编辑监控") : t("新增开源监控")}
 				onCancel={closeEditor}
 				onOk={submit}
-				okText={t("保存")}
+				okText={editor?.mode === "create" ? `${t("新增监控")}（${createRepos.length}）` : t("保存修改")}
 				cancelText={t("取消")}
 				okButtonProps={{ disabled: !canSubmit || probing, loading: probing }}
 				width={680}
 				styles={{ body: { maxHeight: "65vh", overflowY: "auto" } }}
 				destroyOnHidden
+				maskClosable={false}
 			>
 				{editor ? (
 					<Form layout="vertical">
+						<Alert
+							type="info"
+							showIcon
+							className="code-intel-editor-hint"
+							message={t("注册时以各分支当前 HEAD 为基线；可获取分支后重新挑选。")}
+						/>
 						<Form.Item
 							label={editor.mode === "create" ? t("仓库地址") : t("Git 地址")}
 							required
@@ -1769,6 +1949,7 @@ export function CodeIntelPage({
 							{editor.mode === "create" ? (
 								<Input.TextArea
 									rows={4}
+									autoFocus
 									value={bulkUrls}
 									placeholder={"https://github.com/owner/repo-a\nhttps://github.com/owner/repo-b"}
 									onChange={(event) => setBulkUrls(event.target.value)}
@@ -1776,6 +1957,7 @@ export function CodeIntelPage({
 							) : (
 								<Input
 									value={editor.url}
+									autoFocus
 									placeholder="https://github.com/owner/repo"
 									onChange={(event) => setEditor({ ...editor, url: event.target.value })}
 								/>
@@ -1787,11 +1969,7 @@ export function CodeIntelPage({
 									<Tooltip
 										title={
 											<TokenHelp
-												host={
-													editingMonitor?.host ??
-													hostFromUrl(createRepos[0] ?? editor.url) ??
-													"github.com"
-												}
+												host={editingMonitor?.host ?? hostFromUrl(createRepos[0] ?? editor.url) ?? "github.com"}
 											/>
 										}
 										placement="topLeft"
@@ -1812,16 +1990,6 @@ export function CodeIntelPage({
 								placeholder={editingMonitor?.tokenSet ? "••••••••" : "github_pat_..."}
 								autoComplete="new-password"
 								onChange={(event) => setEditor({ ...editor, token: event.target.value })}
-							/>
-						</Form.Item>
-						<Form.Item
-							label={t("API Base URL")}
-							extra={t("留空按主机自动推导：github.com 用 api.github.com，GitHub Enterprise 用 /api/v3。")}
-						>
-							<Input
-								value={editor.apiBaseUrl}
-								placeholder="https://ghe.example.com/api/v3"
-								onChange={(event) => setEditor({ ...editor, apiBaseUrl: event.target.value })}
 							/>
 						</Form.Item>
 						<Form.Item
@@ -1866,6 +2034,8 @@ export function CodeIntelPage({
 													</Text>
 													<Select
 														mode="tags"
+														aria-label={`${t("监控分支")} ${url}`}
+														status={branchesFor(url).length === 0 ? "error" : undefined}
 														className="code-intel-repo-branches"
 														value={branchesFor(url)}
 														options={(branchOptions[url] ?? []).map((branch) => ({
@@ -1873,9 +2043,7 @@ export function CodeIntelPage({
 															label: branch,
 														}))}
 														placeholder="main"
-														onChange={(value) =>
-															setRepoBranches((prev) => ({ ...prev, [url]: value }))
-														}
+														onChange={(value) => setRepoBranches((prev) => ({ ...prev, [url]: value }))}
 														optionFilterProp="label"
 													/>
 													{probeErrors[url] ? (
@@ -1904,6 +2072,8 @@ export function CodeIntelPage({
 									<Space.Compact style={{ width: "100%" }}>
 										<Select
 											mode="tags"
+											aria-label={t("监控分支")}
+											status={editor.branches.length === 0 ? "error" : undefined}
 											style={{ width: "100%" }}
 											value={editor.branches}
 											options={(branchOptions[editor.url] ?? editor.branches).map((branch) => ({
@@ -1917,15 +2087,40 @@ export function CodeIntelPage({
 									</Space.Compact>
 								)}
 								{editor.mode === "edit" && probeErrors[editor.url] ? (
-									<Alert
-										style={{ marginTop: 4 }}
-										type="error"
-										showIcon
-										message={probeErrors[editor.url]}
-									/>
+									<Alert style={{ marginTop: 4 }} type="error" showIcon message={probeErrors[editor.url]} />
 								) : null}
 							</Space>
 						</Form.Item>
+						{(
+							editor.mode === "create"
+								? createRepos.some((url) => branchesFor(url).length === 0)
+								: editor.branches.length === 0
+						) ? (
+							<Alert className="code-intel-editor-hint" type="error" showIcon message={t("请至少选择一个监控分支")} />
+						) : null}
+						<Collapse
+							ghost
+							defaultActiveKey={editor.apiBaseUrl ? ["api"] : []}
+							className="code-intel-api-settings"
+							items={[
+								{
+									key: "api",
+									label: t("API Base URL"),
+									children: (
+										<Form.Item
+											extra={t("留空按主机自动推导：github.com 用 api.github.com，GitHub Enterprise 用 /api/v3。")}
+										>
+											<Input
+												value={editor.apiBaseUrl}
+												aria-label={t("API Base URL")}
+												placeholder="https://ghe.example.com/api/v3"
+												onChange={(event) => setEditor({ ...editor, apiBaseUrl: event.target.value })}
+											/>
+										</Form.Item>
+									),
+								},
+							]}
+						/>
 						<Form.Item label={t("监控策略")}>
 							<ScheduleFields
 								kind={editor.scheduleKind}
@@ -1936,36 +2131,33 @@ export function CodeIntelPage({
 						</Form.Item>
 						<Space size={24} wrap>
 							<Form.Item label={t("自动下发复现")} style={{ marginBottom: 0 }}>
-									<Space size={8}>
-										<Switch
-											checked={editor.autoDispatch}
-											onChange={(checked) => setEditor({ ...editor, autoDispatch: checked })}
-										/>
-										<Select
-											size="small"
-											mode="multiple"
-											style={{ minWidth: 220 }}
-											value={editor.autoDispatchCategories}
-											options={CATEGORY_OPTIONS}
-											placeholder={t("全部类别")}
-											disabled={!editor.autoDispatch}
-											onChange={(value) =>
-												setEditor({
-													...editor,
-													autoDispatchCategories: value as SentinelVulnCategory[],
-												})
-											}
-										/>
-									</Space>
-									<Text type="secondary" style={{ display: "block" }}>
-										{t("置信度 ≥ 65% 时直接新建工程；类别留空表示全部自动复现")}
-									</Text>
-								</Form.Item>
+								<Space size={8}>
+									<Switch
+										checked={editor.autoDispatch}
+										onChange={(checked) => setEditor({ ...editor, autoDispatch: checked })}
+									/>
+									<Select
+										size="small"
+										mode="multiple"
+										style={{ minWidth: 220 }}
+										value={editor.autoDispatchCategories}
+										options={CATEGORY_OPTIONS}
+										placeholder={t("全部类别")}
+										disabled={!editor.autoDispatch}
+										onChange={(value) =>
+											setEditor({
+												...editor,
+												autoDispatchCategories: value as SentinelVulnCategory[],
+											})
+										}
+									/>
+								</Space>
+								<Text type="secondary" style={{ display: "block" }}>
+									{t("置信度 ≥ 65% 时直接新建工程；类别留空表示全部自动复现")}
+								</Text>
+							</Form.Item>
 							<Form.Item label={t("启用定时检查")} style={{ marginBottom: 0 }}>
-								<Switch
-									checked={editor.enabled}
-									onChange={(checked) => setEditor({ ...editor, enabled: checked })}
-								/>
+								<Switch checked={editor.enabled} onChange={(checked) => setEditor({ ...editor, enabled: checked })} />
 							</Form.Item>
 						</Space>
 					</Form>
@@ -2006,6 +2198,7 @@ export function CodeIntelPage({
 				onOk={applyBatchDispatch}
 				okText={t("应用")}
 				cancelText={t("取消")}
+				okButtonProps={{ disabled: !canApplyDispatch }}
 				width={520}
 				destroyOnHidden
 			>
@@ -2078,22 +2271,12 @@ export function CodeIntelPage({
 									))}
 								</Space>
 							</Descriptions.Item>
-							<Descriptions.Item label={t("最近检查")}>
-								{formatWhen(detail.monitor.lastCheckAt)}
-							</Descriptions.Item>
+							<Descriptions.Item label={t("最近检查")}>{formatWhen(detail.monitor.lastCheckAt)}</Descriptions.Item>
 							<Descriptions.Item label={t("访问令牌")}>
 								{detail.monitor.tokenSet ? t("已保存") : t("未配置")}
 							</Descriptions.Item>
-							<Descriptions.Item label={t("监控策略")}>
-								{scheduleText(detail.monitor)}
-							</Descriptions.Item>
-							<Descriptions.Item label={t("下次检查")}>
-								{detail.monitor.nextCheckAt
-									? detail.monitor.nextCheckAt <= Date.now()
-										? t("即将检查")
-										: formatWhen(detail.monitor.nextCheckAt)
-									: t("待首次检查")}
-							</Descriptions.Item>
+							<Descriptions.Item label={t("监控策略")}>{scheduleText(detail.monitor)}</Descriptions.Item>
+							<Descriptions.Item label={t("下次检查")}>{nextCheckText(detail.monitor)}</Descriptions.Item>
 							<Descriptions.Item label={t("自动复现")}>
 								{detail.monitor.autoDispatch ? t("开") : t("关")}
 							</Descriptions.Item>
@@ -2129,13 +2312,14 @@ export function CodeIntelPage({
 											<Empty description={t("还没有拉取到提交")} />
 										) : (
 											<Table
+												className="code-intel-table"
 												rowKey="id"
 												size="small"
 												columns={commitColumns}
 												dataSource={detail.commits}
 												pagination={{ pageSize: 20, showSizeChanger: false }}
 												tableLayout="fixed"
-												scroll={{ x: 1120 }}
+												scroll={{ x: 1452 }}
 												expandable={{
 													expandedRowRender: (commit) => (
 														<Space direction="vertical" size={8} style={{ width: "100%" }}>
@@ -2163,6 +2347,7 @@ export function CodeIntelPage({
 											<Empty description={t("还没有检查记录")} />
 										) : (
 											<Table
+												className="code-intel-table"
 												rowKey="id"
 												size="small"
 												columns={checkColumns}
@@ -2181,6 +2366,7 @@ export function CodeIntelPage({
 											<Empty description={t("队列为空")} />
 										) : (
 											<Table
+												className="code-intel-table"
 												rowKey="id"
 												size="small"
 												columns={jobColumns}
