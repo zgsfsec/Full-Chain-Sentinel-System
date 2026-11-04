@@ -68,6 +68,7 @@ Windows 解压 `sentinel-web-windows-x64.zip` 后，在 PowerShell 运行 `.\sen
 | 资产与漏洞 | 资产库、漏洞中枢、CVSS、证据留存与 Markdown 报告 |
 | 建模与 POC | OpenAPI 业务建模、Nuclei POC 订阅、检索与引用 |
 | 移动端 | 安卓 DroidBridge 与 iOS SentinelBridge，设备反连、抓包与动态分析 |
+| 开源情报 | GitHub / GitHub Enterprise 仓库分支监控，监测模型判定安全修复并交给工程复现 |
 | 情报与插件 | FOFA、Quake、Hunter、Tavily、MCP 与本地 / 远端插件主机 |
 | 发包与取证 | 请求重放、历史查询、截图留证与文件打包下载 |
 

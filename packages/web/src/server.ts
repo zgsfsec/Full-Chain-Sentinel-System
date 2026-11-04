@@ -32,6 +32,8 @@ import {
 	validateCredentials,
 	verifyLogin,
 } from "./auth.ts";
+import { CodeMonitorManager } from "./code-monitor.ts";
+import { CodeMonitorStore, codeMonitorDbPath } from "./code-monitor-store.ts";
 import { buildImage, containerStates, deleteProjectWorkDir } from "./docker.ts";
 import { deleteDoctrine, listDoctrines, saveDoctrine } from "./doctrines.ts";
 import { DroidGateway } from "./droid-gateway.ts";
@@ -46,6 +48,7 @@ import { MitmCenter } from "./mitm.ts";
 import { handleMitmApi } from "./mitm-api.ts";
 import { readProviderModelConfig } from "./model-config.ts";
 import { DEFAULT_TEST_URL } from "./node-test.ts";
+import { buildCodeMonitorNotification, hasEnabledNotifyChannel, sendNotifications } from "./notify.ts";
 import { buildOpenVpnProfile } from "./openvpn.ts";
 import {
 	deletePreset,
@@ -547,6 +550,70 @@ export async function startSentinelServer(
 			)
 		: undefined;
 
+	/**
+	 * Open-source watch. It sits beside engineering mode because a finding's
+	 * terminal state is an engine: the manager polls and judges, and the hook
+	 * below turns a confirmed fix into an engine the operator can watch.
+	 */
+	const codeMonitorStore = agentDir ? new CodeMonitorStore(codeMonitorDbPath(agentDir)) : undefined;
+	const codeMonitors =
+		agentDir && codeMonitorStore
+			? new CodeMonitorManager(agentDir, codeMonitorStore, {
+					onChange: () => broadcastCodeMonitors(),
+					onImportChange: (state) => broadcast({ type: "code_monitor_import", state }),
+					project: (projectId) => {
+						const project = listProjects(agentDir).projects.find((entry) => entry.id === projectId);
+						return project
+							? { id: project.id, name: project.name, cwd: project.workDir, container: project.container }
+							: undefined;
+					},
+					ensureContainer: async (info) => {
+						const project = listProjects(agentDir).projects.find((entry) => entry.id === info.id);
+						return project ? ensureProjectReady(project, agentDir) : false;
+					},
+					createEngine: async (monitor, commit, source) => {
+						if (!engines) throw new Error(t("未配置配置目录，无法使用工程模式"));
+						const project = listProjects(agentDir).projects.find((entry) => entry.id === monitor.projectId);
+						if (!project) throw new Error(t("监控所属项目不存在"));
+						const note = [
+							`分支 ${commit.branch}`,
+							`漏洞版本 ${source.parentSha}`,
+							`修复版本 ${commit.sha}`,
+							commit.cve ? `编号 ${commit.cve}` : "",
+							commit.vulnType ? `类型 ${commit.vulnType}` : "",
+							`主题 ${commit.title}`,
+							`源码已准备：漏洞版本 ${source.vulnerableDir}，修复版本 ${source.fixedDir}`,
+						]
+							.filter(Boolean)
+							.join("；");
+						const engine = await engines.createEngine(
+							{ id: project.id, name: project.name, cwd: project.workDir, container: project.container },
+							{
+								name: `1day ${monitor.owner}/${monitor.repo} ${commit.shortSha}`,
+								targets: `${monitor.repoUrl} ${note}`,
+								doctrines: ["oss-1day-repro"],
+								presetIds: [],
+								presetOptional: true,
+								limits: { concurrency: 1, roundLimit: 30, tokenLimit: null, timeLimitMin: 180, maxRetries: 1 },
+								gateMode: "auto",
+							},
+						);
+						return engine.id;
+					},
+					notify: (monitor, commit) => {
+						const config = runtime.getNotifyConfig();
+						if (!config.kinds.vulns || !hasEnabledNotifyChannel(config)) return;
+						const { title, markdown } = buildCodeMonitorNotification(monitor, commit, config.summaryLimit);
+						void sendNotifications(config, title, markdown)
+							.then((status) => broadcast({ type: "notify_config", config: runtime.getNotifyConfig(), status }))
+							.catch(() => {
+								// A notification is best-effort; the finding is already on the page.
+							});
+					},
+				})
+			: undefined;
+	codeMonitors?.start();
+
 	// One-time, best-effort: fill 工程/任务/会话名 on findings submitted before
 	// those columns existed. It runs off the startup path, because listing every
 	// project's sessions must not delay the console.
@@ -665,6 +732,11 @@ export async function startSentinelServer(
 			page: view.page,
 			pageSize: view.pageSize,
 		});
+	}
+
+	/** Every watched repository; the page filters by the active project. */
+	function broadcastCodeMonitors(): void {
+		if (codeMonitors) broadcast({ type: "code_monitors", monitors: codeMonitors.list() });
 	}
 
 	/**
@@ -2614,6 +2686,7 @@ export async function startSentinelServer(
 					// The project's container is gone: its engines cannot run and
 					// their task sessions die with the project, so cascade.
 					if (engines) await engines.purgeProject(message.id);
+					codeMonitors?.removeByProject(message.id);
 					const purged = runtime.purgeProjectVulns(message.id);
 					const purgedGates = runtime.purgeProjectGates(message.id);
 					const purgedModels = runtime.purgeProjectApiModels(message.id);
@@ -3333,6 +3406,245 @@ export async function startSentinelServer(
 						ok,
 						...(ok ? {} : { error: t("该子代理已结束，无法追加指令") }),
 					});
+					return;
+				}
+				case "list_code_monitors":
+					if (!codeMonitors) {
+						sendError(socket, t("未配置配置目录，无法使用开源监测"));
+						return;
+					}
+					sendTo(socket, { type: "code_monitors", monitors: codeMonitors.list() });
+					return;
+				case "code_monitor_branches": {
+					if (!codeMonitors) {
+						sendTo(socket, {
+							type: "code_monitor_branches",
+							requestId: message.requestId,
+							error: t("未配置配置目录，无法使用开源监测"),
+						});
+						return;
+					}
+					void codeMonitors
+						.branches(message)
+						.then((branches) =>
+							sendTo(socket, { type: "code_monitor_branches", requestId: message.requestId, branches }),
+						)
+						.catch((error: unknown) =>
+							sendTo(socket, {
+								type: "code_monitor_branches",
+								requestId: message.requestId,
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						);
+					return;
+				}
+				case "import_code_monitors": {
+					if (!codeMonitors) {
+						sendError(socket, t("未配置配置目录，无法使用开源监测"));
+						return;
+					}
+					codeMonitors.importMany(Array.isArray(message.inputs) ? message.inputs : []);
+					sendTo(socket, { type: "code_monitor_import", state: codeMonitors.importView() });
+					return;
+				}
+				case "get_code_monitor_import": {
+					if (!codeMonitors) return;
+					sendTo(socket, { type: "code_monitor_import", state: codeMonitors.importView() });
+					return;
+				}
+				case "dismiss_code_monitor_import": {
+					if (!codeMonitors) return;
+					codeMonitors.dismissImport();
+					sendTo(socket, { type: "code_monitor_import", state: codeMonitors.importView() });
+					return;
+				}
+				case "create_code_monitor": {
+					if (!codeMonitors) {
+						sendError(socket, t("未配置配置目录，无法使用开源监测"));
+						return;
+					}
+					void codeMonitors
+						.create(message.input)
+						.then((monitor) => {
+							sendTo(socket, { type: "code_monitor_result", action: "新增监控", id: monitor.id, ok: true });
+							broadcastCodeMonitors();
+						})
+						.catch((error: unknown) =>
+							sendTo(socket, {
+								type: "code_monitor_result",
+								action: "新增监控",
+								ok: false,
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						);
+					return;
+				}
+				case "update_code_monitor": {
+					if (!codeMonitors) {
+						sendError(socket, t("未配置配置目录，无法使用开源监测"));
+						return;
+					}
+					void codeMonitors
+						.update(message.id, message.input)
+						.then((monitor) => {
+							sendTo(socket, { type: "code_monitor_result", action: "保存监控", id: monitor.id, ok: true });
+							broadcastCodeMonitors();
+						})
+						.catch((error: unknown) =>
+							sendTo(socket, {
+								type: "code_monitor_result",
+								action: "保存监控",
+								id: message.id,
+								ok: false,
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						);
+					return;
+				}
+				case "delete_code_monitors": {
+					if (!codeMonitors) return;
+					try {
+						const removed = codeMonitors.removeMany(Array.isArray(message.ids) ? message.ids : []);
+						sendTo(socket, {
+							type: "code_monitor_result",
+							action: "批量删除监控",
+							ok: true,
+							detail: t("已删除 {n} 个监控", { n: removed }),
+						});
+					} catch (error) {
+						sendTo(socket, {
+							type: "code_monitor_result",
+							action: "批量删除监控",
+							ok: false,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					return;
+				}
+				case "delete_code_monitor": {
+					if (!codeMonitors) return;
+					try {
+						codeMonitors.remove(message.id);
+						sendTo(socket, { type: "code_monitor_result", action: "删除监控", id: message.id, ok: true });
+					} catch (error) {
+						sendTo(socket, {
+							type: "code_monitor_result",
+							action: "删除监控",
+							id: message.id,
+							ok: false,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					return;
+				}
+				case "check_code_monitor": {
+					if (!codeMonitors) return;
+					try {
+						const job = codeMonitors.enqueue(message.id, message.trigger ?? "manual");
+						sendTo(socket, {
+							type: "code_monitor_result",
+							action: "检查监控",
+							id: message.id,
+							ok: true,
+							detail: job.status === "running" ? t("已在检查中") : t("已加入检查队列"),
+						});
+					} catch (error) {
+						sendTo(socket, {
+							type: "code_monitor_result",
+							action: "检查监控",
+							id: message.id,
+							ok: false,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					return;
+				}
+				case "get_code_monitor": {
+					if (!codeMonitors) return;
+					try {
+						sendTo(socket, { type: "code_monitor_detail", detail: codeMonitors.detail(message.id) });
+					} catch (error) {
+						sendError(socket, error instanceof Error ? error.message : String(error));
+					}
+					return;
+				}
+				case "dispatch_code_commit": {
+					if (!codeMonitors) return;
+					void codeMonitors
+						.dispatch(message.id)
+						.then(() => {
+							sendTo(socket, {
+								type: "code_monitor_result",
+								action: "下发复现",
+								id: message.id,
+								ok: true,
+							});
+							broadcastEngines();
+							broadcastCodeMonitors();
+							const monitorId = codeMonitors.monitorIdForCommit(message.id);
+							if (monitorId) {
+								sendTo(socket, { type: "code_monitor_detail", detail: codeMonitors.detail(monitorId) });
+							}
+						})
+						.catch((error: unknown) =>
+							sendTo(socket, {
+								type: "code_monitor_result",
+								action: "下发复现",
+								id: message.id,
+								ok: false,
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						);
+					return;
+				}
+				case "ignore_code_commit": {
+					if (!codeMonitors) return;
+					try {
+						sendTo(socket, { type: "code_monitor_detail", detail: codeMonitors.ignore(message.id) });
+					} catch (error) {
+						sendError(socket, error instanceof Error ? error.message : String(error));
+					}
+					return;
+				}
+				case "rejudge_code_commit": {
+					if (!codeMonitors) return;
+					void codeMonitors
+						.rejudge(message.id)
+						.then((detail) => sendTo(socket, { type: "code_monitor_detail", detail }))
+						.catch((error: unknown) =>
+							sendTo(socket, {
+								type: "code_monitor_result",
+								action: "重新判断",
+								id: message.id,
+								ok: false,
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						);
+					return;
+				}
+				case "set_code_monitors_schedule": {
+					if (!codeMonitors) {
+						sendError(socket, t("未配置配置目录，无法使用开源监测"));
+						return;
+					}
+					void codeMonitors
+						.setSchedule(message.ids, message)
+						.then((count) =>
+							sendTo(socket, {
+								type: "code_monitor_result",
+								action: "批量策略",
+								ok: true,
+								detail: t("已更新 {count} 个监控", { count }),
+							}),
+						)
+						.catch((error: unknown) =>
+							sendTo(socket, {
+								type: "code_monitor_result",
+								action: "批量策略",
+								ok: false,
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						);
 					return;
 				}
 				case "list_engines":

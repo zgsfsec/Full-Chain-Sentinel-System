@@ -1,0 +1,191 @@
+/* 开源情报：the diff needs to scroll inside its expanded row, not widen the table. */
+.code-intel-repo {
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 12px;
+}
+
+.code-intel-diff {
+	max-height: 360px;
+	overflow: auto;
+	padding: 12px;
+	margin: 0;
+	background: rgba(0, 0, 0, 0.04);
+	border-radius: 8px;
+	font-size: 12px;
+	line-height: 1.5;
+	white-space: pre;
+}
+
+/* The help marker sits before the label and must not read as a form control. */
+.code-intel-help {
+	color: rgba(0, 0, 0, 0.45);
+	font-size: 12px;
+	cursor: help;
+}
+
+/* Create mode: one address per row, with its own branch picker. */
+.code-intel-repo-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-height: 260px;
+	overflow: auto;
+}
+
+.code-intel-repo-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.code-intel-repo-url {
+	flex: 1;
+	min-width: 0;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 12px;
+}
+
+.code-intel-repo-branches {
+	min-width: 240px;
+	max-width: 52%;
+}
+
+.code-intel-probe-error {
+	color: #d4380d;
+}
+
+/* Visual cron builder: a checkbox per allowed field value. */
+.cron-grid {
+	display: grid;
+	gap: 4px 10px;
+}
+
+.cron-grid .ant-checkbox-wrapper {
+	margin-inline-start: 0;
+	font-size: 12px;
+}
+
+.cron-grid--minutes {
+	grid-template-columns: repeat(10, minmax(0, 1fr));
+}
+
+.cron-grid--hours {
+	grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.cron-grid--daysOfMonth {
+	grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.cron-grid--months {
+	grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.cron-grid--daysOfWeek {
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* Visual cron generator: one compact row per field, with its own editor. */
+.cron-builder {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 10px 12px;
+	border: 1px solid rgba(0, 0, 0, 0.08);
+	border-radius: 8px;
+	background: rgba(0, 0, 0, 0.02);
+}
+
+.cron-field {
+	padding-top: 8px;
+	border-top: 1px dashed rgba(0, 0, 0, 0.08);
+}
+
+.cron-field:first-child {
+	padding-top: 0;
+	border-top: none;
+}
+
+.cron-field__row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.cron-field__label {
+	min-width: 28px;
+}
+
+.cron-field__body {
+	margin-top: 6px;
+}
+
+.cron-builder__hint {
+	font-size: 12px;
+}
+
+/* Tables stay on one line per row; long text truncates and the full value is in a tooltip. */
+.code-intel-line {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+.code-intel-line__text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.code-intel-line__tags {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	flex-wrap: nowrap;
+	overflow: hidden;
+}
+
+.code-intel-line__tags .ant-tag {
+	margin-inline-end: 0;
+}
+
+.code-intel-commit-title {
+	flex: 1;
+}
+
+.code-intel-line__text {
+	flex: 1 1 auto;
+}
+
+.code-intel-line__tags {
+	flex: 0 1 auto;
+	min-width: 0;
+}
+
+.code-intel-repo-pager {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-top: 8px;
+}
+
+.code-intel-import-errors {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	max-height: 96px;
+	overflow: hidden;
+}
+
+.code-intel-selection-bar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 4px 2px 10px;
+}

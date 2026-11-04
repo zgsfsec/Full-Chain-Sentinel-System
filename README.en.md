@@ -68,6 +68,7 @@ Describe your authorized scope and target in the conversation. Approval mode is 
 | Assets and findings | Asset library, vulnerability hub, CVSS, evidence, and Markdown reports |
 | Modeling and POCs | OpenAPI modeling and Nuclei POC feeds, search, and references |
 | Mobile testing | Android DroidBridge and iOS SentinelBridge, reverse connections, capture, and dynamic analysis |
+| Open-source intel | GitHub / GitHub Enterprise branch watch; the Monitor model flags security fixes and hands them to engineering for reproduction |
 | Intelligence and plugins | FOFA, Quake, Hunter, Tavily, MCP, and local or remote plugin hosts |
 | Replay and evidence | Request replay, history, evidence screenshots, and folder downloads |
 

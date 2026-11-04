@@ -51,6 +51,7 @@ export const SENTINEL_MODEL_ROLE_NAMES: SentinelModelRoleName[] = [
 	"reviewer",
 	"supervisor",
 	"commander",
+	"monitor",
 ];
 export const SENTINEL_MODEL_ROLE_LABELS: Record<SentinelModelRoleName, string> = {
 	get main() {
@@ -67,6 +68,9 @@ export const SENTINEL_MODEL_ROLE_LABELS: Record<SentinelModelRoleName, string> =
 	},
 	get commander() {
 		return t("指挥端点");
+	},
+	get monitor() {
+		return t("监测模型");
 	},
 };
 
@@ -88,6 +92,7 @@ export interface SentinelModelLibrary {
 		reviewer: SentinelRoleRef;
 		supervisor: SentinelRoleRef;
 		commander: SentinelRoleRef;
+		monitor: SentinelRoleRef;
 	};
 	/** When off, submissions are not queued for the reviewer at all. */
 	reviewerAuto: boolean;
@@ -190,6 +195,7 @@ export function normalizeModelLibrary(value: unknown): SentinelModelLibrary {
 			reviewer: roleRef(rawRoles.reviewer, { kind: "follow-main" }),
 			supervisor: roleRef(rawRoles.supervisor, { kind: "follow-main" }),
 			commander,
+			monitor: roleRef(rawRoles.monitor, { kind: "follow-main" }),
 		},
 		reviewerAuto: typeof source.reviewerAuto === "boolean" ? source.reviewerAuto : true,
 	};
@@ -262,6 +268,7 @@ export function migrateModelLibrary(agentDir: string): SentinelModelLibrary {
 			commander: has(SENTINEL_COMMANDER_PROVIDER_ID)
 				? { kind: "model", id: SENTINEL_COMMANDER_PROVIDER_ID }
 				: { kind: "follow-main" },
+			monitor: { kind: "follow-main" },
 		},
 		reviewerAuto: true,
 	});
@@ -343,6 +350,7 @@ export function libraryView(agentDir: string): SentinelModelLibraryView {
 			reviewer: library.roles.reviewer.kind === "model" ? library.roles.reviewer.id : FOLLOW_MAIN,
 			supervisor: library.roles.supervisor.kind === "model" ? library.roles.supervisor.id : FOLLOW_MAIN,
 			commander: library.roles.commander.kind === "model" ? library.roles.commander.id : FOLLOW_MAIN,
+			monitor: library.roles.monitor.kind === "model" ? library.roles.monitor.id : FOLLOW_MAIN,
 		},
 		reviewerAuto: library.reviewerAuto,
 		resolved: {
@@ -351,6 +359,7 @@ export function libraryView(agentDir: string): SentinelModelLibraryView {
 			reviewer: toResolvedModelView(resolveLibraryRole(agentDir, "reviewer")),
 			supervisor: toResolvedModelView(resolveLibraryRole(agentDir, "supervisor")),
 			commander: toResolvedModelView(resolveLibraryRole(agentDir, "commander")),
+			monitor: toResolvedModelView(resolveLibraryRole(agentDir, "monitor")),
 		},
 	};
 }

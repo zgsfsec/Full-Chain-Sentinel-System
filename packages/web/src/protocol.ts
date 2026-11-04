@@ -188,7 +188,7 @@ export interface SentinelModelConfig {
 }
 
 /** The jobs a model can be assigned to. */
-export type SentinelModelRoleName = "main" | "judge" | "reviewer" | "supervisor" | "commander";
+export type SentinelModelRoleName = "main" | "judge" | "reviewer" | "supervisor" | "commander" | "monitor";
 
 /**
  * One row of the model library as the settings screen sees it. The key itself is
@@ -275,6 +275,7 @@ export interface SentinelModelLibraryView {
 		reviewer: string;
 		supervisor: string;
 		commander: string;
+		monitor: string;
 	};
 	reviewerAuto: boolean;
 	resolved: {
@@ -283,6 +284,7 @@ export interface SentinelModelLibraryView {
 		reviewer: SentinelResolvedModelView | null;
 		supervisor: SentinelResolvedModelView | null;
 		commander: SentinelResolvedModelView | null;
+		monitor: SentinelResolvedModelView | null;
 	};
 }
 
@@ -1029,6 +1031,198 @@ export interface SentinelPocImportOutcome {
 	/** Templates whose id already existed and were overwritten. */
 	replaced: number;
 	skipped: { name: string; reason: string }[];
+}
+
+// ---------------------------------------------------------------------------
+// 开源漏洞监测（Open-source vulnerability watch）
+// ---------------------------------------------------------------------------
+
+/**
+ * What the monitor model said about one commit. `pending` means it was stored
+ * but not judged yet; `failed` keeps the commit for a retry instead of turning
+ * an endpoint error into a verdict.
+ */
+export type SentinelCodeVerdict = "pending" | "security" | "not_security" | "failed";
+
+/** How a monitor decides when the next check is due. */
+export type SentinelCodeScheduleKind = "interval" | "cron";
+
+/** What started a check; kept in the audit log. */
+export type SentinelCodeCheckTrigger = "manual" | "auto" | "batch";
+
+/** Lifecycle of one check run. */
+export type SentinelCodeCheckStatus = "running" | "ok" | "error";
+
+/** Queue lifecycle of a check request. */
+export type SentinelCodeJobStatus = "queued" | "running" | "done" | "failed";
+
+/** Server-side progress of a bulk monitor import. */
+export interface SentinelCodeImportState {
+	total: number;
+	processed: number;
+	succeeded: number;
+	failed: number;
+	current: string | null;
+	running: boolean;
+	errors: { url: string; error: string }[];
+}
+
+/** One queued or recently executed check request. */
+export interface SentinelCodeCheckJob {
+	id: string;
+	monitorId: string;
+	projectId: string;
+	/** GitHub host, used for per-host concurrency. */
+	host: string;
+	trigger: SentinelCodeCheckTrigger;
+	status: SentinelCodeJobStatus;
+	/** Starts do not count; this is how many runs were launched. */
+	attempts: number;
+	maxAttempts: number;
+	/** Earliest time the queue may start it, in epoch milliseconds. */
+	nextRunAt: number;
+	createdAt: number;
+	startedAt: number | null;
+	endedAt: number | null;
+	error: string | null;
+	/** Check-log row produced by the latest attempt. */
+	checkId: string | null;
+}
+
+/** Where a security commit stands after the operator's or the monitor's action. */
+export type SentinelCodeCommitStatus = "new" | "dispatched" | "ignored";
+
+/**
+ * One watched repository.
+ *
+ * Polling is branch-scoped and stateful: `baselines` maps each watched branch to
+ * the last commit already consumed, so a failed or capped check resumes where it
+ * stopped instead of rescanning history. The token itself never leaves the
+ * server; `tokenSet` only says one is stored.
+ */
+export interface SentinelCodeMonitor {
+	id: string;
+	projectId: string;
+	projectName: string;
+	name: string;
+	/** Host as parsed from the URL, e.g. github.com or ghe.example.com. */
+	host: string;
+	owner: string;
+	repo: string;
+	repoUrl: string;
+	/** REST base, e.g. https://api.github.com or https://ghe.example.com/api/v3. */
+	apiBaseUrl: string;
+	branches: string[];
+	/** Branch → last consumed commit SHA. */
+	baselines: Record<string, string>;
+	tokenSet: boolean;
+	/** Dispatch a confirmed finding to an engine without asking first. */
+	autoDispatch: boolean;
+	/** Minutes between automatic checks when `scheduleKind` is interval; 0 = manual. */
+	intervalMinutes: number;
+	scheduleKind: SentinelCodeScheduleKind;
+	/** Five-field cron expression in server local time; null in interval mode. */
+	cronExpression: string | null;
+	/** Next firing, computed for display; null while a check is due or scheduled mode is off. */
+	nextCheckAt: number | null;
+	/** Whether a queued/running job currently exists for this monitor. */
+	checkState: "idle" | "queued" | "running";
+	enabled: boolean;
+	lastCheckAt: number | null;
+	lastError: string | null;
+	createdAt: number;
+	/** Security verdicts that were not ignored. */
+	findingCount: number;
+	/** Security verdicts not yet dispatched. */
+	pendingCount: number;
+}
+
+/** One commit the monitor fetched, with the judge's verdict and the handoff state. */
+export interface SentinelCodeCommit {
+	id: string;
+	monitorId: string;
+	projectId: string;
+	branch: string;
+	sha: string;
+	shortSha: string;
+	/** First line of the message, for lists. */
+	title: string;
+	message: string;
+	author: string;
+	/** Epoch milliseconds. */
+	authoredAt: number;
+	url: string;
+	verdict: SentinelCodeVerdict;
+	/** 0–1, the monitor model's own confidence; null before a verdict. */
+	confidence: number | null;
+	/** CVE or GHSA id when the commit names one. */
+	cve: string | null;
+	severity: SentinelVulnSeverity | null;
+	/** Vulnerability class, e.g. "路径穿越" or "反序列化". */
+	vulnType: string | null;
+	reason: string | null;
+	status: SentinelCodeCommitStatus;
+	/** Engine started for this finding, once dispatched. */
+	engineId: string | null;
+	/** Another finding in the same monitor already covers this one. */
+	duplicateOf: string | null;
+	/** Why the last dispatch failed; cleared by a successful one. */
+	error: string | null;
+	additions: number;
+	deletions: number;
+	files: number;
+	/** Bounded unified diff used for judging, kept for the detail view. */
+	diff: string | null;
+	createdAt: number;
+	judgedAt: number | null;
+}
+
+/** One executed (or interrupted) check, for the detail page's log. */
+export interface SentinelCodeCheckLog {
+	id: string;
+	monitorId: string;
+	trigger: SentinelCodeCheckTrigger;
+	status: SentinelCodeCheckStatus;
+	startedAt: number;
+	endedAt: number | null;
+	/** Commits consumed by this pass. */
+	commits: number;
+	/** Security verdicts reached by this pass. */
+	findings: number;
+	/** Branch/API/model error, or the reason an interrupted run was closed. */
+	error: string | null;
+}
+
+/** One monitor plus its commit history and recent checks, newest first. */
+export interface SentinelCodeMonitorDetail {
+	monitor: SentinelCodeMonitor;
+	commits: SentinelCodeCommit[];
+	checks: SentinelCodeCheckLog[];
+	jobs: SentinelCodeCheckJob[];
+}
+
+/**
+ * Create/update payload. On update an omitted token keeps the stored one; an
+ * empty string clears it. New branches get their current HEAD as the baseline.
+ */
+export interface SentinelCodeMonitorInput {
+	projectId: string;
+	/** HTTPS, SSH or bare `host/owner/repo`. */
+	url: string;
+	/** Display name; defaults to `owner/repo`. */
+	name?: string;
+	/** Empty or omitted on update keeps the stored token. */
+	token?: string;
+	/** Override the derived REST base, e.g. `https://ghe.example.com/api/v3`. */
+	apiBaseUrl?: string;
+	branches: string[];
+	intervalMinutes?: number;
+	/** Omitted on update keeps the stored strategy. */
+	scheduleKind?: SentinelCodeScheduleKind;
+	/** Required when scheduleKind is cron; null/empty clears it. */
+	cronExpression?: string | null;
+	autoDispatch?: boolean;
+	enabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -2047,7 +2241,40 @@ export type SentinelClientMessage =
 	| { type: "get_api_model"; id: string }
 	| { type: "delete_api_model"; id: string }
 	/** Render one run as a downloadable file; the browser turns it into a download. */
-	| { type: "export_api_model"; id: string; format: "json" | "yaml" };
+	| { type: "export_api_model"; id: string; format: "json" | "yaml" }
+	/** Open-source watch: every monitor of every project; the page filters. */
+	| { type: "list_code_monitors" }
+	/** Probe a repository's branches before a monitor exists, for the multi-select. */
+	| {
+			type: "code_monitor_branches";
+			requestId: number;
+			url: string;
+			/** An existing monitor lets the server reuse its stored token. */
+			monitorId?: string;
+			token?: string;
+			apiBaseUrl?: string;
+	  }
+	| { type: "create_code_monitor"; input: SentinelCodeMonitorInput }
+	| { type: "update_code_monitor"; id: string; input: SentinelCodeMonitorInput }
+	| { type: "delete_code_monitor"; id: string }
+	| { type: "delete_code_monitors"; ids: string[] }
+	| { type: "import_code_monitors"; inputs: SentinelCodeMonitorInput[] }
+	| { type: "get_code_monitor_import" }
+	| { type: "dismiss_code_monitor_import" }
+	| { type: "check_code_monitor"; id: string; trigger?: SentinelCodeCheckTrigger }
+	| { type: "get_code_monitor"; id: string }
+	/** Start a reproduction engine for one confirmed finding. */
+	| { type: "dispatch_code_commit"; id: string }
+	| { type: "ignore_code_commit"; id: string }
+	| { type: "rejudge_code_commit"; id: string }
+	/** Batch-apply one schedule to several monitors. */
+	| {
+			type: "set_code_monitors_schedule";
+			ids: string[];
+			scheduleKind: SentinelCodeScheduleKind;
+			intervalMinutes?: number;
+			cronExpression?: string | null;
+	  };
 
 /** Server-to-client messages. */
 export type SentinelServerMessage =
@@ -2147,6 +2374,20 @@ export type SentinelServerMessage =
 	| { type: "poc_result"; action: string; id?: string; ok: boolean; error?: string }
 	| { type: "poc_sources"; sources: SentinelPocSource[] }
 	| { type: "poc_source_result"; action: string; id?: string; ok: boolean; error?: string }
+	| { type: "code_monitors"; monitors: SentinelCodeMonitor[] }
+	| { type: "code_monitor_import"; state: SentinelCodeImportState | null }
+	| { type: "code_monitor_detail"; detail: SentinelCodeMonitorDetail }
+	/** Answer to `code_monitor_branches`; `error` is set when the probe failed. */
+	| { type: "code_monitor_branches"; requestId: number; branches?: string[]; error?: string }
+	| {
+			type: "code_monitor_result";
+			action: string;
+			id?: string;
+			ok: boolean;
+			error?: string;
+			/** Extra outcome line, e.g. how many commits a check consumed. */
+			detail?: string;
+	  }
 	| { type: "environment"; report: SentinelEnvReport; building: boolean }
 	| { type: "image_build_log"; line: string }
 	| { type: "image_build_result"; ok: boolean; error?: string }

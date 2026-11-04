@@ -28,6 +28,7 @@ export type SentinelPageId =
 	| "mitm"
 	| "webfuzz"
 	| "pocs"
+	| "codeintel"
 	| "apimodels"
 	| "droid"
 	| "ios"
@@ -165,7 +166,7 @@ export interface SentinelModelConfig {
 }
 
 /** The jobs a model can be assigned to. */
-export type SentinelModelRoleName = "main" | "judge" | "reviewer" | "supervisor" | "commander";
+export type SentinelModelRoleName = "main" | "judge" | "reviewer" | "supervisor" | "commander" | "monitor";
 
 /** One row of the model library. The key itself never leaves the server. */
 export interface SentinelModelEntryView {
@@ -240,6 +241,7 @@ export interface SentinelModelLibraryView {
 		reviewer: string;
 		supervisor: string;
 		commander: string;
+		monitor: string;
 	};
 	reviewerAuto: boolean;
 	resolved: {
@@ -248,6 +250,7 @@ export interface SentinelModelLibraryView {
 		reviewer: SentinelResolvedModelView | null;
 		supervisor: SentinelResolvedModelView | null;
 		commander: SentinelResolvedModelView | null;
+		monitor: SentinelResolvedModelView | null;
 	};
 }
 
@@ -860,6 +863,140 @@ export interface SentinelPocSourceSave {
 	headerValue?: string;
 	intervalHours: number;
 	enabled: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// 开源漏洞监测（Open-source vulnerability watch）
+// ---------------------------------------------------------------------------
+
+export type SentinelCodeVerdict = "pending" | "security" | "not_security" | "failed";
+
+export type SentinelCodeScheduleKind = "interval" | "cron";
+
+export type SentinelCodeCheckTrigger = "manual" | "auto" | "batch";
+
+export type SentinelCodeCheckStatus = "running" | "ok" | "error";
+
+export type SentinelCodeCommitStatus = "new" | "dispatched" | "ignored";
+
+export interface SentinelCodeMonitor {
+	id: string;
+	projectId: string;
+	projectName: string;
+	name: string;
+	host: string;
+	owner: string;
+	repo: string;
+	repoUrl: string;
+	apiBaseUrl: string;
+	branches: string[];
+	baselines: Record<string, string>;
+	tokenSet: boolean;
+	autoDispatch: boolean;
+	intervalMinutes: number;
+	scheduleKind: SentinelCodeScheduleKind;
+	cronExpression: string | null;
+	nextCheckAt: number | null;
+	checkState: "idle" | "queued" | "running";
+	enabled: boolean;
+	lastCheckAt: number | null;
+	lastError: string | null;
+	createdAt: number;
+	findingCount: number;
+	pendingCount: number;
+}
+
+export interface SentinelCodeCommit {
+	id: string;
+	monitorId: string;
+	projectId: string;
+	branch: string;
+	sha: string;
+	shortSha: string;
+	title: string;
+	message: string;
+	author: string;
+	authoredAt: number;
+	url: string;
+	verdict: SentinelCodeVerdict;
+	confidence: number | null;
+	cve: string | null;
+	severity: SentinelVulnSeverity | null;
+	vulnType: string | null;
+	reason: string | null;
+	status: SentinelCodeCommitStatus;
+	engineId: string | null;
+	duplicateOf: string | null;
+	error: string | null;
+	additions: number;
+	deletions: number;
+	files: number;
+	diff: string | null;
+	createdAt: number;
+	judgedAt: number | null;
+}
+
+/** Progress of the client-side sequential monitor import queue. */
+export interface SentinelCodeImportState {
+	total: number;
+	processed: number;
+	succeeded: number;
+	failed: number;
+	current: string | null;
+	running: boolean;
+	errors: { url: string; error: string }[];
+}
+
+export interface SentinelCodeCheckJob {
+	id: string;
+	monitorId: string;
+	projectId: string;
+	host: string;
+	trigger: SentinelCodeCheckTrigger;
+	status: SentinelCodeJobStatus;
+	attempts: number;
+	maxAttempts: number;
+	nextRunAt: number;
+	createdAt: number;
+	startedAt: number | null;
+	endedAt: number | null;
+	error: string | null;
+	checkId: string | null;
+}
+
+export type SentinelCodeJobStatus = "queued" | "running" | "done" | "failed";
+
+export interface SentinelCodeCheckLog {
+	id: string;
+	monitorId: string;
+	trigger: SentinelCodeCheckTrigger;
+	status: SentinelCodeCheckStatus;
+	startedAt: number;
+	endedAt: number | null;
+	commits: number;
+	findings: number;
+	error: string | null;
+}
+
+export interface SentinelCodeMonitorDetail {
+	monitor: SentinelCodeMonitor;
+	commits: SentinelCodeCommit[];
+	checks: SentinelCodeCheckLog[];
+	jobs: SentinelCodeCheckJob[];
+}
+
+export interface SentinelCodeMonitorInput {
+	projectId: string;
+	url: string;
+	name?: string;
+	token?: string;
+	apiBaseUrl?: string;
+	branches: string[];
+	intervalMinutes?: number;
+	scheduleKind?: SentinelCodeScheduleKind;
+	cronExpression?: string | null;
+	autoDispatch?: boolean;
+	enabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1568,6 +1705,34 @@ export type SentinelClientMessage =
 	| { type: "delete_poc_source"; id: string }
 	| { type: "sync_poc_source"; id: string }
 	| { type: "sync_official_pocs" }
+	| { type: "list_code_monitors" }
+	| {
+			type: "code_monitor_branches";
+			requestId: number;
+			url: string;
+			monitorId?: string;
+			token?: string;
+			apiBaseUrl?: string;
+	  }
+	| { type: "create_code_monitor"; input: SentinelCodeMonitorInput }
+	| { type: "update_code_monitor"; id: string; input: SentinelCodeMonitorInput }
+	| { type: "delete_code_monitor"; id: string }
+	| { type: "delete_code_monitors"; ids: string[] }
+	| { type: "import_code_monitors"; inputs: SentinelCodeMonitorInput[] }
+	| { type: "get_code_monitor_import" }
+	| { type: "dismiss_code_monitor_import" }
+	| { type: "check_code_monitor"; id: string; trigger?: SentinelCodeCheckTrigger }
+	| { type: "get_code_monitor"; id: string }
+	| { type: "dispatch_code_commit"; id: string }
+	| { type: "ignore_code_commit"; id: string }
+	| { type: "rejudge_code_commit"; id: string }
+	| {
+			type: "set_code_monitors_schedule";
+			ids: string[];
+			scheduleKind: SentinelCodeScheduleKind;
+			intervalMinutes?: number;
+			cronExpression?: string | null;
+	  }
 	| { type: "get_environment" }
 	| { type: "check_environment" }
 	| { type: "build_image" }
@@ -1866,6 +2031,18 @@ export type SentinelServerMessage =
 	| { type: "poc_result"; action: string; id?: string; ok: boolean; error?: string }
 	| { type: "poc_sources"; sources: SentinelPocSource[] }
 	| { type: "poc_source_result"; action: string; id?: string; ok: boolean; error?: string }
+	| { type: "code_monitors"; monitors: SentinelCodeMonitor[] }
+	| { type: "code_monitor_import"; state: SentinelCodeImportState | null }
+	| { type: "code_monitor_detail"; detail: SentinelCodeMonitorDetail }
+	| { type: "code_monitor_branches"; requestId: number; branches?: string[]; error?: string }
+	| {
+			type: "code_monitor_result";
+			action: string;
+			id?: string;
+			ok: boolean;
+			error?: string;
+			detail?: string;
+	  }
 	| { type: "environment"; report: SentinelEnvReport; building: boolean }
 	| { type: "image_build_log"; line: string }
 	| { type: "image_build_result"; ok: boolean; error?: string }

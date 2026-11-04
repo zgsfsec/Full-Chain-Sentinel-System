@@ -14,6 +14,7 @@ export const ROLE_ORDER: SentinelModelRoleName[] = [
 	"reviewer",
 	"supervisor",
 	"commander",
+	"monitor",
 ];
 
 export const ROLE_LABELS: Record<SentinelModelRoleName, string> = {
@@ -22,6 +23,7 @@ export const ROLE_LABELS: Record<SentinelModelRoleName, string> = {
 	reviewer: t("漏洞评审"),
 	supervisor: t("监督模型"),
 	commander: t("指挥端点"),
+	monitor: t("监测模型"),
 };
 
 export const ROLE_HINTS: Record<SentinelModelRoleName, string> = {
@@ -30,6 +32,7 @@ export const ROLE_HINTS: Record<SentinelModelRoleName, string> = {
 	reviewer: t("提交漏洞后自动校准等级与 CVSS；改完立即生效"),
 	supervisor: t("观察模式每 20 次调用或异常时总结；介入模式只给建议，不阻断工具调用"),
 	commander: t("工程模式的指挥官；跟随主模型时共用主模型端点"),
+	monitor: t("开源情报判断每个新提交是否为安全修复；改完下一次检查生效"),
 };
 
 export const ROLE_SHORT: Record<SentinelModelRoleName, string> = {
@@ -38,6 +41,7 @@ export const ROLE_SHORT: Record<SentinelModelRoleName, string> = {
 	reviewer: t("结论复核"),
 	supervisor: t("介入判断"),
 	commander: t("工程指挥"),
+	monitor: t("提交定级"),
 };
 
 export const MODEL_API_OPTIONS = [

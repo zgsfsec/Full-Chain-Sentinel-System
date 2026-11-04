@@ -27,6 +27,7 @@ import {
 	InfoCircleOutlined,
 	LockOutlined,
 	MessageOutlined,
+	RadarChartOutlined,
 	RobotOutlined,
 	SafetyCertificateOutlined,
 	SearchOutlined,
@@ -77,6 +78,10 @@ export const NAV_GROUPS: { group: string; items: MenuEntry[] }[] = [
 			{ page: "droid", label: t("安卓设备"), icon: AndroidOutlined },
 			{ page: "ios", label: t("iOS 设备"), icon: AppleOutlined },
 		],
+	},
+	{
+		group: "情报",
+		items: [{ page: "codeintel", label: t("开源情报"), icon: RadarChartOutlined }],
 	},
 	{
 		group: "执行与审计",

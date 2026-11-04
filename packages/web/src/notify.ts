@@ -16,6 +16,8 @@
 import { createHmac } from "node:crypto";
 import { t } from "./i18n.ts";
 import type {
+	SentinelCodeCommit,
+	SentinelCodeMonitor,
 	SentinelNotifyChannel,
 	SentinelNotifyChannelConfig,
 	SentinelNotifyConfig,
@@ -662,6 +664,40 @@ export function buildGoalNotification(report: SentinelGoalReport, limit: number)
 		lines.push("", "**证据**");
 		for (const item of report.evidence.slice(0, 8)) lines.push(`- ${item}`);
 	}
+	return { title, markdown: lines.join("\n") };
+}
+
+/**
+ * One security-fix commit found by the open-source watch. Sent as soon as the
+ * verdict lands, before the reproduction engine has had time to run, so the
+ * operator learns about the 1day while the patch is still fresh.
+ */
+export function buildCodeMonitorNotification(
+	monitor: SentinelCodeMonitor,
+	commit: SentinelCodeCommit,
+	limit: number,
+): { title: string; markdown: string } {
+	const title = `开源漏洞情报 ${monitor.owner}/${monitor.repo}`;
+	const lines = [
+		`### ${title}`,
+		"",
+		`- **仓库**：${monitor.host}/${monitor.owner}/${monitor.repo}`,
+		`- **分支**：${commit.branch}`,
+		`- **提交**：[${commit.shortSha}](${commit.url})`,
+		`- **作者**：${commit.author}`,
+		`- **置信度**：${Math.round((commit.confidence ?? 0) * 100)}%`,
+		`- **判定**：${commit.title}`,
+	];
+	if (commit.cve) lines.push(`- **编号**：${commit.cve}`);
+	if (commit.severity) lines.push(`- **估计等级**：${commit.severity}`);
+	if (commit.vulnType) lines.push(`- **类型**：${commit.vulnType}`);
+	lines.push(
+		`- **状态**：${commit.engineId ? "已交给工程复现" : monitor.autoDispatch ? "已判定为安全更新，正在自动下发复现" : "待确认（可在控制台一键复现）"}`,
+		"",
+		"**判定依据**",
+		"",
+		clipText(commit.reason?.trim() || "(无)", limit),
+	);
 	return { title, markdown: lines.join("\n") };
 }
 

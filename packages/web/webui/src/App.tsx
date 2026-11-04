@@ -33,6 +33,7 @@ import { Overlay } from "./components/Overlay.tsx";
 import { PermissionsPanel } from "./components/PermissionsPanel.tsx";
 import { PluginPanel } from "./components/PluginPanel.tsx";
 import { PluginUiOverlay, type PluginUiCallResult, type PluginUiContext } from "./components/PluginUiOverlay.tsx";
+import { CodeIntelPage, type BranchProbe } from "./components/CodeIntelPage.tsx";
 import { PocPage } from "./components/PocPage.tsx";
 import { PocSourcesPanel } from "./components/PocSourcesPanel.tsx";
 import { type PresetImportNotice, PresetPanel } from "./components/PresetPanel.tsx";
@@ -77,6 +78,10 @@ import type {
 	SentinelWebSearchConfigView,
 	SentinelAssetPlatform,
 	SentinelClientMessage,
+	SentinelCodeImportState,
+	SentinelCodeMonitor,
+	SentinelCodeMonitorDetail,
+	SentinelCodeMonitorInput,
 	SentinelDoctrineView,
 	SentinelEngine,
 	SentinelEnvReport,
@@ -471,6 +476,13 @@ export function App() {
 	/** The one-click official sync runs for minutes; it keeps its own busy flag
 	 * because the source list is broadcast as soon as the source is created. */
 	const [pocOfficialSyncing, setPocOfficialSyncing] = useState(false);
+	const [codeMonitors, setCodeMonitors] = useState<SentinelCodeMonitor[]>([]);
+	const [codeMonitorDetail, setCodeMonitorDetail] = useState<SentinelCodeMonitorDetail | null>(null);
+	const [codeBranchProbes, setCodeBranchProbes] = useState<BranchProbe[]>([]);
+	const [codeMonitorBusy, setCodeMonitorBusy] = useState<string | null>(null);
+	const [codeCheckingIds, setCodeCheckingIds] = useState<string[]>([]);
+	const [codeImport, setCodeImport] = useState<SentinelCodeImportState | null>(null);
+	const codeMonitorDetailRef = useRef<SentinelCodeMonitorDetail | null>(null);
 	/** Android devices: the device page's gateway state. */
 	const [droidState, setDroidState] = useState<{
 		enabled: boolean;
@@ -1403,6 +1415,51 @@ export function App() {
 					if (message.action === "同步" && message.ok && message.id) setPocSyncing(null);
 					if (message.action === "同步官方 POC") setPocOfficialSyncing(false);
 					break;
+				case "code_monitors": {
+					setCodeMonitors(message.monitors);
+					// A check or a dispatch landed; an open detail should show it without
+					// the operator closing and reopening the drawer.
+					const open = codeMonitorDetailRef.current;
+					if (open) send({ type: "get_code_monitor", id: open.monitor.id });
+					break;
+				}
+				case "code_monitor_import":
+					setCodeImport(message.state);
+					break;
+				case "code_monitor_detail":
+					setCodeMonitorDetail(message.detail);
+					break;
+				case "code_monitor_branches":
+					setCodeBranchProbes((prev) =>
+						[
+							...prev,
+							{
+								requestId: message.requestId,
+								...(message.branches ? { branches: message.branches } : {}),
+								...(message.error ? { error: message.error } : {}),
+							},
+						].slice(-100),
+					);
+					break;
+				case "code_monitor_result":
+					if (message.action === "检查监控" && message.id) {
+						setCodeCheckingIds((prev) => prev.filter((id) => id !== message.id));
+					} else {
+						setCodeMonitorBusy(null);
+					}
+					if (!message.ok && message.error) pushError(message.error);
+					if (
+						message.ok &&
+						message.action === "检查监控" &&
+						message.id &&
+						codeMonitorDetailRef.current?.monitor.id === message.id
+					) {
+						send({ type: "get_code_monitor", id: message.id });
+					}
+					if (message.ok && message.action === "删除监控" && message.id) {
+						setCodeMonitorDetail((current) => (current?.monitor.id === message.id ? null : current));
+					}
+					break;
 				case "api_models":
 					setApiModels(message.items);
 					break;
@@ -1648,7 +1705,11 @@ export function App() {
 			(message) => handleServerMessage(message),
 			(open) => {
 				setConnected(open);
-				if (!open) return;
+				if (!open) {
+					// A check in flight dies with the socket; do not leave spinners stuck.
+					setCodeCheckingIds([]);
+					return;
+				}
 				// Every (re)connect re-reads the whole view. A dropped socket misses
 				// events, so the snapshot and the listings are the only way to catch up.
 				for (const request of [
@@ -1658,6 +1719,7 @@ export function App() {
 					"get_environment",
 					"get_stats",
 					"list_projects",
+					"list_code_monitors",
 					"get_state",
 					"get_gatekeeper_config",
 					"get_model_library",
@@ -1690,6 +1752,29 @@ export function App() {
 	const send = useCallback((message: Parameters<SentinelConnection["send"]>[0]) => {
 		connectionRef.current?.send(message);
 	}, []);
+
+	/** One check per selected monitor; the row spinners follow the ids in flight. */
+	const startMonitorChecks = useCallback(
+		(ids: string[], trigger: "manual" | "batch" = "manual") => {
+			const unique = [...new Set(ids)].filter(Boolean);
+			if (unique.length === 0) return;
+			setCodeCheckingIds((prev) => [...new Set([...prev, ...unique])]);
+			for (const id of unique) send({ type: "check_code_monitor", id, trigger });
+		},
+		[send],
+	);
+
+	const importCodeMonitors = useCallback(
+		(inputs: SentinelCodeMonitorInput[]) => {
+			if (inputs.length === 0) return;
+			send({ type: "import_code_monitors", inputs });
+		},
+		[send],
+	);
+
+	const dismissCodeMonitorImport = useCallback(() => {
+		send({ type: "dismiss_code_monitor_import" });
+	}, [send]);
 
 	const loadPluginBuildLog = useCallback(
 		(hostId: string, pluginId: string) => {
@@ -2023,6 +2108,9 @@ export function App() {
 			case "pocs":
 				send({ type: "list_pocs", filters: pocFilters });
 				break;
+			case "codeintel":
+				send({ type: "list_code_monitors" });
+				break;
 			case "apimodels":
 				send({ type: "list_api_models" });
 				break;
@@ -2132,6 +2220,19 @@ export function App() {
 		send({ type: "list_pocs", filters: pocFilters, page: pocPage });
 	}, [page, connected, pocFilters, pocPage, send]);
 
+	/**
+	 * The watch page reads its list on open and whenever the project changes. The
+	 * list is project-scoped on screen, but the server broadcast is pushed only
+	 * after a change; without this read a fresh page shows an empty table over a
+	 * populated database.
+	 */
+	useEffect(() => {
+		setCodeMonitorDetail(null);
+		if (page !== "codeintel" || !connected) return;
+		send({ type: "list_code_monitors" });
+		send({ type: "get_code_monitor_import" });
+	}, [page, connected, snapshot?.project?.id, send]);
+
 	/** The plugin center is host state with no push, so opening it reads the page. */
 	useEffect(() => {
 		if (page !== "settings.plugins" || !connected) return;
@@ -2181,6 +2282,9 @@ export function App() {
 	useEffect(() => {
 		assetDetailRef.current = assetDetail;
 	}, [assetDetail]);
+	useEffect(() => {
+		codeMonitorDetailRef.current = codeMonitorDetail;
+	}, [codeMonitorDetail]);
 
 	/** A folder archive belongs to one project's container; drop it on a switch. */
 	useEffect(() => {
@@ -3146,6 +3250,51 @@ export function App() {
 						<WebFuzzPage key={snapshot?.project?.id ?? "none"} project={snapshot?.project ?? null}
 							initialFlowId={webFuzzImport?.projectId === snapshot?.project?.id ? webFuzzImport?.flowId : undefined}
 							onImportConsumed={() => setWebFuzzImport(null)} />
+					) : page === "codeintel" ? (
+						<CodeIntelPage
+							project={snapshot?.project ?? null}
+							monitors={codeMonitors}
+							detail={codeMonitorDetail}
+							branchProbes={codeBranchProbes}
+							busyId={codeMonitorBusy}
+							checkingIds={codeCheckingIds}
+							onCheckMany={(ids) => startMonitorChecks(ids, "batch")}
+							onSetSchedule={(ids, schedule) => {
+								setCodeMonitorBusy("schedule");
+								send({ type: "set_code_monitors_schedule", ids, ...schedule });
+							}}
+							onRefresh={() => send({ type: "list_code_monitors" })}
+							onOpen={(id) => send({ type: "get_code_monitor", id })}
+							onCloseDetail={() => setCodeMonitorDetail(null)}
+							importState={codeImport}
+							onImport={importCodeMonitors}
+							onDismissImport={dismissCodeMonitorImport}
+							onUpdate={(id, input) => {
+								setCodeMonitorBusy(id);
+								send({ type: "update_code_monitor", id, input });
+							}}
+							onDelete={(id) => {
+								setCodeMonitorBusy(id);
+								send({ type: "delete_code_monitor", id });
+							}}
+							onDeleteMany={(ids) => {
+								setCodeMonitorBusy("batch-delete");
+								send({ type: "delete_code_monitors", ids });
+							}}
+							onCheck={(id) => startMonitorChecks([id])}
+							onDispatch={(commitId) => {
+								setCodeMonitorBusy(commitId);
+								send({ type: "dispatch_code_commit", id: commitId });
+							}}
+							onIgnore={(commitId) => send({ type: "ignore_code_commit", id: commitId })}
+							onRejudge={(commitId) => {
+								setCodeMonitorBusy(commitId);
+								send({ type: "rejudge_code_commit", id: commitId });
+							}}
+							onProbeBranches={(requestId, input) =>
+								send({ type: "code_monitor_branches", requestId, ...input })
+							}
+						/>
 					) : page === "pocs" ? (
 						<PocPage
 							items={pocItems}
