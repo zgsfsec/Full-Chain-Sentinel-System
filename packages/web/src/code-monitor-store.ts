@@ -15,6 +15,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
+	SentinelCodeActivityCounts,
+	SentinelCodeActivityFilter,
 	SentinelCodeCheckJob,
 	SentinelCodeCheckLog,
 	SentinelCodeCheckStatus,
@@ -27,6 +29,30 @@ import type {
 	SentinelVulnSeverity,
 } from "./protocol.ts";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite.ts";
+
+const REVIEW_SQL =
+	"verdict = 'security' AND engine_id IS NULL AND status = 'new' AND duplicate_of IS NULL AND error IS NULL";
+const PENDING_SQL = "verdict = 'pending' AND status != 'ignored'";
+const FAILED_SQL = "verdict = 'failed' AND status != 'ignored'";
+const DISPATCH_FAILED_SQL = "verdict = 'security' AND error IS NOT NULL AND status != 'ignored'";
+const ATTENTION_SQL = `(${PENDING_SQL}) OR (${FAILED_SQL}) OR (${DISPATCH_FAILED_SQL}) OR (${REVIEW_SQL})`;
+
+function activityWhere(filter: SentinelCodeActivityFilter): string {
+	switch (filter) {
+		case "review":
+			return `project_id = ? AND (${REVIEW_SQL})`;
+		case "failed":
+			return `project_id = ? AND (${FAILED_SQL})`;
+		case "dispatch_failed":
+			return `project_id = ? AND (${DISPATCH_FAILED_SQL})`;
+		case "pending":
+			return `project_id = ? AND (${PENDING_SQL})`;
+		case "all":
+			return "project_id = ?";
+		default:
+			return `project_id = ? AND (${ATTENTION_SQL})`;
+	}
+}
 
 /** Commits kept per monitor; the oldest are dropped first. */
 const MAX_COMMITS_PER_MONITOR = 2000;
@@ -614,6 +640,63 @@ export class CodeMonitorStore {
 			.prepare("SELECT * FROM code_commits WHERE monitor_id = ? ORDER BY authored_at DESC, id LIMIT ?")
 			.all(monitorId, limit) as unknown as CommitRow[];
 		return rows.map(toCommit);
+	}
+
+	/**
+	 * Cross-monitor activity for one project. The default slice is the work that
+	 * needs an operator: pending/security review, failed judgments and failed
+	 * dispatch. Dispatched successes stay out of it.
+	 */
+	listActivity(
+		projectId: string,
+		filter: SentinelCodeActivityFilter,
+		page: number,
+		pageSize: number,
+	): { items: SentinelCodeCommit[]; total: number } {
+		const where = activityWhere(filter);
+		const safePage = Math.max(1, Math.floor(page));
+		const safeSize = Math.min(200, Math.max(1, Math.floor(pageSize)));
+		const totalRow = this.db
+			.prepare(`SELECT COUNT(*) AS total FROM code_commits WHERE ${where}`)
+			.get(projectId) as unknown as { total: number } | undefined;
+		const rows = this.db
+			.prepare(
+				`SELECT * FROM code_commits WHERE ${where}
+				 ORDER BY authored_at DESC, created_at DESC, id DESC LIMIT ? OFFSET ?`,
+			)
+			.all(projectId, safeSize, (safePage - 1) * safeSize) as unknown as CommitRow[];
+		return { items: rows.map(toCommit), total: Number(totalRow?.total ?? 0) };
+	}
+
+	activityCounts(projectId: string): Omit<SentinelCodeActivityCounts, "anomalies"> {
+		const row = this.db
+			.prepare(
+				`SELECT
+					SUM(CASE WHEN ${PENDING_SQL} THEN 1 ELSE 0 END) AS pending,
+					SUM(CASE WHEN ${FAILED_SQL} THEN 1 ELSE 0 END) AS failed,
+					SUM(CASE WHEN ${DISPATCH_FAILED_SQL} THEN 1 ELSE 0 END) AS dispatch_failed,
+					SUM(CASE WHEN ${REVIEW_SQL} THEN 1 ELSE 0 END) AS review,
+					SUM(CASE WHEN ${ATTENTION_SQL} THEN 1 ELSE 0 END) AS attention,
+					COUNT(*) AS total
+				 FROM code_commits WHERE project_id = ?`,
+			)
+			.get(projectId) as unknown as
+			| {
+					pending: number;
+					failed: number;
+					dispatch_failed: number;
+					review: number;
+					attention: number;
+					total: number;
+			  }
+			| undefined;
+		return {
+			pending: Number(row?.pending ?? 0),
+			failed: Number(row?.failed ?? 0),
+			dispatchFailed: Number(row?.dispatch_failed ?? 0),
+			review: Number(row?.review ?? 0),
+			attention: Number(row?.attention ?? 0),
+		};
 	}
 
 	/** Create a queued job, or return the active one already covering this monitor. */

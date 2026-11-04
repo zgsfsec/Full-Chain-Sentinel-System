@@ -78,6 +78,8 @@ import type {
 	SentinelWebSearchConfigView,
 	SentinelAssetPlatform,
 	SentinelClientMessage,
+	SentinelCodeActivityFilter,
+	SentinelCodeActivityView,
 	SentinelCodeImportState,
 	SentinelCodeMonitor,
 	SentinelCodeMonitorDetail,
@@ -482,6 +484,8 @@ export function App() {
 	const [codeMonitorBusy, setCodeMonitorBusy] = useState<string | null>(null);
 	const [codeCheckingIds, setCodeCheckingIds] = useState<string[]>([]);
 	const [codeImport, setCodeImport] = useState<SentinelCodeImportState | null>(null);
+	const [codeActivity, setCodeActivity] = useState<SentinelCodeActivityView | null>(null);
+	const [codeActivityLoading, setCodeActivityLoading] = useState(false);
 	const codeMonitorDetailRef = useRef<SentinelCodeMonitorDetail | null>(null);
 	/** Android devices: the device page's gateway state. */
 	const [droidState, setDroidState] = useState<{
@@ -1426,6 +1430,10 @@ export function App() {
 				case "code_monitor_import":
 					setCodeImport(message.state);
 					break;
+				case "code_activity":
+					setCodeActivity(message.view);
+					setCodeActivityLoading(false);
+					break;
 				case "code_monitor_detail":
 					setCodeMonitorDetail(message.detail);
 					break;
@@ -1775,6 +1783,14 @@ export function App() {
 	const dismissCodeMonitorImport = useCallback(() => {
 		send({ type: "dismiss_code_monitor_import" });
 	}, [send]);
+
+	const loadCodeActivity = useCallback(
+		(projectId: string, filter: SentinelCodeActivityFilter, page: number, pageSize: number) => {
+			setCodeActivityLoading(true);
+			send({ type: "list_code_activity", projectId, filter, page, pageSize });
+		},
+		[send],
+	);
 
 	const loadPluginBuildLog = useCallback(
 		(hostId: string, pluginId: string) => {
@@ -3267,6 +3283,9 @@ export function App() {
 							onOpen={(id) => send({ type: "get_code_monitor", id })}
 							onCloseDetail={() => setCodeMonitorDetail(null)}
 							importState={codeImport}
+							activity={codeActivity}
+							activityLoading={codeActivityLoading}
+							onLoadActivity={loadCodeActivity}
 							onImport={importCodeMonitors}
 							onDismissImport={dismissCodeMonitorImport}
 							onUpdate={(id, input) => {

@@ -1056,6 +1056,26 @@ export type SentinelCodeCheckStatus = "running" | "ok" | "error";
 /** Queue lifecycle of a check request. */
 export type SentinelCodeJobStatus = "queued" | "running" | "done" | "failed";
 
+/** Which slice of the project activity feed to read. */
+export type SentinelCodeActivityFilter = "attention" | "review" | "failed" | "dispatch_failed" | "pending" | "all";
+
+export interface SentinelCodeActivityCounts {
+	attention: number;
+	review: number;
+	failed: number;
+	dispatchFailed: number;
+	pending: number;
+	anomalies: number;
+}
+
+export interface SentinelCodeActivityView {
+	items: SentinelCodeCommit[];
+	total: number;
+	page: number;
+	pageSize: number;
+	counts: SentinelCodeActivityCounts;
+}
+
 /** Server-side progress of a bulk monitor import. */
 export interface SentinelCodeImportState {
 	total: number;
@@ -2261,6 +2281,13 @@ export type SentinelClientMessage =
 	| { type: "import_code_monitors"; inputs: SentinelCodeMonitorInput[] }
 	| { type: "get_code_monitor_import" }
 	| { type: "dismiss_code_monitor_import" }
+	| {
+			type: "list_code_activity";
+			projectId: string;
+			filter: SentinelCodeActivityFilter;
+			page: number;
+			pageSize: number;
+	  }
 	| { type: "check_code_monitor"; id: string; trigger?: SentinelCodeCheckTrigger }
 	| { type: "get_code_monitor"; id: string }
 	/** Start a reproduction engine for one confirmed finding. */
@@ -2376,6 +2403,7 @@ export type SentinelServerMessage =
 	| { type: "poc_source_result"; action: string; id?: string; ok: boolean; error?: string }
 	| { type: "code_monitors"; monitors: SentinelCodeMonitor[] }
 	| { type: "code_monitor_import"; state: SentinelCodeImportState | null }
+	| { type: "code_activity"; view: SentinelCodeActivityView }
 	| { type: "code_monitor_detail"; detail: SentinelCodeMonitorDetail }
 	/** Answer to `code_monitor_branches`; `error` is set when the probe failed. */
 	| { type: "code_monitor_branches"; requestId: number; branches?: string[]; error?: string }

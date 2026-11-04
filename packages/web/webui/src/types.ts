@@ -937,6 +937,31 @@ export interface SentinelCodeCommit {
 }
 
 /** Progress of the client-side sequential monitor import queue. */
+export type SentinelCodeActivityFilter =
+	| "attention"
+	| "review"
+	| "failed"
+	| "dispatch_failed"
+	| "pending"
+	| "all";
+
+export interface SentinelCodeActivityCounts {
+	attention: number;
+	review: number;
+	failed: number;
+	dispatchFailed: number;
+	pending: number;
+	anomalies: number;
+}
+
+export interface SentinelCodeActivityView {
+	items: SentinelCodeCommit[];
+	total: number;
+	page: number;
+	pageSize: number;
+	counts: SentinelCodeActivityCounts;
+}
+
 export interface SentinelCodeImportState {
 	total: number;
 	processed: number;
@@ -1721,6 +1746,13 @@ export type SentinelClientMessage =
 	| { type: "import_code_monitors"; inputs: SentinelCodeMonitorInput[] }
 	| { type: "get_code_monitor_import" }
 	| { type: "dismiss_code_monitor_import" }
+	| {
+			type: "list_code_activity";
+			projectId: string;
+			filter: SentinelCodeActivityFilter;
+			page: number;
+			pageSize: number;
+	  }
 	| { type: "check_code_monitor"; id: string; trigger?: SentinelCodeCheckTrigger }
 	| { type: "get_code_monitor"; id: string }
 	| { type: "dispatch_code_commit"; id: string }
@@ -2033,6 +2065,7 @@ export type SentinelServerMessage =
 	| { type: "poc_source_result"; action: string; id?: string; ok: boolean; error?: string }
 	| { type: "code_monitors"; monitors: SentinelCodeMonitor[] }
 	| { type: "code_monitor_import"; state: SentinelCodeImportState | null }
+	| { type: "code_activity"; view: SentinelCodeActivityView }
 	| { type: "code_monitor_detail"; detail: SentinelCodeMonitorDetail }
 	| { type: "code_monitor_branches"; requestId: number; branches?: string[]; error?: string }
 	| {

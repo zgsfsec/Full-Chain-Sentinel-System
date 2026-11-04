@@ -28,6 +28,22 @@ export function interpolate(source: string, vars?: Record<string, string | numbe
  * string still renders (in Chinese) until its translation lands.
  */
 export const EN_MESSAGES: Record<string, string> = {
+	"动态（{n}）": "Activity ({n})",
+	监控仓库: "Watched repositories",
+	"待处理（{n}）": "Needs attention ({n})",
+	"待复现（{n}）": "Ready to reproduce ({n})",
+	"判定失败（{n}）": "Judgment failed ({n})",
+	"下发失败（{n}）": "Dispatch failed ({n})",
+	"判定中（{n}）": "Judging ({n})",
+	"复现所选（{n}）": "Reproduce selected ({n})",
+	"重判所选（{n}）": "Rejudge selected ({n})",
+	"忽略所选（{n}）": "Ignore selected ({n})",
+	没有需要处理的动态: "No activity needs attention",
+	"有 {n} 个监控检查异常": "{n} monitors have check errors",
+	"另有 {n} 个异常": "{n} more errors",
+	已复现: "Reproduced",
+	判定中: "Judging",
+	判定失败: "Judgment failed",
 	"已全选 {n} 个": "All {n} selected",
 	"全选所有（{n}）": "Select all ({n})",
 	"已选 {n} 个": "{n} selected",

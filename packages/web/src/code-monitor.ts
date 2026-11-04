@@ -40,6 +40,8 @@ import { nextCronTime, parseCronExpression, validateCronExpression } from "./cro
 import { execInContainer } from "./docker.ts";
 import { resolveLibraryRole } from "./model-library.ts";
 import type {
+	SentinelCodeActivityFilter,
+	SentinelCodeActivityView,
 	SentinelCodeCheckJob,
 	SentinelCodeCheckTrigger,
 	SentinelCodeCommit,
@@ -347,6 +349,28 @@ export class CodeMonitorManager {
 			nextCheckAt: nextCheckFor(monitor),
 			checkState: active.get(monitor.id) ?? "idle",
 		}));
+	}
+
+	/** Project-wide activity for the cross-monitor inbox tab. */
+	activity(
+		projectId: string,
+		filter: SentinelCodeActivityFilter,
+		page: number,
+		pageSize: number,
+	): SentinelCodeActivityView {
+		const project = this.hooks.project(projectId);
+		if (!project) throw new Error("项目不存在");
+		const { items, total } = this.store.listActivity(projectId, filter, page, pageSize);
+		const anomalies = this.store
+			.listMonitors()
+			.filter((monitor) => monitor.projectId === projectId && Boolean(monitor.lastError)).length;
+		return {
+			items,
+			total,
+			page: Math.max(1, Math.floor(page)),
+			pageSize: Math.min(200, Math.max(1, Math.floor(pageSize))),
+			counts: { ...this.store.activityCounts(projectId), anomalies },
+		};
 	}
 
 	detail(id: string): SentinelCodeMonitorDetail {

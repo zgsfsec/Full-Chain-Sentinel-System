@@ -3415,6 +3415,21 @@ export async function startSentinelServer(
 					}
 					sendTo(socket, { type: "code_monitors", monitors: codeMonitors.list() });
 					return;
+				case "list_code_activity": {
+					if (!codeMonitors) {
+						sendError(socket, t("未配置配置目录，无法使用开源监测"));
+						return;
+					}
+					try {
+						sendTo(socket, {
+							type: "code_activity",
+							view: codeMonitors.activity(message.projectId, message.filter, message.page, message.pageSize),
+						});
+					} catch (error) {
+						sendError(socket, error instanceof Error ? error.message : String(error));
+					}
+					return;
+				}
 				case "code_monitor_branches": {
 					if (!codeMonitors) {
 						sendTo(socket, {

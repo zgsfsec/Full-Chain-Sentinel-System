@@ -189,3 +189,16 @@
 	gap: 12px;
 	padding: 4px 2px 10px;
 }
+
+.code-intel-activity-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.code-intel-activity-bar .ant-segmented {
+	max-width: 100%;
+	overflow-x: auto;
+}

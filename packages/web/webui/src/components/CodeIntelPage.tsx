@@ -50,6 +50,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_CRON_EXPRESSION, nextCronOccurrences, validateCronExpression } from "../../../src/cron.ts";
 import { getLanguage, t } from "../i18n.ts";
 import type {
+	SentinelCodeActivityFilter,
+	SentinelCodeActivityView,
 	SentinelCodeCheckJob,
 	SentinelCodeCheckLog,
 	SentinelCodeCheckStatus,
@@ -170,8 +172,16 @@ export interface CodeIntelPageProps {
 	onOpen: (id: string) => void;
 	onCloseDetail: () => void;
 	importState: SentinelCodeImportState | null;
+	activity: SentinelCodeActivityView | null;
+	activityLoading: boolean;
 	onImport: (inputs: SentinelCodeMonitorInput[]) => void;
 	onDismissImport: () => void;
+	onLoadActivity: (
+		projectId: string,
+		filter: SentinelCodeActivityFilter,
+		page: number,
+		pageSize: number,
+	) => void;
 	onUpdate: (id: string, input: SentinelCodeMonitorInput) => void;
 	onDelete: (id: string) => void;
 	onDeleteMany: (ids: string[]) => void;
@@ -387,8 +397,11 @@ export function CodeIntelPage({
 	onOpen,
 	onCloseDetail,
 	importState,
+	activity,
+	activityLoading,
 	onImport,
 	onDismissImport,
+	onLoadActivity,
 	onUpdate,
 	onDelete,
 	onDeleteMany,
@@ -412,6 +425,11 @@ export function CodeIntelPage({
 	const [selectedIds, setSelectedIds] = useState<string[]>([]);
 	const [monitorPage, setMonitorPage] = useState(1);
 	const [monitorPageSize, setMonitorPageSize] = useState(20);
+	const [view, setView] = useState<"activity" | "monitors">("activity");
+	const [activityFilter, setActivityFilter] = useState<SentinelCodeActivityFilter>("attention");
+	const [activityPage, setActivityPage] = useState(1);
+	const [activityPageSize, setActivityPageSize] = useState(20);
+	const [activitySelectedIds, setActivitySelectedIds] = useState<string[]>([]);
 	const [batchOpen, setBatchOpen] = useState(false);
 	const [batchKind, setBatchKind] = useState<SentinelCodeScheduleKind>("interval");
 	const [batchInterval, setBatchInterval] = useState(60);
@@ -430,6 +448,12 @@ export function CodeIntelPage({
 		[monitors, project],
 	);
 	const allSelected = rows.length > 0 && selectedIds.length === rows.length;
+	const monitorById = useMemo(() => new Map(rows.map((monitor) => [monitor.id, monitor] as const)), [rows]);
+	const activityRows = activity?.items ?? [];
+	const activityCounts =
+		activity?.counts ??
+		({ attention: 0, review: 0, failed: 0, dispatchFailed: 0, pending: 0, anomalies: 0 } as const);
+	const activityAnomalies = rows.filter((monitor) => Boolean(monitor.lastError));
 	const editingMonitor = editor?.monitor ?? null;
 	const createRepos = useMemo(() => repoLines(bulkUrls), [bulkUrls]);
 	const pagedCreateRepos = useMemo(
@@ -445,6 +469,20 @@ export function CodeIntelPage({
 		const lastPage = Math.max(1, Math.ceil(rows.length / monitorPageSize));
 		setMonitorPage((page) => Math.min(page, lastPage));
 	}, [monitorPageSize, rows.length]);
+	useEffect(() => {
+		if (view !== "activity" || !project) return;
+		onLoadActivity(project.id, activityFilter, activityPage, activityPageSize);
+	}, [view, project?.id, activityFilter, activityPage, activityPageSize, monitors, onLoadActivity]);
+	useEffect(() => {
+		setActivitySelectedIds((prev) =>
+			prev.filter((id) => (activity?.items ?? []).some((item) => item.id === id)),
+		);
+	}, [activity]);
+	useEffect(() => {
+		if (!activity) return;
+		const lastPage = Math.max(1, Math.ceil(activity.total / activityPageSize));
+		setActivityPage((page) => Math.min(page, lastPage));
+	}, [activity, activityPageSize]);
 	const branchesFor = (url: string): string[] => repoBranches[url] ?? ["main"];
 
 	// Selection follows the visible rows: a project switch or a deleted monitor
@@ -932,6 +970,132 @@ export function CodeIntelPage({
 		},
 	];
 
+	const canDispatch = (commit: SentinelCodeCommit): boolean =>
+		commit.verdict === "security" &&
+		!commit.engineId &&
+		commit.status !== "ignored" &&
+		!commit.duplicateOf;
+	const canIgnore = (commit: SentinelCodeCommit): boolean =>
+		commit.status !== "dispatched" && !commit.engineId;
+
+	const activityColumns: TableColumnsType<SentinelCodeCommit> = [
+		{
+			title: t("时间"),
+			dataIndex: "authoredAt",
+			key: "authoredAt",
+			width: 170,
+			render: (value: number) => <Text className="code-intel-line__text">{formatWhen(value)}</Text>,
+		},
+		{
+			title: t("仓库"),
+			key: "repo",
+			width: 200,
+			render: (_value, commit) => (
+				<Text className="code-intel-line__text">
+					{monitorById.get(commit.monitorId)?.name ?? commit.monitorId}
+				</Text>
+			),
+		},
+		{
+			title: t("分支"),
+			dataIndex: "branch",
+			key: "branch",
+			width: 100,
+			render: (branch: string) => <Tag>{branch}</Tag>,
+		},
+		{
+			title: t("提交"),
+			key: "commit",
+			width: 360,
+			render: (_value, commit) => (
+				<div className="code-intel-line">
+					<Anchor href={commit.url} target="_blank" rel="noreferrer">
+						{commit.shortSha}
+					</Anchor>
+					<Text className="code-intel-line__text">{commit.title}</Text>
+				</div>
+			),
+		},
+		{
+			title: t("判定"),
+			key: "verdict",
+			width: 140,
+			render: (_value, commit) => (
+				<span className="code-intel-line">
+					<Tag
+						color={
+							commit.verdict === "security" ? "red" : commit.verdict === "failed" ? "orange" : "default"
+						}
+					>
+						{VERDICT_LABELS[commit.verdict]}
+					</Tag>
+					{commit.cve ? <Tag color="magenta">{commit.cve}</Tag> : null}
+					{commit.severity ? (
+						<Tag color={SEVERITY_COLORS[commit.severity]}>{commit.severity}</Tag>
+					) : null}
+				</span>
+			),
+		},
+		{
+			title: t("状态"),
+			key: "status",
+			width: 130,
+			render: (_value, commit) => {
+				if (commit.error) {
+					return (
+						<Tooltip title={commit.error}>
+							<Tag color="red">{t("下发失败")}</Tag>
+						</Tooltip>
+					);
+				}
+				if (commit.verdict === "pending") return <Tag color="processing">{t("判定中")}</Tag>;
+				if (commit.status === "ignored") return <Tag>{t("已忽略")}</Tag>;
+				if (commit.engineId) return <Tag color="blue">{t("已复现")}</Tag>;
+				if (commit.verdict === "failed") return <Tag color="orange">{t("判定失败")}</Tag>;
+				if (commit.verdict === "security") return <Tag color="gold">{t("待复现")}</Tag>;
+				return <Tag>{t("非安全")}</Tag>;
+			},
+		},
+		{
+			title: t("操作"),
+			key: "actions",
+			width: 280,
+			render: (_value, commit) => (
+				<Space size={4} wrap={false}>
+					<Tooltip title={t("准备源码并新建工程复现")}>
+						<Button
+							size="small"
+							type="primary"
+							icon={<ExperimentOutlined />}
+							disabled={!canDispatch(commit)}
+							loading={busyId === commit.id}
+							onClick={() => onDispatch(commit.id)}
+						>
+							{t("复现")}
+						</Button>
+					</Tooltip>
+					<Button
+						size="small"
+						icon={<ReloadOutlined />}
+						loading={busyId === commit.id}
+						onClick={() => onRejudge(commit.id)}
+					>
+						{t("重判")}
+					</Button>
+					<Button
+						size="small"
+						icon={<StopOutlined />}
+						disabled={!canIgnore(commit)}
+						onClick={() => onIgnore(commit.id)}
+					/>
+					<Button size="small" type="link" onClick={() => onOpen(commit.monitorId)}>
+						{t("详情")}
+					</Button>
+				</Space>
+			),
+		},
+	];
+
 	const commitColumns: TableColumnsType<SentinelCodeCommit> = [
 		{
 			title: t("提交"),
@@ -1054,6 +1218,149 @@ export function CodeIntelPage({
 		},
 	];
 
+	const activitySelected = activityRows.filter((commit) => activitySelectedIds.includes(commit.id));
+	const dispatchableSelected = activitySelected.filter(canDispatch);
+	const ignorableSelected = activitySelected.filter(canIgnore);
+
+	const renderActivity = () => (
+		<Space direction="vertical" size={12} style={{ width: "100%" }}>
+			{activityAnomalies.length > 0 ? (
+				<Alert
+					type="warning"
+					showIcon
+					message={t("有 {n} 个监控检查异常", { n: activityAnomalies.length })}
+					description={
+						<Space direction="vertical" size={4} style={{ width: "100%" }}>
+							{activityAnomalies.slice(0, 3).map((monitor) => (
+								<div key={monitor.id} className="code-intel-line">
+									<Text strong>{monitor.name}</Text>
+									<Text type="danger" className="code-intel-line__text">
+										{monitor.lastError}
+									</Text>
+									<Button size="small" onClick={() => onCheck(monitor.id)}>
+										{t("检查")}
+									</Button>
+								</div>
+							))}
+							{activityAnomalies.length > 3 ? (
+								<Text type="secondary">
+									{t("另有 {n} 个异常", { n: activityAnomalies.length - 3 })}
+								</Text>
+							) : null}
+						</Space>
+					}
+				/>
+			) : null}
+
+			<div className="code-intel-activity-bar">
+				<Segmented
+					size="small"
+					value={activityFilter}
+					options={[
+						{
+							value: "attention",
+							label: t("待处理（{n}）", { n: activityCounts.attention }),
+						},
+						{ value: "review", label: t("待复现（{n}）", { n: activityCounts.review }) },
+						{ value: "failed", label: t("判定失败（{n}）", { n: activityCounts.failed }) },
+						{
+							value: "dispatch_failed",
+							label: t("下发失败（{n}）", { n: activityCounts.dispatchFailed }),
+						},
+						{ value: "pending", label: t("判定中（{n}）", { n: activityCounts.pending }) },
+						{ value: "all", label: t("全部") },
+					]}
+					onChange={(value) => {
+						setActivityFilter(value as SentinelCodeActivityFilter);
+						setActivityPage(1);
+						setActivitySelectedIds([]);
+					}}
+				/>
+				{activitySelected.length > 0 ? (
+					<Space size={6} wrap>
+						<Text type="secondary">{t("已选 {n} 个", { n: activitySelected.length })}</Text>
+						<Button
+							size="small"
+							type="primary"
+							disabled={dispatchableSelected.length === 0}
+							onClick={() => {
+								for (const commit of dispatchableSelected) onDispatch(commit.id);
+								setActivitySelectedIds([]);
+							}}
+						>
+							{t("复现所选（{n}）", { n: dispatchableSelected.length })}
+						</Button>
+						<Button
+							size="small"
+							onClick={() => {
+								for (const commit of activitySelected) onRejudge(commit.id);
+								setActivitySelectedIds([]);
+							}}
+						>
+							{t("重判所选（{n}）", { n: activitySelected.length })}
+						</Button>
+						<Button
+							size="small"
+							danger
+							disabled={ignorableSelected.length === 0}
+							onClick={() => {
+								for (const commit of ignorableSelected) onIgnore(commit.id);
+								setActivitySelectedIds([]);
+							}}
+						>
+							{t("忽略所选（{n}）", { n: ignorableSelected.length })}
+						</Button>
+					</Space>
+				) : null}
+			</div>
+
+			<Table
+				rowKey="id"
+				size="middle"
+				columns={activityColumns}
+				dataSource={activityRows}
+				loading={activityLoading}
+				locale={{ emptyText: <Empty description={t("没有需要处理的动态")} /> }}
+				pagination={{
+					current: activityPage,
+					pageSize: activityPageSize,
+					total: activity?.total ?? 0,
+					showSizeChanger: true,
+					pageSizeOptions: [20, 50, 100],
+					showTotal: (total) => t("共 {n} 条", { n: total }),
+					onChange: (page, size) => {
+						setActivityPage(page);
+						setActivityPageSize(size);
+						setActivitySelectedIds([]);
+					},
+				}}
+				rowSelection={{
+					selectedRowKeys: activitySelectedIds,
+					preserveSelectedRowKeys: true,
+					onChange: (keys) => setActivitySelectedIds(keys.map((key) => String(key))),
+				}}
+				expandable={{
+					expandedRowRender: (commit) => (
+						<Space direction="vertical" size={8} style={{ width: "100%" }}>
+							<Paragraph style={{ margin: 0 }}>
+								<Text strong>{t("判断依据")}</Text>
+								<br />
+								{commit.reason ?? "—"}
+							</Paragraph>
+							{commit.diff ? (
+								<pre className="code-intel-diff">{commit.diff}</pre>
+							) : (
+								<Text type="secondary">{t("没有保存 diff")}</Text>
+							)}
+						</Space>
+					),
+				}}
+				tableLayout="fixed"
+				scroll={{ x: 1400 }}
+			/>
+		</Space>
+	);
+
 	return (
 		<Page
 			title={t("开源情报")}
@@ -1061,46 +1368,70 @@ export function CodeIntelPage({
 				"监控仓库分支上的新提交，由监测模型判断是否为安全修复；确认后交给工程复现漏洞。仓库凭据只存本机，源码准备时短暂传给容器内的 git。",
 			)}
 			extra={
-				<Space>
-					<Button
-						icon={<ScheduleOutlined />}
-						disabled={selectedIds.length === 0}
-						onClick={openBatchSchedule}
-					>
-						{t("批量策略")}
-					</Button>
-					<Popconfirm
-						title={t("删除所选监控？")}
-						description={t("已记录的提交、检查日志和发现会一起删除，工程不受影响。")}
-						okButtonProps={{ danger: true }}
-						okText={t("删除")}
-						cancelText={t("取消")}
-						disabled={selectedIds.length === 0}
-						onConfirm={() => onDeleteMany(selectedIds)}
-					>
-						<Button danger icon={<DeleteOutlined />} disabled={selectedIds.length === 0}>
-							{t("批量删除")}
-						</Button>
-					</Popconfirm>
+				view === "activity" ? (
 					<Button
 						icon={<ReloadOutlined />}
-						disabled={selectedIds.length === 0 || checkingIds.length > 0}
-						loading={selectedIds.some((id) => checkingIds.includes(id))}
-						onClick={() => onCheckMany(selectedIds)}
+						loading={activityLoading}
+						disabled={!project}
+						onClick={() => {
+							if (project) onLoadActivity(project.id, activityFilter, activityPage, activityPageSize);
+						}}
 					>
-						{selectedIds.length > 0
-							? t("检查所选（{n}）", { n: selectedIds.length })
-							: t("检查所选")}
-					</Button>
-					<Button icon={<ReloadOutlined />} onClick={onRefresh}>
 						{t("刷新")}
 					</Button>
-					<Button type="primary" icon={<PlusOutlined />} disabled={!project} onClick={openCreate}>
-						{t("新增监控")}
-					</Button>
-				</Space>
+				) : (
+					<Space>
+						<Button
+							icon={<ScheduleOutlined />}
+							disabled={selectedIds.length === 0}
+							onClick={openBatchSchedule}
+						>
+							{t("批量策略")}
+						</Button>
+						<Popconfirm
+							title={t("删除所选监控？")}
+							description={t("已记录的提交、检查日志和发现会一起删除，工程不受影响。")}
+							okButtonProps={{ danger: true }}
+							okText={t("删除")}
+							cancelText={t("取消")}
+							disabled={selectedIds.length === 0}
+							onConfirm={() => onDeleteMany(selectedIds)}
+						>
+							<Button danger icon={<DeleteOutlined />} disabled={selectedIds.length === 0}>
+								{t("批量删除")}
+							</Button>
+						</Popconfirm>
+						<Button
+							icon={<ReloadOutlined />}
+							disabled={selectedIds.length === 0 || checkingIds.length > 0}
+							loading={selectedIds.some((id) => checkingIds.includes(id))}
+							onClick={() => onCheckMany(selectedIds)}
+						>
+							{selectedIds.length > 0
+								? t("检查所选（{n}）", { n: selectedIds.length })
+								: t("检查所选")}
+						</Button>
+						<Button icon={<ReloadOutlined />} onClick={onRefresh}>
+							{t("刷新")}
+						</Button>
+						<Button type="primary" icon={<PlusOutlined />} disabled={!project} onClick={openCreate}>
+							{t("新增监控")}
+						</Button>
+					</Space>
+				)
 			}
 		>
+			<Tabs
+				activeKey={view}
+				onChange={(key) => setView(key as "activity" | "monitors")}
+				items={[
+					{
+						key: "activity",
+						label: t("动态（{n}）", { n: activityCounts.attention + activityCounts.anomalies }),
+					},
+					{ key: "monitors", label: t("监控仓库") },
+				]}
+			/>
 			{importState ? (
 				<Alert
 					style={{ marginBottom: 12 }}
@@ -1172,6 +1503,8 @@ export function CodeIntelPage({
 					message={t("请先创建或选择一个项目")}
 					description={t("监控必须绑定项目，复现会在该项目的容器里进行。")}
 				/>
+			) : view === "activity" ? (
+				renderActivity()
 			) : rows.length === 0 ? (
 				<Card>
 					<Empty description={t("还没有监控的仓库")}>

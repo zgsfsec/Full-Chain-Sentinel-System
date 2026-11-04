@@ -188,6 +188,53 @@ describe("CodeMonitorStore", () => {
 		});
 	});
 
+	it("builds the project activity inbox from actionable commits", () => {
+		const { store } = open();
+		const monitor = addMonitor(store);
+		const review = addCommit(store, monitor.id, "review");
+		const dispatched = addCommit(store, monitor.id, "dispatched");
+		const failed = addCommit(store, monitor.id, "failed");
+		const dispatchFailed = addCommit(store, monitor.id, "dispatch-failed");
+		const ignored = addCommit(store, monitor.id, "ignored");
+		const security = {
+			verdict: "security" as const,
+			confidence: 0.9,
+			cve: null,
+			severity: "high" as const,
+			vulnType: "路径穿越",
+			reason: "fix",
+			judgedAt: 1,
+		};
+		for (const row of [review, dispatched, dispatchFailed, ignored]) {
+			store.setVerdict(row.id, security);
+		}
+		store.setVerdict(failed.id, {
+			verdict: "failed",
+			confidence: null,
+			cve: null,
+			severity: null,
+			vulnType: null,
+			reason: "model down",
+			judgedAt: 1,
+		});
+		store.setStatus(dispatched.id, "dispatched", "engine-1", null);
+		store.setStatus(dispatchFailed.id, "new", null, "429");
+		store.setStatus(ignored.id, "ignored", null, null);
+
+		const counts = store.activityCounts("p1");
+		expect(counts).toEqual({
+			pending: 0,
+			failed: 1,
+			dispatchFailed: 1,
+			review: 1,
+			attention: 3,
+		});
+		const inbox = store.listActivity("p1", "attention", 1, 20);
+		expect(inbox.total).toBe(3);
+		expect(inbox.items.map((row) => row.id).sort()).toEqual([review.id, failed.id, dispatchFailed.id].sort());
+		expect(store.listActivity("p1", "all", 1, 20).total).toBe(5);
+	});
+
 	it("deletes a project's monitors and history together", () => {
 		const { store } = open();
 		const monitor = addMonitor(store);
