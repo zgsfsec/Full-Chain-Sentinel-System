@@ -35,7 +35,8 @@ const REVIEW_SQL =
 const PENDING_SQL = "verdict = 'pending' AND status != 'ignored'";
 const FAILED_SQL = "verdict = 'failed' AND status != 'ignored'";
 const DISPATCH_FAILED_SQL = "verdict = 'security' AND error IS NOT NULL AND status != 'ignored'";
-const ATTENTION_SQL = `(${PENDING_SQL}) OR (${FAILED_SQL}) OR (${DISPATCH_FAILED_SQL}) OR (${REVIEW_SQL})`;
+const DISPATCHING_SQL = "status = 'dispatching'";
+const ATTENTION_SQL = `(${PENDING_SQL}) OR (${FAILED_SQL}) OR (${DISPATCH_FAILED_SQL}) OR (${DISPATCHING_SQL}) OR (${REVIEW_SQL})`;
 
 function activityWhere(filter: SentinelCodeActivityFilter): string {
 	switch (filter) {
@@ -386,6 +387,9 @@ export class CodeMonitorStore {
 		this.db.exec("PRAGMA journal_mode = WAL");
 		this.db.exec(SCHEMA);
 		this.addScheduleColumns();
+		// A crash mid-dispatch leaves "dispatching" behind with no run behind it;
+		// the engine is only created at the end, so back to "new" is the truth.
+		this.db.prepare("UPDATE code_commits SET status = 'new' WHERE status = 'dispatching'").run();
 	}
 
 	/** Databases created before cron scheduling have no strategy columns. */

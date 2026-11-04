@@ -93,6 +93,7 @@ const VERDICT_LABELS: Record<SentinelCodeCommit["verdict"], string> = {
 
 const STATUS_LABELS: Record<SentinelCodeCommit["status"], string> = {
 	new: t("待处理"),
+	dispatching: t("复现中"),
 	dispatched: t("已下发工程"),
 	ignored: t("已忽略"),
 };
@@ -986,10 +987,12 @@ export function CodeIntelPage({
 	const canDispatch = (commit: SentinelCodeCommit): boolean =>
 		commit.verdict === "security" &&
 		!commit.engineId &&
+		commit.status !== "dispatching" &&
+		commit.status !== "dispatched" &&
 		commit.status !== "ignored" &&
 		!commit.duplicateOf;
 	const canIgnore = (commit: SentinelCodeCommit): boolean =>
-		commit.status !== "dispatched" && !commit.engineId;
+		commit.status !== "dispatching" && commit.status !== "dispatched" && !commit.engineId;
 
 	const activityColumns: TableColumnsType<SentinelCodeCommit> = [
 		{
@@ -1061,6 +1064,7 @@ export function CodeIntelPage({
 						</Tooltip>
 					);
 				}
+				if (commit.status === "dispatching") return <Tag color="processing">{t("复现中")}</Tag>;
 				if (commit.verdict === "pending") return <Tag color="processing">{t("判定中")}</Tag>;
 				if (commit.status === "ignored") return <Tag>{t("已忽略")}</Tag>;
 				if (commit.engineId) return <Tag color="blue">{t("已复现")}</Tag>;
@@ -1171,7 +1175,13 @@ export function CodeIntelPage({
 				<span className="code-intel-line">
 					<Tag
 						color={
-							commit.status === "dispatched" ? "blue" : commit.status === "ignored" ? "default" : "gold"
+							commit.status === "dispatched"
+								? "blue"
+								: commit.status === "dispatching"
+									? "processing"
+									: commit.status === "ignored"
+										? "default"
+										: "gold"
 						}
 					>
 						{STATUS_LABELS[commit.status]}
@@ -1203,6 +1213,7 @@ export function CodeIntelPage({
 							disabled={
 								commit.verdict !== "security" ||
 								Boolean(commit.engineId) ||
+								commit.status === "dispatching" ||
 								commit.status === "ignored" ||
 								Boolean(commit.duplicateOf)
 							}
@@ -1223,7 +1234,11 @@ export function CodeIntelPage({
 					<Button
 						size="small"
 						icon={<StopOutlined />}
-						disabled={commit.status === "dispatched" || Boolean(commit.engineId)}
+						disabled={
+						commit.status === "dispatching" ||
+						commit.status === "dispatched" ||
+						Boolean(commit.engineId)
+					}
 						onClick={() => onIgnore(commit.id)}
 					/>
 				</Space>

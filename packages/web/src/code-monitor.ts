@@ -1062,6 +1062,16 @@ export class CodeMonitorManager {
 		this.dispatching.add(commitId);
 		try {
 			return await this.dispatchUnlocked(commitId);
+		} catch (error) {
+			// Only a run that actually started may be rolled back: a commit that was
+			// rejected before marking (ignored, duplicate, already dispatched) keeps
+			// its own status.
+			const current = this.store.getCommit(commitId);
+			if (current?.status === "dispatching") {
+				this.store.setStatus(commitId, "new", null, errorText(error));
+				this.hooks.onChange();
+			}
+			throw error;
 		} finally {
 			this.dispatching.delete(commitId);
 		}
@@ -1074,11 +1084,16 @@ export class CodeMonitorManager {
 		if (row.engineId) return row.engineId;
 		if (row.duplicateOf) throw new Error("该提交与已有发现重复，已跳过");
 		if (row.status === "ignored") throw new Error("该提交已被忽略");
+		if (row.status === "dispatching") throw new Error("该发现正在下发，请稍候");
 		const monitor = this.store.getMonitor(row.monitorId);
 		if (!monitor) throw new Error("监控不存在");
 		if (!row.diff) throw new Error("缺少 diff，无法准备复现环境");
 		const project = this.hooks.project(monitor.projectId);
 		if (!project) throw new Error("监控所属项目不存在");
+		// Persist "in flight" before the first await: the run takes minutes, and the
+		// UI must show a queued state across page refreshes, not spin on busy flags.
+		this.store.setStatus(row.id, "dispatching", null, null);
+		this.hooks.onChange();
 		if (!(await this.hooks.ensureContainer(project))) {
 			throw new Error("项目容器未运行，请先在项目页启动容器");
 		}

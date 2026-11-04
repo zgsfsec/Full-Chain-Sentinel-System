@@ -877,7 +877,7 @@ export type SentinelCodeCheckTrigger = "manual" | "auto" | "batch";
 
 export type SentinelCodeCheckStatus = "running" | "ok" | "error";
 
-export type SentinelCodeCommitStatus = "new" | "dispatched" | "ignored";
+export type SentinelCodeCommitStatus = "new" | "dispatching" | "dispatched" | "ignored";
 
 export interface SentinelCodeMonitor {
 	id: string;

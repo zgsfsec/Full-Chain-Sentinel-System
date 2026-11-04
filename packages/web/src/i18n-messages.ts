@@ -47,6 +47,7 @@ export const EN_MESSAGES: Record<string, string> = {
 	"已全选 {n} 个": "All {n} selected",
 	"全选所有（{n}）": "Select all ({n})",
 	"已选 {n} 个": "{n} selected",
+	复现中: "Reproducing",
 	取消选择: "Clear selection",
 	"共 {n} 个监控": "{n} monitors",
 	检查全部: "Check all",

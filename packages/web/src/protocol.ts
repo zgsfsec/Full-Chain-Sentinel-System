@@ -1109,8 +1109,12 @@ export interface SentinelCodeCheckJob {
 	checkId: string | null;
 }
 
-/** Where a security commit stands after the operator's or the monitor's action. */
-export type SentinelCodeCommitStatus = "new" | "dispatched" | "ignored";
+/**
+ * Where a security commit stands after the operator's or the monitor's action.
+ * "dispatching" marks a reproduce run in flight, so a page refresh (or a server
+ * restart recovery) still shows the truth instead of snapping back to "new".
+ */
+export type SentinelCodeCommitStatus = "new" | "dispatching" | "dispatched" | "ignored";
 
 /**
  * One watched repository.
