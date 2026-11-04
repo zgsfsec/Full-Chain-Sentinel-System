@@ -13,6 +13,7 @@ import {
 	EditOutlined,
 	ExperimentOutlined,
 	EyeOutlined,
+	MoreOutlined,
 	PlusOutlined,
 	QuestionCircleOutlined,
 	ReloadOutlined,
@@ -25,15 +26,14 @@ import {
 	Badge,
 	Button,
 	Card,
-	Checkbox,
 	Descriptions,
 	Drawer,
+	Dropdown,
 	Empty,
 	Form,
 	Input,
 	Modal,
 	Pagination,
-	Popconfirm,
 	Progress,
 	Segmented,
 	Select,
@@ -447,7 +447,6 @@ export function CodeIntelPage({
 		() => (project ? monitors.filter((monitor) => monitor.projectId === project.id) : []),
 		[monitors, project],
 	);
-	const allSelected = rows.length > 0 && selectedIds.length === rows.length;
 	const monitorById = useMemo(() => new Map(rows.map((monitor) => [monitor.id, monitor] as const)), [rows]);
 	const activityRows = activity?.items ?? [];
 	const activityCounts =
@@ -790,7 +789,7 @@ export function CodeIntelPage({
 		{
 			title: t("操作"),
 			key: "actions",
-			width: 250,
+			width: 190,
 			render: (_value, monitor) => (
 				<Space size={4} wrap={false}>
 					<Button size="small" icon={<EyeOutlined />} onClick={() => onOpen(monitor.id)}>
@@ -805,17 +804,31 @@ export function CodeIntelPage({
 					>
 						{t("检查")}
 					</Button>
-					<Button size="small" icon={<EditOutlined />} onClick={() => openEdit(monitor)} />
-					<Popconfirm
-						title={t("删除这个监控？")}
-						description={t("已记录的提交与发现会一起删除，工程不受影响。")}
-						okButtonProps={{ danger: true }}
-						okText={t("删除")}
-						cancelText={t("取消")}
-						onConfirm={() => onDelete(monitor.id)}
+					<Dropdown
+						menu={{
+							items: [
+								{ key: "edit", icon: <EditOutlined />, label: t("编辑") },
+								{ key: "delete", icon: <DeleteOutlined />, danger: true, label: t("删除") },
+							],
+							onClick: ({ key }) => {
+								if (key === "edit") {
+									openEdit(monitor);
+								} else if (key === "delete") {
+									Modal.confirm({
+										title: t("删除这个监控？"),
+										content: t("已记录的提交与发现会一起删除，工程不受影响。"),
+										okButtonProps: { danger: true },
+										okText: t("删除"),
+										cancelText: t("取消"),
+										onOk: () => onDelete(monitor.id),
+									});
+								}
+							},
+						}}
+						trigger={["click"]}
 					>
-						<Button size="small" danger icon={<DeleteOutlined />} />
-					</Popconfirm>
+						<Button size="small" icon={<MoreOutlined />} />
+					</Dropdown>
 				</Space>
 			),
 		},
@@ -1276,9 +1289,12 @@ export function CodeIntelPage({
 						setActivitySelectedIds([]);
 					}}
 				/>
-				{activitySelected.length > 0 ? (
+			</div>
+
+			{activitySelected.length > 0 ? (
+				<div className="code-intel-selection-bar">
+					<Text type="secondary">{t("已选 {n} 个", { n: activitySelected.length })}</Text>
 					<Space size={6} wrap>
-						<Text type="secondary">{t("已选 {n} 个", { n: activitySelected.length })}</Text>
 						<Button
 							size="small"
 							type="primary"
@@ -1310,9 +1326,12 @@ export function CodeIntelPage({
 						>
 							{t("忽略所选（{n}）", { n: ignorableSelected.length })}
 						</Button>
+						<Button size="small" type="text" onClick={() => setActivitySelectedIds([])}>
+							{t("取消选择")}
+						</Button>
 					</Space>
-				) : null}
-			</div>
+				</div>
+			) : null}
 
 			<Table
 				rowKey="id"
@@ -1368,57 +1387,23 @@ export function CodeIntelPage({
 				"监控仓库分支上的新提交，由监测模型判断是否为安全修复；确认后交给工程复现漏洞。仓库凭据只存本机，源码准备时短暂传给容器内的 git。",
 			)}
 			extra={
-				view === "activity" ? (
+				<Space>
 					<Button
 						icon={<ReloadOutlined />}
-						loading={activityLoading}
+						loading={view === "activity" ? activityLoading : false}
 						disabled={!project}
 						onClick={() => {
-							if (project) onLoadActivity(project.id, activityFilter, activityPage, activityPageSize);
+							if (!project) return;
+							if (view === "activity") onLoadActivity(project.id, activityFilter, activityPage, activityPageSize);
+							else onRefresh();
 						}}
 					>
 						{t("刷新")}
 					</Button>
-				) : (
-					<Space>
-						<Button
-							icon={<ScheduleOutlined />}
-							disabled={selectedIds.length === 0}
-							onClick={openBatchSchedule}
-						>
-							{t("批量策略")}
-						</Button>
-						<Popconfirm
-							title={t("删除所选监控？")}
-							description={t("已记录的提交、检查日志和发现会一起删除，工程不受影响。")}
-							okButtonProps={{ danger: true }}
-							okText={t("删除")}
-							cancelText={t("取消")}
-							disabled={selectedIds.length === 0}
-							onConfirm={() => onDeleteMany(selectedIds)}
-						>
-							<Button danger icon={<DeleteOutlined />} disabled={selectedIds.length === 0}>
-								{t("批量删除")}
-							</Button>
-						</Popconfirm>
-						<Button
-							icon={<ReloadOutlined />}
-							disabled={selectedIds.length === 0 || checkingIds.length > 0}
-							loading={selectedIds.some((id) => checkingIds.includes(id))}
-							onClick={() => onCheckMany(selectedIds)}
-						>
-							{selectedIds.length > 0
-								? t("检查所选（{n}）", { n: selectedIds.length })
-								: t("检查所选")}
-						</Button>
-						<Button icon={<ReloadOutlined />} onClick={onRefresh}>
-							{t("刷新")}
-						</Button>
-						<Button type="primary" icon={<PlusOutlined />} disabled={!project} onClick={openCreate}>
-							{t("新增监控")}
-						</Button>
-					</Space>
-				)
+					<Button type="primary" icon={<PlusOutlined />} disabled={!project} onClick={openCreate}>
+						{t("新增监控")}
+					</Button>
+				</Space>
 			}
 		>
 			<Tabs
@@ -1515,18 +1500,45 @@ export function CodeIntelPage({
 				</Card>
 			) : (
 				<>
-					<div className="code-intel-selection-bar">
-						<Checkbox
-							checked={allSelected}
-							indeterminate={selectedIds.length > 0 && !allSelected}
-							onChange={(event) => setSelectedIds(event.target.checked ? rows.map((row) => row.id) : [])}
-						>
-							{allSelected
-								? t("已全选 {n} 个", { n: rows.length })
-								: t("全选所有（{n}）", { n: rows.length })}
-						</Checkbox>
-						<Text type="secondary">{t("已选 {n} 个", { n: selectedIds.length })}</Text>
-					</div>
+					{selectedIds.length > 0 ? (
+						<div className="code-intel-selection-bar">
+							<Text type="secondary">{t("已选 {n} 个", { n: selectedIds.length })}</Text>
+							<Space size={6} wrap>
+								<Button size="small" icon={<ScheduleOutlined />} onClick={openBatchSchedule}>
+									{t("批量策略")}
+								</Button>
+								<Button
+									size="small"
+									icon={<ReloadOutlined />}
+									disabled={checkingIds.length > 0}
+									loading={selectedIds.some((id) => checkingIds.includes(id))}
+									onClick={() => onCheckMany(selectedIds)}
+								>
+									{t("检查所选（{n}）", { n: selectedIds.length })}
+								</Button>
+								<Button
+									size="small"
+									danger
+									icon={<DeleteOutlined />}
+									onClick={() => {
+										Modal.confirm({
+											title: t("删除所选监控？"),
+											content: t("已记录的提交、检查日志和发现会一起删除，工程不受影响。"),
+											okButtonProps: { danger: true },
+											okText: t("删除"),
+											cancelText: t("取消"),
+											onOk: () => onDeleteMany(selectedIds),
+										});
+									}}
+								>
+									{t("批量删除")}
+								</Button>
+								<Button size="small" type="text" onClick={() => setSelectedIds([])}>
+									{t("取消选择")}
+								</Button>
+							</Space>
+						</div>
+					) : null}
 					<Table
 						rowKey="id"
 						size="middle"

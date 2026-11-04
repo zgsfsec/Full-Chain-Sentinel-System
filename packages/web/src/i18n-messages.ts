@@ -47,6 +47,7 @@ export const EN_MESSAGES: Record<string, string> = {
 	"已全选 {n} 个": "All {n} selected",
 	"全选所有（{n}）": "Select all ({n})",
 	"已选 {n} 个": "{n} selected",
+	取消选择: "Clear selection",
 	批量删除: "Delete selected",
 	"删除所选监控？": "Delete the selected monitors?",
 	"已记录的提交、检查日志和发现会一起删除，工程不受影响。":
