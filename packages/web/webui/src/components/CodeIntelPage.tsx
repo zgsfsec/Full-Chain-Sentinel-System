@@ -1500,9 +1500,13 @@ export function CodeIntelPage({
 				</Card>
 			) : (
 				<>
-					{selectedIds.length > 0 ? (
-						<div className="code-intel-selection-bar">
-							<Text type="secondary">{t("已选 {n} 个", { n: selectedIds.length })}</Text>
+					<div className="code-intel-selection-bar">
+						<Text type="secondary">
+							{selectedIds.length > 0
+								? t("已选 {n} 个", { n: selectedIds.length })
+								: t("共 {n} 个监控", { n: rows.length })}
+						</Text>
+						{selectedIds.length > 0 ? (
 							<Space size={6} wrap>
 								<Button size="small" icon={<ScheduleOutlined />} onClick={openBatchSchedule}>
 									{t("批量策略")}
@@ -1537,8 +1541,18 @@ export function CodeIntelPage({
 									{t("取消选择")}
 								</Button>
 							</Space>
-						</div>
-					) : null}
+						) : (
+							<Button
+								size="small"
+								icon={<ReloadOutlined />}
+								disabled={checkingIds.length > 0}
+								loading={rows.some((row) => checkingIds.includes(row.id))}
+								onClick={() => onCheckMany(rows.map((row) => row.id))}
+							>
+								{t("检查全部")}
+							</Button>
+						)}
+					</div>
 					<Table
 						rowKey="id"
 						size="middle"
