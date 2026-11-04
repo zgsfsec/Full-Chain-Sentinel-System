@@ -1,6 +1,6 @@
 # 全链哨兵 Full Chain Sentinel System
 
-**简体中文** | [English](README.en.md) · **版本 2.2.13**
+**简体中文** | [English](README.en.md) · **版本 2.3.0**
 
 知攻善防实验室出品，基于 [pi](https://github.com/earendil-works/pi) 的授权渗透测试 Agent。通过中英文 Web 控制台，统一管理 Web、小程序与移动端测试、项目环境、审批和证据。
 

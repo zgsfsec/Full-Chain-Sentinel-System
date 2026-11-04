@@ -1,6 +1,6 @@
 # Full Chain Sentinel System
 
-**English** | [简体中文](README.md) · **Version 2.2.13**
+**English** | [简体中文](README.md) · **Version 2.3.0**
 
 An authorized penetration-testing agent by Zhigong Shanfang Lab, built on [pi](https://github.com/earendil-works/pi). A bilingual web console brings Web, mini-program, and mobile testing together with project environments, approval, and evidence management.
 
