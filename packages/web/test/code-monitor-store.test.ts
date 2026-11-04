@@ -104,6 +104,7 @@ describe("CodeMonitorStore", () => {
 			cve: "CVE-2024-1234",
 			severity: "high",
 			vulnType: "路径穿越",
+			vulnCategory: "web",
 			reason: "补了规范化",
 			judgedAt: Date.now(),
 		});
@@ -125,6 +126,7 @@ describe("CodeMonitorStore", () => {
 			cve: "CVE-2024-1234",
 			severity: "high",
 			vulnType: null,
+			vulnCategory: "other",
 			reason: "x",
 			judgedAt: Date.now(),
 		});
@@ -202,6 +204,7 @@ describe("CodeMonitorStore", () => {
 			cve: null,
 			severity: "high" as const,
 			vulnType: "路径穿越",
+			vulnCategory: "web" as const,
 			reason: "fix",
 			judgedAt: 1,
 		};
@@ -214,6 +217,7 @@ describe("CodeMonitorStore", () => {
 			cve: null,
 			severity: null,
 			vulnType: null,
+			vulnCategory: null,
 			reason: "model down",
 			judgedAt: 1,
 		});
@@ -233,6 +237,9 @@ describe("CodeMonitorStore", () => {
 		expect(inbox.total).toBe(3);
 		expect(inbox.items.map((row) => row.id).sort()).toEqual([review.id, failed.id, dispatchFailed.id].sort());
 		expect(store.listActivity("p1", "all", 1, 20).total).toBe(5);
+		// The category narrowing keeps the status filter but drops other classes.
+		expect(store.listActivity("p1", "all", 1, 20, "web").total).toBe(4);
+		expect(store.listActivity("p1", "all", 1, 20, "memory").total).toBe(0);
 	});
 
 	it("deletes a project's monitors and history together", () => {

@@ -79,6 +79,7 @@ import type {
 	SentinelAssetPlatform,
 	SentinelClientMessage,
 	SentinelCodeActivityFilter,
+	SentinelVulnCategory,
 	SentinelCodeActivityView,
 	SentinelCodeImportState,
 	SentinelCodeMonitor,
@@ -1785,9 +1786,15 @@ export function App() {
 	}, [send]);
 
 	const loadCodeActivity = useCallback(
-		(projectId: string, filter: SentinelCodeActivityFilter, page: number, pageSize: number) => {
+		(
+			projectId: string,
+			filter: SentinelCodeActivityFilter,
+			page: number,
+			pageSize: number,
+			category: SentinelVulnCategory | null = null,
+		) => {
 			setCodeActivityLoading(true);
-			send({ type: "list_code_activity", projectId, filter, page, pageSize });
+			send({ type: "list_code_activity", projectId, filter, page, pageSize, category });
 		},
 		[send],
 	);

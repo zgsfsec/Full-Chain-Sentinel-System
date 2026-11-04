@@ -3423,7 +3423,13 @@ export async function startSentinelServer(
 					try {
 						sendTo(socket, {
 							type: "code_activity",
-							view: codeMonitors.activity(message.projectId, message.filter, message.page, message.pageSize),
+							view: codeMonitors.activity(
+								message.projectId,
+								message.filter,
+								message.page,
+								message.pageSize,
+								message.category ?? null,
+							),
 						});
 					} catch (error) {
 						sendError(socket, error instanceof Error ? error.message : String(error));

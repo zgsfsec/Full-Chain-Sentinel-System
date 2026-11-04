@@ -97,6 +97,7 @@ describe("CodeMonitorManager.check", () => {
 									cve: "CVE-2024-9999",
 									severity: "high",
 									vuln_type: "认证绕过",
+									vuln_category: "web",
 									title: "管理员接口缺少授权校验",
 									reason: "src/admin.ts 增加了 isAdmin 判断",
 								}),

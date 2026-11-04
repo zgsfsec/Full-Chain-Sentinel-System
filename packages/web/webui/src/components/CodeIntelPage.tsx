@@ -64,6 +64,7 @@ import type {
 	SentinelCodeMonitorInput,
 	SentinelCodeScheduleKind,
 	SentinelProjectInfo,
+	SentinelVulnCategory,
 } from "../types.ts";
 import { Page } from "../ui/Page.tsx";
 import { CronGrid } from "./CronGrid.tsx";
@@ -125,6 +126,30 @@ const SEVERITY_COLORS: Record<string, string> = {
 	info: "default",
 };
 
+const CATEGORY_LABELS: Record<SentinelVulnCategory, string> = {
+	web: t("Web 漏洞"),
+	memory: t("内存漏洞"),
+	other: t("其他漏洞"),
+};
+
+const CATEGORY_COLORS: Record<SentinelVulnCategory, string> = {
+	web: "geekblue",
+	memory: "volcano",
+	other: "default",
+};
+
+const CATEGORY_OPTIONS = [
+	{ value: "web" as SentinelVulnCategory, label: t("Web 漏洞") },
+	{ value: "memory" as SentinelVulnCategory, label: t("内存漏洞") },
+	{ value: "other" as SentinelVulnCategory, label: t("其他漏洞") },
+];
+
+/** Filter dropdown for the activity list; null means "all categories". */
+const ACTIVITY_CATEGORY_OPTIONS: Array<{ value: SentinelVulnCategory | null; label: string }> = [
+	{ value: null, label: t("全部类别") },
+	...CATEGORY_OPTIONS,
+];
+
 /** Host of a Git address, for the token-help link. Null when it cannot be read. */
 function hostFromUrl(value: string): string | null {
 	const trimmed = value.trim();
@@ -182,6 +207,7 @@ export interface CodeIntelPageProps {
 		filter: SentinelCodeActivityFilter,
 		page: number,
 		pageSize: number,
+		category?: SentinelVulnCategory | null,
 	) => void;
 	onUpdate: (id: string, input: SentinelCodeMonitorInput) => void;
 	onDelete: (id: string) => void;
@@ -213,6 +239,7 @@ interface EditorState {
 	scheduleKind: SentinelCodeScheduleKind;
 	cronExpression: string;
 	autoDispatch: boolean;
+	autoDispatchCategories: SentinelVulnCategory[];
 	enabled: boolean;
 }
 
@@ -229,6 +256,7 @@ function emptyEditor(): EditorState {
 		scheduleKind: "interval",
 		cronExpression: "",
 		autoDispatch: false,
+		autoDispatchCategories: [],
 		enabled: true,
 	};
 }
@@ -428,6 +456,7 @@ export function CodeIntelPage({
 	const [monitorPageSize, setMonitorPageSize] = useState(20);
 	const [view, setView] = useState<"activity" | "monitors">("activity");
 	const [activityFilter, setActivityFilter] = useState<SentinelCodeActivityFilter>("attention");
+	const [activityCategory, setActivityCategory] = useState<SentinelVulnCategory | null>(null);
 	const [activityPage, setActivityPage] = useState(1);
 	const [activityPageSize, setActivityPageSize] = useState(20);
 	const [activitySelectedIds, setActivitySelectedIds] = useState<string[]>([]);
@@ -471,8 +500,8 @@ export function CodeIntelPage({
 	}, [monitorPageSize, rows.length]);
 	useEffect(() => {
 		if (view !== "activity" || !project) return;
-		onLoadActivity(project.id, activityFilter, activityPage, activityPageSize);
-	}, [view, project?.id, activityFilter, activityPage, activityPageSize, monitors, onLoadActivity]);
+		onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory);
+	}, [view, project?.id, activityFilter, activityCategory, activityPage, activityPageSize, monitors, onLoadActivity]);
 	useEffect(() => {
 		setActivitySelectedIds((prev) =>
 			prev.filter((id) => (activity?.items ?? []).some((item) => item.id === id)),
@@ -596,6 +625,7 @@ export function CodeIntelPage({
 			scheduleKind: monitor.scheduleKind,
 			cronExpression: monitor.cronExpression ?? "",
 			autoDispatch: monitor.autoDispatch,
+			autoDispatchCategories: monitor.autoDispatchCategories ?? [],
 			enabled: monitor.enabled,
 		});
 	};
@@ -652,6 +682,7 @@ export function CodeIntelPage({
 			scheduleKind: editor.scheduleKind,
 			cronExpression: editor.scheduleKind === "cron" ? editor.cronExpression.trim() : null,
 			autoDispatch: editor.autoDispatch,
+			autoDispatchCategories: editor.autoDispatch && editor.autoDispatchCategories.length > 0 ? editor.autoDispatchCategories : null,
 			enabled: editor.enabled,
 		};
 		if (editor.mode === "create") {
@@ -1045,6 +1076,9 @@ export function CodeIntelPage({
 					>
 						{VERDICT_LABELS[commit.verdict]}
 					</Tag>
+					{commit.vulnCategory ? (
+						<Tag color={CATEGORY_COLORS[commit.vulnCategory]}>{CATEGORY_LABELS[commit.vulnCategory]}</Tag>
+					) : null}
 					{commit.cve ? <Tag color="magenta">{commit.cve}</Tag> : null}
 					{commit.severity ? (
 						<Tag color={SEVERITY_COLORS[commit.severity]}>{commit.severity}</Tag>
@@ -1137,6 +1171,11 @@ export function CodeIntelPage({
 						</Anchor>
 						<span className="code-intel-line__tags">
 							<Tag>{commit.branch}</Tag>
+							{commit.vulnCategory ? (
+								<Tag color={CATEGORY_COLORS[commit.vulnCategory]}>
+									{CATEGORY_LABELS[commit.vulnCategory]}
+								</Tag>
+							) : null}
 							{commit.cve ? <Tag color="magenta">{commit.cve}</Tag> : null}
 							{commit.severity ? (
 								<Tag color={SEVERITY_COLORS[commit.severity]}>{commit.severity}</Tag>
@@ -1304,6 +1343,17 @@ export function CodeIntelPage({
 						setActivitySelectedIds([]);
 					}}
 				/>
+				<Select
+					size="small"
+					style={{ minWidth: 120 }}
+					value={activityCategory}
+					options={ACTIVITY_CATEGORY_OPTIONS}
+					onChange={(value) => {
+						setActivityCategory(value);
+						setActivityPage(1);
+						setActivitySelectedIds([]);
+					}}
+				/>
 			</div>
 
 			{activitySelected.length > 0 ? (
@@ -1409,7 +1459,8 @@ export function CodeIntelPage({
 						disabled={!project}
 						onClick={() => {
 							if (!project) return;
-							if (view === "activity") onLoadActivity(project.id, activityFilter, activityPage, activityPageSize);
+							if (view === "activity")
+								onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory);
 							else onRefresh();
 						}}
 					>
@@ -1790,14 +1841,31 @@ export function CodeIntelPage({
 						</Form.Item>
 						<Space size={24} wrap>
 							<Form.Item label={t("自动下发复现")} style={{ marginBottom: 0 }}>
-								<Switch
-									checked={editor.autoDispatch}
-									onChange={(checked) => setEditor({ ...editor, autoDispatch: checked })}
-								/>
-								<Text type="secondary" style={{ marginLeft: 8 }}>
-									{t("置信度 ≥ 65% 时直接新建工程")}
-								</Text>
-							</Form.Item>
+									<Space size={8}>
+										<Switch
+											checked={editor.autoDispatch}
+											onChange={(checked) => setEditor({ ...editor, autoDispatch: checked })}
+										/>
+										<Select
+											size="small"
+											mode="multiple"
+											style={{ minWidth: 220 }}
+											value={editor.autoDispatchCategories}
+											options={CATEGORY_OPTIONS}
+											placeholder={t("全部类别")}
+											disabled={!editor.autoDispatch}
+											onChange={(value) =>
+												setEditor({
+													...editor,
+													autoDispatchCategories: value as SentinelVulnCategory[],
+												})
+											}
+										/>
+									</Space>
+									<Text type="secondary" style={{ display: "block" }}>
+										{t("置信度 ≥ 65% 时直接新建工程；类别留空表示全部自动复现")}
+									</Text>
+								</Form.Item>
 							<Form.Item label={t("启用定时检查")} style={{ marginBottom: 0 }}>
 								<Switch
 									checked={editor.enabled}

@@ -11,7 +11,7 @@
 
 import type { GithubCommitDetail } from "./code-host.ts";
 import { t } from "./i18n.ts";
-import type { SentinelCodeMonitor, SentinelVulnSeverity } from "./protocol.ts";
+import type { SentinelCodeMonitor, SentinelVulnCategory, SentinelVulnSeverity } from "./protocol.ts";
 
 const REQUEST_TIMEOUT_MS = 90_000;
 const MESSAGE_LIMIT = 4_000;
@@ -36,7 +36,12 @@ export const CODE_MONITOR_SYSTEM_PROMPT = `你是一名开源漏洞情报分析�
    - 提交信息含糊、diff 只是重命名变量：除非 diff 清楚地补上了一个安全边界，否则判否；
    - 无法从 diff 判断是否有安全影响时，security=false，并在 reason 里写清缺少什么证据。
 5. security=true 时，尽量给出漏洞类型、受影响面与利用前提；能从 message 或 diff 得到 CVE/GHSA 编号时填写，否则 cve 为 null。severity 按"如果被利用"的影响估计：critical / high / medium / low / info；不确定时用 medium。
-6. confidence 表示你对 security 判断的把握（0 到 1）。证据只够怀疑时不要给 0.9。
+6. security=true 时必须给 vuln_category 分类：
+   - "web"：Web/应用层漏洞——注入、XSS、SSRF、路径穿越、认证/授权绕过、反序列化、开放重定向等；
+   - "memory"：内存安全漏洞——越界读写、整数溢出导致的内存破坏、释放后使用、双重释放、竞态损坏内存等；
+   - "other"：其余——加密实现错误、拒绝服务、信息泄露、凭据泄露等。
+   拿不准属于哪类时按漏洞被利用时破坏的对象判断：破坏的是 Web 请求处理逻辑选 web，破坏的是进程内存选 memory，其余选 other。security=false 时 vuln_category 为 null。
+7. confidence 表示你对 security 判断的把握（0 到 1）。证据只够怀疑时不要给 0.9。
 
 只输出一个 JSON 对象，不要 Markdown 代码块，不要额外解释。字段：
 {
@@ -45,6 +50,7 @@ export const CODE_MONITOR_SYSTEM_PROMPT = `你是一名开源漏洞情报分析�
   "cve": "CVE-2024-12345" | "GHSA-xxxx-xxxx-xxxx" | null,
   "severity": "critical" | "high" | "medium" | "low" | "info" | null,
   "vuln_type": "路径穿越" | "反序列化" | "认证绕过" | "SQL 注入" | "内存破坏" | "拒绝服务" | "信息泄露" | "其他" | null,
+  "vuln_category": "web" | "memory" | "other" | null,
   "title": "一句话说明修复了什么安全问题（中文）",
   "reason": "判断依据，引用具体文件或 diff 片段（中文）"
 }`;
@@ -56,11 +62,13 @@ export interface CodeJudgeVerdict {
 	cve: string | null;
 	severity: SentinelVulnSeverity | null;
 	vulnType: string | null;
+	vulnCategory: SentinelVulnCategory | null;
 	title: string;
 	reason: string;
 }
 
 const SEVERITIES: readonly SentinelVulnSeverity[] = ["critical", "high", "medium", "low", "info"];
+const CATEGORIES: readonly SentinelVulnCategory[] = ["web", "memory", "other"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -106,12 +114,23 @@ export function parseMonitorVerdict(raw: string): CodeJudgeVerdict {
 			? (severityRaw as SentinelVulnSeverity)
 			: null;
 	const vulnTypeRaw = typeof parsed.vuln_type === "string" ? parsed.vuln_type.trim() : "";
+	const categoryRaw = typeof parsed.vuln_category === "string" ? parsed.vuln_category.trim().toLowerCase() : "";
+	// A security verdict without a usable class is rejected, not guessed into
+	// "other": the category now gates auto-dispatch, so a wrong class is worse
+	// than a retryable failed judgment.
+	const vulnCategory = parsed.security
+		? CATEGORIES.includes(categoryRaw as SentinelVulnCategory)
+			? (categoryRaw as SentinelVulnCategory)
+			: null
+		: null;
+	if (parsed.security && !vulnCategory) throw new Error(t("vuln_category 无效"));
 	return {
 		security: parsed.security,
 		confidence,
 		cve: parsed.security ? normalizeAdvisoryId(parsed.cve) : null,
 		severity,
 		vulnType: vulnTypeRaw || null,
+		vulnCategory,
 		title: title || t("未命名安全修复"),
 		reason,
 	};

@@ -189,6 +189,12 @@ export const EN_MESSAGES: Record<string, string> = {
 	检查间隔: "Check interval",
 	自动下发复现: "Auto-dispatch reproduction",
 	"置信度 ≥ 65% 时直接新建工程": "Create an engine automatically at 65% confidence or higher",
+	"置信度 ≥ 65% 时直接新建工程；类别留空表示全部自动复现":
+		"Create an engine automatically at 65% confidence or higher; empty category selection means all classes",
+	"Web 漏洞": "Web vulnerability",
+	内存漏洞: "Memory vulnerability",
+	其他漏洞: "Other vulnerability",
+	全部类别: "All categories",
 	启用定时检查: "Enable scheduled checks",
 	"10 分钟": "10 minutes",
 	"30 分钟": "30 minutes",

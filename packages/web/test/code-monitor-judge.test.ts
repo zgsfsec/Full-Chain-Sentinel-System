@@ -24,6 +24,7 @@ describe("parseMonitorVerdict", () => {
 				cve: "cve-2024-12345",
 				severity: "HIGH",
 				vuln_type: "路径穿越",
+				vuln_category: "web",
 				title: "压缩包路径穿越",
 				reason: "src/zip.ts 增加了规范化检查",
 			}),
@@ -32,6 +33,7 @@ describe("parseMonitorVerdict", () => {
 		expect(verdict.cve).toBe("CVE-2024-12345");
 		expect(verdict.severity).toBe("high");
 		expect(verdict.confidence).toBeCloseTo(0.86);
+		expect(verdict.vulnCategory).toBe("web");
 	});
 
 	it("tolerates a fenced answer and clamps confidence", () => {
@@ -43,9 +45,22 @@ describe("parseMonitorVerdict", () => {
 
 	it("drops an invented advisory id", () => {
 		const verdict = parseMonitorVerdict(
-			JSON.stringify({ security: true, confidence: 0.7, cve: "CVE-2024-1", reason: "x" }),
+			JSON.stringify({
+				security: true,
+				confidence: 0.7,
+				cve: "CVE-2024-1",
+				vuln_category: "other",
+				reason: "x",
+			}),
 		);
 		expect(verdict.cve).toBeNull();
+	});
+
+	it("rejects a security verdict without a usable category", () => {
+		expect(() =>
+			parseMonitorVerdict('{"security": true, "confidence": 0.9, "reason": "x", "vuln_category": "web2"}'),
+		).toThrow();
+		expect(() => parseMonitorVerdict('{"security": true, "confidence": 0.9, "reason": "x"}')).toThrow();
 	});
 
 	it("rejects a verdict without security or reason", () => {

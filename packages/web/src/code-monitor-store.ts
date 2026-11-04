@@ -26,6 +26,7 @@ import type {
 	SentinelCodeJobStatus,
 	SentinelCodeMonitor,
 	SentinelCodeVerdict,
+	SentinelVulnCategory,
 	SentinelVulnSeverity,
 } from "./protocol.ts";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite.ts";
@@ -74,6 +75,7 @@ CREATE TABLE IF NOT EXISTS code_monitors (
   branches TEXT NOT NULL DEFAULT '[]',
   baselines TEXT NOT NULL DEFAULT '{}',
   auto_dispatch INTEGER NOT NULL DEFAULT 0,
+  auto_dispatch_categories TEXT,
   interval_minutes INTEGER NOT NULL DEFAULT 60,
   schedule_kind TEXT NOT NULL DEFAULT 'interval',
   cron_expression TEXT,
@@ -99,6 +101,7 @@ CREATE TABLE IF NOT EXISTS code_commits (
   cve TEXT,
   severity TEXT,
   vuln_type TEXT,
+  vuln_category TEXT,
   reason TEXT,
   status TEXT NOT NULL DEFAULT 'new',
   engine_id TEXT,
@@ -178,6 +181,7 @@ export interface CodeCommitVerdict {
 	cve: string | null;
 	severity: SentinelVulnSeverity | null;
 	vulnType: string | null;
+	vulnCategory: SentinelVulnCategory | null;
 	reason: string | null;
 	judgedAt: number | null;
 }
@@ -195,6 +199,7 @@ interface MonitorRow {
 	branches: string;
 	baselines: string;
 	auto_dispatch: number;
+	auto_dispatch_categories: string | null;
 	interval_minutes: number;
 	schedule_kind: string;
 	cron_expression: string | null;
@@ -223,6 +228,7 @@ interface CommitRow {
 	cve: string | null;
 	severity: string | null;
 	vuln_type: string | null;
+	vuln_category: string | null;
 	reason: string | null;
 	status: string;
 	engine_id: string | null;
@@ -322,6 +328,24 @@ function parseBaselines(raw: string): Record<string, string> {
 	}
 }
 
+const VULN_CATEGORIES: readonly SentinelVulnCategory[] = ["web", "memory", "other"];
+
+/** JSON column → category allowlist; null/empty/invalid means "all categories". */
+function parseCategories(raw: string | null): SentinelVulnCategory[] | null {
+	if (!raw) return null;
+	try {
+		const value: unknown = JSON.parse(raw);
+		if (!Array.isArray(value)) return null;
+		const list = value.filter(
+			(entry): entry is SentinelVulnCategory =>
+				typeof entry === "string" && VULN_CATEGORIES.includes(entry as SentinelVulnCategory),
+		);
+		return list.length > 0 ? [...new Set(list)] : null;
+	} catch {
+		return null;
+	}
+}
+
 function toMonitor(row: MonitorRow): StoredCodeMonitor {
 	return {
 		id: row.id,
@@ -336,6 +360,7 @@ function toMonitor(row: MonitorRow): StoredCodeMonitor {
 		branches: parseStringArray(row.branches),
 		baselines: parseBaselines(row.baselines),
 		autoDispatch: row.auto_dispatch === 1,
+		autoDispatchCategories: parseCategories(row.auto_dispatch_categories),
 		intervalMinutes: row.interval_minutes,
 		scheduleKind: row.schedule_kind === "cron" ? "cron" : "interval",
 		cronExpression: row.cron_expression,
@@ -364,6 +389,9 @@ function toCommit(row: CommitRow): SentinelCodeCommit {
 		cve: row.cve,
 		severity: row.severity as SentinelVulnSeverity | null,
 		vulnType: row.vuln_type,
+		vulnCategory: (VULN_CATEGORIES.includes(row.vuln_category as SentinelVulnCategory)
+			? row.vuln_category
+			: null) as SentinelVulnCategory | null,
 		reason: row.reason,
 		status: row.status as SentinelCodeCommitStatus,
 		engineId: row.engine_id,
@@ -401,6 +429,15 @@ export class CodeMonitorStore {
 		}
 		if (!names.includes("cron_expression")) {
 			this.db.exec("ALTER TABLE code_monitors ADD COLUMN cron_expression TEXT");
+		}
+		if (!names.includes("auto_dispatch_categories")) {
+			this.db.exec("ALTER TABLE code_monitors ADD COLUMN auto_dispatch_categories TEXT");
+		}
+		const commitColumns = this.db.prepare("PRAGMA table_info(code_commits)").all() as unknown as Array<{
+			name: string;
+		}>;
+		if (!commitColumns.some((column) => column.name === "vuln_category")) {
+			this.db.exec("ALTER TABLE code_commits ADD COLUMN vuln_category TEXT");
 		}
 	}
 
@@ -463,6 +500,7 @@ export class CodeMonitorStore {
 		branches: string[];
 		baselines: Record<string, string>;
 		autoDispatch: boolean;
+		autoDispatchCategories?: SentinelVulnCategory[] | null;
 		intervalMinutes: number;
 		scheduleKind: "interval" | "cron";
 		cronExpression: string | null;
@@ -474,9 +512,9 @@ export class CodeMonitorStore {
 			.prepare(
 				`INSERT INTO code_monitors
 					(id, project_id, project_name, name, host, owner, repo, repo_url, api_base_url,
-					 branches, baselines, auto_dispatch, interval_minutes, schedule_kind, cron_expression,
-					 enabled, created_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					 branches, baselines, auto_dispatch, auto_dispatch_categories, interval_minutes,
+					 schedule_kind, cron_expression, enabled, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				id,
@@ -491,6 +529,7 @@ export class CodeMonitorStore {
 				JSON.stringify(monitor.branches),
 				JSON.stringify(monitor.baselines),
 				monitor.autoDispatch ? 1 : 0,
+				monitor.autoDispatchCategories ? JSON.stringify(monitor.autoDispatchCategories) : null,
 				monitor.intervalMinutes,
 				monitor.scheduleKind,
 				monitor.cronExpression,
@@ -516,6 +555,7 @@ export class CodeMonitorStore {
 			branches?: string[];
 			baselines?: Record<string, string>;
 			autoDispatch?: boolean;
+			autoDispatchCategories?: SentinelVulnCategory[] | null;
 			intervalMinutes?: number;
 			scheduleKind?: "interval" | "cron";
 			cronExpression?: string | null;
@@ -529,8 +569,8 @@ export class CodeMonitorStore {
 			.prepare(
 				`UPDATE code_monitors SET
 					name = ?, host = ?, owner = ?, repo = ?, repo_url = ?, api_base_url = ?,
-					branches = ?, baselines = ?, auto_dispatch = ?, interval_minutes = ?,
-					schedule_kind = ?, cron_expression = ?, enabled = ?
+					branches = ?, baselines = ?, auto_dispatch = ?, auto_dispatch_categories = ?,
+					interval_minutes = ?, schedule_kind = ?, cron_expression = ?, enabled = ?
 				 WHERE id = ?`,
 			)
 			.run(
@@ -543,6 +583,7 @@ export class CodeMonitorStore {
 				JSON.stringify(next.branches),
 				JSON.stringify(next.baselines),
 				next.autoDispatch ? 1 : 0,
+				next.autoDispatchCategories ? JSON.stringify(next.autoDispatchCategories) : null,
 				next.intervalMinutes,
 				next.scheduleKind,
 				next.cronExpression,
@@ -656,19 +697,22 @@ export class CodeMonitorStore {
 		filter: SentinelCodeActivityFilter,
 		page: number,
 		pageSize: number,
+		category: SentinelVulnCategory | null = null,
 	): { items: SentinelCodeCommit[]; total: number } {
 		const where = activityWhere(filter);
+		const categoryClause = category ? " AND vuln_category = ?" : "";
+		const params = category ? [projectId, category] : [projectId];
 		const safePage = Math.max(1, Math.floor(page));
 		const safeSize = Math.min(200, Math.max(1, Math.floor(pageSize)));
 		const totalRow = this.db
-			.prepare(`SELECT COUNT(*) AS total FROM code_commits WHERE ${where}`)
-			.get(projectId) as unknown as { total: number } | undefined;
+			.prepare(`SELECT COUNT(*) AS total FROM code_commits WHERE ${where}${categoryClause}`)
+			.get(...params) as unknown as { total: number } | undefined;
 		const rows = this.db
 			.prepare(
-				`SELECT * FROM code_commits WHERE ${where}
+				`SELECT * FROM code_commits WHERE ${where}${categoryClause}
 				 ORDER BY authored_at DESC, created_at DESC, id DESC LIMIT ? OFFSET ?`,
 			)
-			.all(projectId, safeSize, (safePage - 1) * safeSize) as unknown as CommitRow[];
+			.all(...params, safeSize, (safePage - 1) * safeSize) as unknown as CommitRow[];
 		return { items: rows.map(toCommit), total: Number(totalRow?.total ?? 0) };
 	}
 
@@ -894,7 +938,7 @@ export class CodeMonitorStore {
 		this.db
 			.prepare(
 				`UPDATE code_commits SET verdict = ?, confidence = ?, cve = ?, severity = ?,
-				 vuln_type = ?, reason = ?, judged_at = ? WHERE id = ?`,
+				 vuln_type = ?, vuln_category = ?, reason = ?, judged_at = ? WHERE id = ?`,
 			)
 			.run(
 				verdict.verdict,
@@ -902,6 +946,7 @@ export class CodeMonitorStore {
 				verdict.cve,
 				verdict.severity,
 				verdict.vulnType,
+				verdict.vulnCategory,
 				verdict.reason,
 				verdict.judgedAt,
 				id,

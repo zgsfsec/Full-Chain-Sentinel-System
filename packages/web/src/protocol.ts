@@ -1117,6 +1117,14 @@ export interface SentinelCodeCheckJob {
 export type SentinelCodeCommitStatus = "new" | "dispatching" | "dispatched" | "ignored";
 
 /**
+ * Coarse vulnerability class the judge must pick for a security verdict:
+ * web (injection, XSS, SSRF, auth bypass, path traversal, …), memory (overflow,
+ * OOB, UAF, double free, …) or other (crypto, DoS, info leak, …). Drives the
+ * activity filter and the per-monitor auto-dispatch allowlist.
+ */
+export type SentinelVulnCategory = "web" | "memory" | "other";
+
+/**
  * One watched repository.
  *
  * Polling is branch-scoped and stateful: `baselines` maps each watched branch to
@@ -1142,6 +1150,8 @@ export interface SentinelCodeMonitor {
 	tokenSet: boolean;
 	/** Dispatch a confirmed finding to an engine without asking first. */
 	autoDispatch: boolean;
+	/** When set, auto-dispatch only these vulnerability classes; null means all. */
+	autoDispatchCategories: SentinelVulnCategory[] | null;
 	/** Minutes between automatic checks when `scheduleKind` is interval; 0 = manual. */
 	intervalMinutes: number;
 	scheduleKind: SentinelCodeScheduleKind;
@@ -1184,6 +1194,8 @@ export interface SentinelCodeCommit {
 	severity: SentinelVulnSeverity | null;
 	/** Vulnerability class, e.g. "路径穿越" or "反序列化". */
 	vulnType: string | null;
+	/** Required coarse class on a security verdict; null otherwise. */
+	vulnCategory: SentinelVulnCategory | null;
 	reason: string | null;
 	status: SentinelCodeCommitStatus;
 	/** Engine started for this finding, once dispatched. */
@@ -1246,6 +1258,8 @@ export interface SentinelCodeMonitorInput {
 	/** Required when scheduleKind is cron; null/empty clears it. */
 	cronExpression?: string | null;
 	autoDispatch?: boolean;
+	/** Categories eligible for auto-dispatch; null/empty means all categories. */
+	autoDispatchCategories?: SentinelVulnCategory[] | null;
 	enabled?: boolean;
 }
 
@@ -2289,6 +2303,8 @@ export type SentinelClientMessage =
 			type: "list_code_activity";
 			projectId: string;
 			filter: SentinelCodeActivityFilter;
+			/** Optional vuln-category narrowing on top of the status filter. */
+			category?: SentinelVulnCategory | null;
 			page: number;
 			pageSize: number;
 	  }

@@ -50,6 +50,7 @@ import type {
 	SentinelCodeMonitorDetail,
 	SentinelCodeMonitorInput,
 	SentinelProjectInfo,
+	SentinelVulnCategory,
 } from "./protocol.ts";
 
 /** Scheduler granularity; a monitor's own interval decides when it is due. */
@@ -61,6 +62,15 @@ const MAX_RETRIES_PER_CHECK = 3;
 /** Automatic dispatch below this confidence waits for the operator's click. */
 const AUTO_DISPATCH_MIN_CONFIDENCE = 0.65;
 const MAX_BRANCHES = 20;
+
+const VULN_CATEGORIES: readonly SentinelVulnCategory[] = ["web", "memory", "other"];
+
+/** Input allowlist → stored allowlist; empty or fully invalid input means "all". */
+function normalizeAutoDispatchCategories(input: SentinelVulnCategory[] | null): SentinelVulnCategory[] | null {
+	if (!input) return null;
+	const list = [...new Set(input.filter((entry) => VULN_CATEGORIES.includes(entry)))];
+	return list.length > 0 ? list : null;
+}
 
 /** Queue bounds: a slow GitHub or model endpoint must not take the whole console. */
 const MAX_CONCURRENT_CHECKS = 3;
@@ -357,10 +367,11 @@ export class CodeMonitorManager {
 		filter: SentinelCodeActivityFilter,
 		page: number,
 		pageSize: number,
+		category: SentinelVulnCategory | null = null,
 	): SentinelCodeActivityView {
 		const project = this.hooks.project(projectId);
 		if (!project) throw new Error("项目不存在");
-		const { items, total } = this.store.listActivity(projectId, filter, page, pageSize);
+		const { items, total } = this.store.listActivity(projectId, filter, page, pageSize, category);
 		const anomalies = this.store
 			.listMonitors()
 			.filter((monitor) => monitor.projectId === projectId && Boolean(monitor.lastError)).length;
@@ -452,6 +463,9 @@ export class CodeMonitorManager {
 			branches: resolvedBranches,
 			baselines,
 			autoDispatch: input.autoDispatch === true,
+			autoDispatchCategories: normalizeAutoDispatchCategories(
+				input.autoDispatchCategories === undefined ? null : input.autoDispatchCategories,
+			),
 			intervalMinutes: schedule.intervalMinutes,
 			scheduleKind: schedule.kind,
 			cronExpression: schedule.cron,
@@ -494,6 +508,10 @@ export class CodeMonitorManager {
 			branches: resolvedBranches,
 			baselines,
 			autoDispatch: input.autoDispatch === undefined ? current.autoDispatch : input.autoDispatch === true,
+			autoDispatchCategories:
+				input.autoDispatchCategories === undefined
+					? current.autoDispatchCategories
+					: normalizeAutoDispatchCategories(input.autoDispatchCategories),
 			intervalMinutes: schedule.intervalMinutes,
 			scheduleKind: schedule.kind,
 			cronExpression: schedule.cron,
@@ -908,6 +926,7 @@ export class CodeMonitorManager {
 			cve: null,
 			severity: null,
 			vulnType: null,
+			vulnCategory: null,
 			reason: null,
 			judgedAt: null,
 		});
@@ -950,6 +969,7 @@ export class CodeMonitorManager {
 				cve: null,
 				severity: null,
 				vulnType: null,
+				vulnCategory: null,
 				reason: "合并提交，改动由分支上的单个提交承载",
 				judgedAt: Date.now(),
 			});
@@ -962,6 +982,7 @@ export class CodeMonitorManager {
 				cve: null,
 				severity: null,
 				vulnType: null,
+				vulnCategory: null,
 				reason: "没有文件差异",
 				judgedAt: Date.now(),
 			});
@@ -974,6 +995,7 @@ export class CodeMonitorManager {
 				cve: null,
 				severity: null,
 				vulnType: null,
+				vulnCategory: null,
 				reason: "纯依赖升级，跳过",
 				judgedAt: Date.now(),
 			});
@@ -987,6 +1009,7 @@ export class CodeMonitorManager {
 				cve: null,
 				severity: null,
 				vulnType: null,
+				vulnCategory: null,
 				reason: "未配置监测模型（设置 → 模型 → 监测模型）",
 				judgedAt: Date.now(),
 			});
@@ -1002,6 +1025,7 @@ export class CodeMonitorManager {
 					cve: null,
 					severity: null,
 					vulnType: null,
+					vulnCategory: null,
 					reason: verdict.reason,
 					judgedAt: Date.now(),
 				});
@@ -1013,6 +1037,7 @@ export class CodeMonitorManager {
 				cve: verdict.cve,
 				severity: verdict.severity,
 				vulnType: verdict.vulnType,
+				vulnCategory: verdict.vulnCategory,
 				reason: verdict.reason,
 				judgedAt: Date.now(),
 			});
@@ -1034,6 +1059,12 @@ export class CodeMonitorManager {
 				// A chat robot that rejects a message must not undo the verdict.
 			}
 			if (monitor.autoDispatch && verdict.confidence >= AUTO_DISPATCH_MIN_CONFIDENCE) {
+				// Category allowlist: null means every class is reproducible; otherwise
+				// only the chosen classes are dispatched automatically.
+				const allowed = monitor.autoDispatchCategories ?? null;
+				if (allowed && (!verdict.vulnCategory || !allowed.includes(verdict.vulnCategory))) {
+					return "security";
+				}
 				// Off the polling path: preparing sources can take minutes, and the
 				// next monitor in the tick must not wait for this clone.
 				void this.dispatch(row.id).catch((error: unknown) => {
@@ -1049,6 +1080,7 @@ export class CodeMonitorManager {
 				cve: null,
 				severity: null,
 				vulnType: null,
+				vulnCategory: null,
 				reason: errorText(error),
 				judgedAt: Date.now(),
 			});

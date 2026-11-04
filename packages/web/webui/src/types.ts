@@ -879,6 +879,9 @@ export type SentinelCodeCheckStatus = "running" | "ok" | "error";
 
 export type SentinelCodeCommitStatus = "new" | "dispatching" | "dispatched" | "ignored";
 
+/** Coarse vulnerability class on a security verdict; drives filtering and auto-dispatch. */
+export type SentinelVulnCategory = "web" | "memory" | "other";
+
 export interface SentinelCodeMonitor {
 	id: string;
 	projectId: string;
@@ -893,6 +896,7 @@ export interface SentinelCodeMonitor {
 	baselines: Record<string, string>;
 	tokenSet: boolean;
 	autoDispatch: boolean;
+	autoDispatchCategories: SentinelVulnCategory[] | null;
 	intervalMinutes: number;
 	scheduleKind: SentinelCodeScheduleKind;
 	cronExpression: string | null;
@@ -923,6 +927,7 @@ export interface SentinelCodeCommit {
 	cve: string | null;
 	severity: SentinelVulnSeverity | null;
 	vulnType: string | null;
+	vulnCategory: SentinelVulnCategory | null;
 	reason: string | null;
 	status: SentinelCodeCommitStatus;
 	engineId: string | null;
@@ -1021,6 +1026,7 @@ export interface SentinelCodeMonitorInput {
 	scheduleKind?: SentinelCodeScheduleKind;
 	cronExpression?: string | null;
 	autoDispatch?: boolean;
+	autoDispatchCategories?: SentinelVulnCategory[] | null;
 	enabled?: boolean;
 }
 
@@ -1750,6 +1756,7 @@ export type SentinelClientMessage =
 			type: "list_code_activity";
 			projectId: string;
 			filter: SentinelCodeActivityFilter;
+			category?: SentinelVulnCategory | null;
 			page: number;
 			pageSize: number;
 	  }
