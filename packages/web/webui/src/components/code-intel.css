@@ -209,6 +209,46 @@
 	overflow-x: auto;
 }
 
+.code-intel-tag-filter {
+	width: 200px;
+}
+
+.code-intel-vuln-tags {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	max-width: 100%;
+	white-space: nowrap;
+}
+
+.code-intel-vuln-tags .ant-tag {
+	min-width: 0;
+	margin-inline-end: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.code-intel-vuln-tags .code-intel-vuln-tags__more {
+	flex-shrink: 0;
+}
+
+.code-intel-vuln-tags--expanded {
+	flex-wrap: wrap;
+}
+
+.code-intel-vuln-tags--expanded .ant-tag {
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+.code-intel-vuln-detail {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
 .code-intel-overview {
 	display: grid;
 	grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -309,6 +349,20 @@
 	white-space: nowrap;
 }
 
+.code-intel-reproduction {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	white-space: nowrap;
+	font-size: 12px;
+	color: var(--ant-color-text-tertiary, #667085);
+}
+
+.code-intel-reproduction__arrow { margin-inline-end: 8px; color: var(--ant-color-text-tertiary, #667085); }
+.code-intel-reproduction .is-active { color: var(--ant-color-primary, #2563eb); font-weight: 600; }
+.code-intel-reproduction .is-finished { color: var(--ant-color-success, #389e0d); }
+.code-intel-reproduction .is-error { color: var(--ant-color-error, #dc2626); }
+
 .code-intel-actions > .ant-btn,
 .code-intel-actions > .ant-tooltip-disabled-compatible-wrapper > .ant-btn {
 	padding-inline: 6px;
@@ -335,6 +389,29 @@
 	display: block;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+
+.code-intel-error-link.ant-btn {
+	display: block;
+	width: 100%;
+	height: auto;
+	padding: 0;
+	text-align: start;
+	overflow: hidden;
+}
+
+.code-intel-error-link.ant-btn > span {
+	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.code-intel-error-detail {
+	max-height: 60vh;
+	overflow: auto;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 .code-intel-monitor-filters {

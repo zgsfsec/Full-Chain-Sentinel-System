@@ -10,6 +10,7 @@
  */
 
 import type { GithubCommitDetail } from "./code-host.ts";
+import { CODE_VULN_TAGS, type CodeVulnTag, normalizeCodeVulnTags } from "./code-vuln-tags.ts";
 import { t } from "./i18n.ts";
 import type { SentinelCodeMonitor, SentinelVulnCategory, SentinelVulnSeverity } from "./protocol.ts";
 
@@ -42,6 +43,9 @@ export const CODE_MONITOR_SYSTEM_PROMPT = `你是一名开源漏洞情报分析�
    - "other"：其余——加密实现错误、拒绝服务、信息泄露、凭据泄露等。
    拿不准属于哪类时按漏洞被利用时破坏的对象判断：破坏的是 Web 请求处理逻辑选 web，破坏的是进程内存选 memory，其余选 other。security=false 时 vuln_category 为 null。
 7. confidence 表示你对 security 判断的把握（0 到 1）。证据只够怀疑时不要给 0.9。
+8. security=true 时必须给出 vuln_tags 数组，可多选，只使用下方与 vuln_category 对应的标签 ID。依据 diff 选择具体成因；RCE、信息泄露、权限提升、拒绝服务等影响标签只有在证据充分时才附加，不因越界写就推断 RCE，不因内存泄漏就推断信息泄露。内存问题导致 RCE 仍归 memory。没有更具体类型时仅选 other。security=false 时返回 []。
+可用细分标签（ID=名称，括号内为适用类别）：
+${CODE_VULN_TAGS.map((tag) => `${tag.id}=${tag.zh} (${tag.categories.join("/")})`).join("；")}
 
 只输出一个 JSON 对象，不要 Markdown 代码块，不要额外解释。字段：
 {
@@ -51,6 +55,7 @@ export const CODE_MONITOR_SYSTEM_PROMPT = `你是一名开源漏洞情报分析�
   "severity": "critical" | "high" | "medium" | "low" | "info" | null,
   "vuln_type": "路径穿越" | "反序列化" | "认证绕过" | "SQL 注入" | "内存破坏" | "拒绝服务" | "信息泄露" | "其他" | null,
   "vuln_category": "web" | "memory" | "other" | null,
+  "vuln_tags": ["path-traversal", "file-read"],
   "title": "一句话说明修复了什么安全问题（中文）",
   "reason": "判断依据，引用具体文件或 diff 片段（中文）"
 }`;
@@ -63,6 +68,7 @@ export interface CodeJudgeVerdict {
 	severity: SentinelVulnSeverity | null;
 	vulnType: string | null;
 	vulnCategory: SentinelVulnCategory | null;
+	vulnTags: CodeVulnTag[];
 	title: string;
 	reason: string;
 }
@@ -124,6 +130,8 @@ export function parseMonitorVerdict(raw: string): CodeJudgeVerdict {
 			: null
 		: null;
 	if (parsed.security && !vulnCategory) throw new Error(t("vuln_category 无效"));
+	const vulnTags = normalizeCodeVulnTags(parsed.vuln_tags, vulnCategory);
+	if (parsed.security && vulnTags.length === 0) throw new Error("vuln_tags 缺少有效的细分标签");
 	return {
 		security: parsed.security,
 		confidence,
@@ -131,6 +139,7 @@ export function parseMonitorVerdict(raw: string): CodeJudgeVerdict {
 		severity,
 		vulnType: vulnTypeRaw || null,
 		vulnCategory,
+		vulnTags,
 		title: title || t("未命名安全修复"),
 		reason,
 	};

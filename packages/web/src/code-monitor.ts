@@ -27,6 +27,7 @@ import {
 	renderCommitDiff,
 } from "./code-host.ts";
 import { judgeCommit } from "./code-monitor-judge.ts";
+import { createProjectGithubFetch } from "./code-monitor-network.ts";
 import {
 	type CodeMonitorStore,
 	normalizeIntervalMinutes,
@@ -36,6 +37,7 @@ import {
 	type StoredCodeMonitor,
 	setCodeMonitorSecret,
 } from "./code-monitor-store.ts";
+import { CODE_VULN_TAGS, type CodeVulnTag } from "./code-vuln-tags.ts";
 import { nextCronTime, parseCronExpression, validateCronExpression } from "./cron.ts";
 import { execInContainer } from "./docker.ts";
 import { resolveLibraryRole } from "./model-library.ts";
@@ -50,6 +52,7 @@ import type {
 	SentinelCodeMonitor,
 	SentinelCodeMonitorDetail,
 	SentinelCodeMonitorInput,
+	SentinelEngineStatus,
 	SentinelProjectInfo,
 	SentinelVulnCategory,
 } from "./protocol.ts";
@@ -71,6 +74,19 @@ function normalizeAutoDispatchCategories(input: SentinelVulnCategory[] | null): 
 	if (!input) return null;
 	const list = [...new Set(input.filter((entry) => VULN_CATEGORIES.includes(entry)))];
 	return list.length > 0 ? list : null;
+}
+
+/** Invalid or empty restrictions must never silently allow every type. */
+function normalizeAutoDispatchTags(input: unknown): CodeVulnTag[] | null {
+	if (input === null) return null;
+	if (!Array.isArray(input) || input.length === 0) throw new Error("请至少选择一种自动复现的漏洞类型");
+	const tags = new Set<CodeVulnTag>();
+	for (const value of input) {
+		const tag = CODE_VULN_TAGS.find((tag) => tag.id === value);
+		if (!tag) throw new Error("自动复现包含未知的漏洞类型，请重新选择");
+		tags.add(tag.id);
+	}
+	return [...tags];
 }
 
 /** Queue bounds: a slow GitHub or model endpoint must not take the whole console. */
@@ -101,6 +117,8 @@ export interface CodeMonitorHooks {
 		commit: SentinelCodeCommit,
 		source: CodeMonitorEngineSource,
 	): Promise<string>;
+	/** Current engineering state, including persisted runs after a restart. */
+	engineStatus?(engineId: string): SentinelEngineStatus | null;
 	/** Push the finding to the operator's enabled chat channels. */
 	notify(monitor: SentinelCodeMonitor, commit: SentinelCodeCommit): void;
 	/** Import progress is pushed to every console so a refresh can resume the banner. */
@@ -310,6 +328,7 @@ export class CodeMonitorManager {
 
 	start(): void {
 		if (this.timer) return;
+		this.syncEngines();
 		const now = Date.now();
 		// A process that died mid-check leaves a running row; close the log once so
 		// the detail page shows an interrupted check, and put the job back in line.
@@ -369,10 +388,11 @@ export class CodeMonitorManager {
 		page: number,
 		pageSize: number,
 		category: SentinelVulnCategory | null = null,
+		tag: CodeVulnTag | null = null,
 	): SentinelCodeActivityView {
 		const project = this.hooks.project(projectId);
 		if (!project) throw new Error("项目不存在");
-		const { items, total } = this.store.listActivity(projectId, filter, page, pageSize, category);
+		const { items, total } = this.store.listActivity(projectId, filter, page, pageSize, category, tag);
 		const anomalies = this.store
 			.listMonitors()
 			.filter((monitor) => monitor.projectId === projectId && Boolean(monitor.lastError)).length;
@@ -396,10 +416,22 @@ export class CodeMonitorManager {
 	}
 
 	/** Probe a repository's branches for the multi-select, before or during a save. */
-	async branches(input: { url: string; token?: string; apiBaseUrl?: string; monitorId?: string }): Promise<string[]> {
+	async branches(input: {
+		projectId: string;
+		url: string;
+		token?: string;
+		apiBaseUrl?: string;
+		monitorId?: string;
+	}): Promise<string[]> {
 		const ref = parseGithubRepoUrl(input.url, input.apiBaseUrl);
+		const monitor = input.monitorId ? this.store.getMonitor(input.monitorId) : null;
+		if (input.monitorId && (!monitor || monitor.projectId !== input.projectId)) throw new Error("监控不属于当前项目");
 		const token = input.token?.trim() || (input.monitorId ? this.token(input.monitorId) : "");
-		const client = new GithubClient(ref, token, this.hooks.fetchImpl);
+		const client = new GithubClient(
+			ref,
+			token,
+			this.hooks.fetchImpl ?? createProjectGithubFetch(this.agentDir, input.projectId),
+		);
 		return (await client.listBranches()).map((branch) => branch.name);
 	}
 
@@ -445,7 +477,12 @@ export class CodeMonitorManager {
 		const token = input.token?.trim() ?? "";
 		if (/\s/.test(token)) throw new Error("访问令牌不能包含空白字符");
 		const schedule = resolveSchedule(input);
-		const client = new GithubClient(ref, token, this.hooks.fetchImpl);
+		const autoDispatchTags = normalizeAutoDispatchTags(input.autoDispatchTags ?? null);
+		const client = new GithubClient(
+			ref,
+			token,
+			this.hooks.fetchImpl ?? createProjectGithubFetch(this.agentDir, project.id),
+		);
 		const { branches: resolvedBranches, baselines } = await this.resolveBranches(
 			client,
 			branches,
@@ -467,6 +504,7 @@ export class CodeMonitorManager {
 			autoDispatchCategories: normalizeAutoDispatchCategories(
 				input.autoDispatchCategories === undefined ? null : input.autoDispatchCategories,
 			),
+			autoDispatchTags,
 			intervalMinutes: schedule.intervalMinutes,
 			scheduleKind: schedule.kind,
 			cronExpression: schedule.cron,
@@ -492,7 +530,15 @@ export class CodeMonitorManager {
 		const token = input.token === undefined ? this.token(id) : input.token.trim();
 		if (/\s/.test(token)) throw new Error("访问令牌不能包含空白字符");
 		const schedule = resolveSchedule(input, current);
-		const client = new GithubClient(ref, token, this.hooks.fetchImpl);
+		const autoDispatchTags =
+			input.autoDispatchTags === undefined
+				? current.autoDispatchTags
+				: normalizeAutoDispatchTags(input.autoDispatchTags);
+		const client = new GithubClient(
+			ref,
+			token,
+			this.hooks.fetchImpl ?? createProjectGithubFetch(this.agentDir, project.id),
+		);
 		const { branches: resolvedBranches, baselines } = await this.resolveBranches(
 			client,
 			branches,
@@ -513,6 +559,7 @@ export class CodeMonitorManager {
 				input.autoDispatchCategories === undefined
 					? current.autoDispatchCategories
 					: normalizeAutoDispatchCategories(input.autoDispatchCategories),
+			autoDispatchTags,
 			intervalMinutes: schedule.intervalMinutes,
 			scheduleKind: schedule.kind,
 			cronExpression: schedule.cron,
@@ -776,7 +823,7 @@ export class CodeMonitorManager {
 				repoUrl: monitor.repoUrl,
 			},
 			token,
-			this.hooks.fetchImpl,
+			this.hooks.fetchImpl ?? createProjectGithubFetch(this.agentDir, monitor.projectId),
 			// An unauthenticated client has a tiny hourly quota; slow it down and
 			// consume fewer commits per pass.
 			{ minRequestIntervalMs: token ? 500 : 1_500 },
@@ -918,7 +965,7 @@ export class CodeMonitorManager {
 				repoUrl: monitor.repoUrl,
 			},
 			this.token(row.monitorId),
-			this.hooks.fetchImpl,
+			this.hooks.fetchImpl ?? createProjectGithubFetch(this.agentDir, monitor.projectId),
 		);
 		const detail = await client.getCommit(row.sha);
 		this.store.setVerdict(row.id, {
@@ -928,6 +975,7 @@ export class CodeMonitorManager {
 			severity: null,
 			vulnType: null,
 			vulnCategory: null,
+			vulnTags: [],
 			reason: null,
 			judgedAt: null,
 		});
@@ -951,7 +999,7 @@ export class CodeMonitorManager {
 				repoUrl: monitor.repoUrl,
 			},
 			this.token(monitorId),
-			this.hooks.fetchImpl,
+			this.hooks.fetchImpl ?? createProjectGithubFetch(this.agentDir, monitor.projectId),
 		);
 		const detail = await client.getCommit(row.sha);
 		const verdict = await this.judge(monitor, row, detail);
@@ -971,6 +1019,7 @@ export class CodeMonitorManager {
 				severity: null,
 				vulnType: null,
 				vulnCategory: null,
+				vulnTags: [],
 				reason: "合并提交，改动由分支上的单个提交承载",
 				judgedAt: Date.now(),
 			});
@@ -984,6 +1033,7 @@ export class CodeMonitorManager {
 				severity: null,
 				vulnType: null,
 				vulnCategory: null,
+				vulnTags: [],
 				reason: "没有文件差异",
 				judgedAt: Date.now(),
 			});
@@ -997,6 +1047,7 @@ export class CodeMonitorManager {
 				severity: null,
 				vulnType: null,
 				vulnCategory: null,
+				vulnTags: [],
 				reason: "纯依赖升级，跳过",
 				judgedAt: Date.now(),
 			});
@@ -1011,6 +1062,7 @@ export class CodeMonitorManager {
 				severity: null,
 				vulnType: null,
 				vulnCategory: null,
+				vulnTags: [],
 				reason: "未配置监测模型（设置 → 模型 → 监测模型）",
 				judgedAt: Date.now(),
 			});
@@ -1027,6 +1079,7 @@ export class CodeMonitorManager {
 					severity: null,
 					vulnType: null,
 					vulnCategory: null,
+					vulnTags: [],
 					reason: verdict.reason,
 					judgedAt: Date.now(),
 				});
@@ -1039,6 +1092,7 @@ export class CodeMonitorManager {
 				severity: verdict.severity,
 				vulnType: verdict.vulnType,
 				vulnCategory: verdict.vulnCategory,
+				vulnTags: verdict.vulnTags,
 				reason: verdict.reason,
 				judgedAt: Date.now(),
 			});
@@ -1066,6 +1120,8 @@ export class CodeMonitorManager {
 				if (allowed && (!verdict.vulnCategory || !allowed.includes(verdict.vulnCategory))) {
 					return "security";
 				}
+				const allowedTags = monitor.autoDispatchTags;
+				if (allowedTags && !updated.vulnTags.some((tag) => allowedTags.includes(tag))) return "security";
 				// Off the polling path: preparing sources can take minutes, and the
 				// next monitor in the tick must not wait for this clone.
 				void this.dispatch(row.id).catch((error: unknown) => {
@@ -1082,6 +1138,7 @@ export class CodeMonitorManager {
 				severity: null,
 				vulnType: null,
 				vulnCategory: null,
+				vulnTags: [],
 				reason: errorText(error),
 				judgedAt: Date.now(),
 			});
@@ -1137,8 +1194,27 @@ export class CodeMonitorManager {
 		const source = await this.prepareRepository(monitor, row, project, detail.parentSha);
 		const engineId = await this.hooks.createEngine(this.view(monitor.id), row, source);
 		this.store.setStatus(row.id, "dispatched", engineId, null);
+		if (this.hooks.engineStatus) this.syncEngine(engineId, this.hooks.engineStatus(engineId));
 		this.hooks.onChange();
 		return engineId;
+	}
+
+	/** Keep progress and the activity filters in sync with the engineering board. */
+	syncEngine(engineId: string, status: SentinelEngineStatus | null): void {
+		const stage =
+			status === "running" || status === "scheduled"
+				? "engineering"
+				: status === "paused"
+					? "paused"
+					: status === "completed"
+						? "completed"
+						: "stopped";
+		if (this.store.syncEngineStage(engineId, stage)) this.hooks.onChange();
+	}
+
+	syncEngines(): void {
+		if (!this.hooks.engineStatus) return;
+		for (const id of this.store.linkedEngineIds()) this.syncEngine(id, this.hooks.engineStatus(id));
 	}
 
 	private async detailForDispatch(monitorId: string, row: SentinelCodeCommit): Promise<GithubCommitDetail> {
@@ -1153,7 +1229,7 @@ export class CodeMonitorManager {
 				repoUrl: monitor.repoUrl,
 			},
 			this.token(monitorId),
-			this.hooks.fetchImpl,
+			this.hooks.fetchImpl ?? createProjectGithubFetch(this.agentDir, monitor.projectId),
 		);
 		return client.getCommit(row.sha);
 	}
@@ -1256,14 +1332,31 @@ export class CodeMonitorManager {
 	 */
 	setDispatch(
 		ids: string[],
-		patch: { autoDispatch?: boolean; autoDispatchCategories?: SentinelVulnCategory[] | null },
+		patch: {
+			autoDispatch?: boolean;
+			autoDispatchCategories?: SentinelVulnCategory[] | null;
+			autoDispatchTags?: CodeVulnTag[] | null;
+		},
 	): number {
 		const unique = [...new Set(ids)].filter(Boolean);
 		if (unique.length === 0) throw new Error("请选择要修改的监控");
+		const normalized = {
+			...patch,
+			...(patch.autoDispatchCategories === undefined
+				? {}
+				: {
+						autoDispatchCategories: normalizeAutoDispatchCategories(patch.autoDispatchCategories),
+					}),
+			...(patch.autoDispatchTags === undefined
+				? {}
+				: {
+						autoDispatchTags: normalizeAutoDispatchTags(patch.autoDispatchTags),
+					}),
+		};
 		let updated = 0;
 		for (const id of unique) {
 			if (!this.store.getMonitor(id)) continue;
-			this.store.updateMonitor(id, patch);
+			this.store.updateMonitor(id, normalized);
 			updated += 1;
 		}
 		this.hooks.onChange();

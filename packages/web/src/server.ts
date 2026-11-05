@@ -531,6 +531,7 @@ export async function startSentinelServer(
 				{
 					onChange: (engine) => {
 						broadcast({ type: "engine_update", engine });
+						codeMonitors?.syncEngine(engine.id, engine.status);
 						// Task statuses feed the sidebar badges.
 						void broadcastSessions();
 					},
@@ -571,6 +572,7 @@ export async function startSentinelServer(
 						const project = listProjects(agentDir).projects.find((entry) => entry.id === info.id);
 						return project ? ensureProjectReady(project, agentDir) : false;
 					},
+					engineStatus: (id) => engines?.getEngine(id)?.status ?? null,
 					createEngine: async (monitor, commit, source) => {
 						if (!engines) throw new Error(t("未配置配置目录，无法使用工程模式"));
 						const project = listProjects(agentDir).projects.find((entry) => entry.id === monitor.projectId);
@@ -652,6 +654,7 @@ export async function startSentinelServer(
 
 	function broadcastEngines(socket?: WebSocket): void {
 		if (!engines) return;
+		codeMonitors?.syncEngines();
 		const view = { type: "engines", engines: engines.listEngines() } satisfies SentinelServerMessage;
 		if (socket) sendTo(socket, view);
 		else broadcast(view);
@@ -3417,22 +3420,32 @@ export async function startSentinelServer(
 					return;
 				case "list_code_activity": {
 					if (!codeMonitors) {
-						sendError(socket, t("未配置配置目录，无法使用开源监测"));
+						sendTo(socket, {
+							type: "code_activity_error",
+							requestId: message.requestId,
+							error: t("未配置配置目录，无法使用开源监测"),
+						});
 						return;
 					}
 					try {
 						sendTo(socket, {
 							type: "code_activity",
+							requestId: message.requestId,
 							view: codeMonitors.activity(
 								message.projectId,
 								message.filter,
 								message.page,
 								message.pageSize,
 								message.category ?? null,
+								message.tag ?? null,
 							),
 						});
 					} catch (error) {
-						sendError(socket, error instanceof Error ? error.message : String(error));
+						sendTo(socket, {
+							type: "code_activity_error",
+							requestId: message.requestId,
+							error: error instanceof Error ? error.message : String(error),
+						});
 					}
 					return;
 				}
@@ -3679,6 +3692,7 @@ export async function startSentinelServer(
 							...(message.autoDispatchCategories === undefined
 								? {}
 								: { autoDispatchCategories: message.autoDispatchCategories }),
+							...(message.autoDispatchTags === undefined ? {} : { autoDispatchTags: message.autoDispatchTags }),
 						});
 						sendTo(socket, {
 							type: "code_monitor_result",

@@ -1,5 +1,6 @@
 /** Client-side view of the Full Chain Sentinel wire protocol (mirrors packages/web/src/protocol.ts). */
 
+import type { CodeVulnTag } from "../../src/code-vuln-tags.ts";
 import type { UiLanguage } from "../../src/i18n-messages.ts";
 import { t } from "./i18n.ts";
 
@@ -879,6 +880,8 @@ export type SentinelCodeCheckStatus = "running" | "ok" | "error";
 
 export type SentinelCodeCommitStatus = "new" | "dispatching" | "dispatched" | "ignored";
 
+export type SentinelCodeReproductionStage = "git" | "engineering" | "paused" | "completed" | "stopped" | "failed";
+
 /** Coarse vulnerability class on a security verdict; drives filtering and auto-dispatch. */
 export type SentinelVulnCategory = "web" | "memory" | "other";
 
@@ -897,6 +900,7 @@ export interface SentinelCodeMonitor {
 	tokenSet: boolean;
 	autoDispatch: boolean;
 	autoDispatchCategories: SentinelVulnCategory[] | null;
+	autoDispatchTags: CodeVulnTag[] | null;
 	intervalMinutes: number;
 	scheduleKind: SentinelCodeScheduleKind;
 	cronExpression: string | null;
@@ -928,8 +932,10 @@ export interface SentinelCodeCommit {
 	severity: SentinelVulnSeverity | null;
 	vulnType: string | null;
 	vulnCategory: SentinelVulnCategory | null;
+	vulnTags: CodeVulnTag[];
 	reason: string | null;
 	status: SentinelCodeCommitStatus;
+	reproductionStage: SentinelCodeReproductionStage | null;
 	engineId: string | null;
 	duplicateOf: string | null;
 	error: string | null;
@@ -948,6 +954,8 @@ export type SentinelCodeActivityFilter =
 	| "failed"
 	| "dispatch_failed"
 	| "pending"
+	| "reproducing"
+	| "finished"
 	| "all";
 
 export interface SentinelCodeActivityCounts {
@@ -957,6 +965,8 @@ export interface SentinelCodeActivityCounts {
 	dispatchFailed: number;
 	pending: number;
 	anomalies: number;
+	reproducing: number;
+	finished: number;
 }
 
 export interface SentinelCodeActivityView {
@@ -1027,6 +1037,7 @@ export interface SentinelCodeMonitorInput {
 	cronExpression?: string | null;
 	autoDispatch?: boolean;
 	autoDispatchCategories?: SentinelVulnCategory[] | null;
+	autoDispatchTags?: CodeVulnTag[] | null;
 	enabled?: boolean;
 }
 
@@ -1740,6 +1751,7 @@ export type SentinelClientMessage =
 	| {
 			type: "code_monitor_branches";
 			requestId: number;
+			projectId: string;
 			url: string;
 			monitorId?: string;
 			token?: string;
@@ -1754,9 +1766,11 @@ export type SentinelClientMessage =
 	| { type: "dismiss_code_monitor_import" }
 	| {
 			type: "list_code_activity";
+			requestId: number;
 			projectId: string;
 			filter: SentinelCodeActivityFilter;
 			category?: SentinelVulnCategory | null;
+			tag?: CodeVulnTag | null;
 			page: number;
 			pageSize: number;
 	  }
@@ -1777,6 +1791,7 @@ export type SentinelClientMessage =
 			ids: string[];
 			autoDispatch?: boolean;
 			autoDispatchCategories?: SentinelVulnCategory[] | null;
+			autoDispatchTags?: CodeVulnTag[] | null;
 	  }
 	| { type: "list_code_monitor_logs"; projectId: string }
 	| { type: "get_environment" }
@@ -2079,7 +2094,8 @@ export type SentinelServerMessage =
 	| { type: "poc_source_result"; action: string; id?: string; ok: boolean; error?: string }
 	| { type: "code_monitors"; monitors: SentinelCodeMonitor[] }
 	| { type: "code_monitor_import"; state: SentinelCodeImportState | null }
-	| { type: "code_activity"; view: SentinelCodeActivityView }
+	| { type: "code_activity"; requestId: number; view: SentinelCodeActivityView }
+	| { type: "code_activity_error"; requestId: number; error: string }
 	| { type: "code_monitor_detail"; detail: SentinelCodeMonitorDetail }
 	| { type: "code_monitor_logs"; checks: SentinelCodeCheckLog[]; jobs: SentinelCodeCheckJob[] }
 	| { type: "code_monitor_branches"; requestId: number; branches?: string[]; error?: string }

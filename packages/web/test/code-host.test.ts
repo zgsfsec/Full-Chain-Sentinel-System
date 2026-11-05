@@ -141,6 +141,70 @@ describe("GithubClient", () => {
 		await expect(client.listBranches()).rejects.toBeInstanceOf(GithubApiError);
 	});
 
+	it("preserves native fetch causes, request context and socket error codes", async () => {
+		const cause = Object.assign(new Error("getaddrinfo ENOTFOUND api.github.com"), {
+			code: "ENOTFOUND",
+			hostname: "api.github.com",
+			syscall: "getaddrinfo",
+		});
+		const original = new TypeError("fetch failed", { cause });
+		const client = new GithubClient(
+			parseGithubRepoUrl("https://github.com/acme/app"),
+			"secret",
+			fakeFetch(() => {
+				throw original;
+			}),
+		);
+		const error: unknown = await client.getBranch("main").catch((error: unknown) => error);
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).cause).toBe(original);
+		expect((error as Error).message).toContain("GET https://api.github.com/repos/acme/app/branches/main");
+		expect((error as Error).message).toContain("code=ENOTFOUND");
+		expect((error as Error).message).toContain("hostname=api.github.com");
+		expect((error as Error).message).toMatch(/\d+ms/);
+	});
+
+	it("reports both IPv4 and IPv6 connection failures and redacts credentials", async () => {
+		const nested = new AggregateError([
+			Object.assign(new Error("connect failed"), { code: "ECONNREFUSED", address: "127.0.0.1", port: 443 }),
+			Object.assign(new Error("secret-token via http://user:password@proxy.example:8080"), {
+				code: "ENETUNREACH",
+				address: "::1",
+				port: 443,
+			}),
+		]);
+		const client = new GithubClient(
+			parseGithubRepoUrl("https://github.com/acme/app"),
+			"secret-token",
+			fakeFetch(() => {
+				throw new TypeError("fetch failed", { cause: nested });
+			}),
+		);
+		const error: unknown = await client.getBranch("main").catch((error: unknown) => error);
+		const message = (error as Error).message;
+		expect(message).toContain("ECONNREFUSED");
+		expect(message).toContain("ENETUNREACH");
+		expect(message).toContain("address=::1");
+		expect(message).not.toContain("secret-token");
+		expect(message).not.toContain("user:password");
+	});
+
+	it("handles cyclic causes without dropping the useful error code", async () => {
+		const cause: { message: string; code: string; cause?: unknown } = {
+			message: "TLS failed",
+			code: "CERT_HAS_EXPIRED",
+		};
+		cause.cause = cause;
+		const client = new GithubClient(
+			parseGithubRepoUrl("https://github.com/acme/app"),
+			"",
+			fakeFetch(() => {
+				throw new Error("fetch failed", { cause });
+			}),
+		);
+		await expect(client.getBranch("main")).rejects.toThrow("CERT_HAS_EXPIRED");
+	});
+
 	it("reads the repository default branch", async () => {
 		const client = new GithubClient(
 			parseGithubRepoUrl("https://github.com/acme/app"),

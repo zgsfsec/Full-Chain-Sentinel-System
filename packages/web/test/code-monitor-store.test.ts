@@ -9,6 +9,8 @@ import {
 	removeCodeMonitorSecret,
 	setCodeMonitorSecret,
 } from "../src/code-monitor-store.ts";
+import type { CodeVulnTag } from "../src/code-vuln-tags.ts";
+import { openSqliteDatabase } from "../src/sqlite.ts";
 
 const dirs: string[] = [];
 
@@ -29,9 +31,9 @@ afterEach(() => {
 	dirs.splice(0, dirs.length);
 });
 
-function addMonitor(store: CodeMonitorStore) {
+function addMonitor(store: CodeMonitorStore, projectId = "p1") {
 	return store.createMonitor({
-		projectId: "p1",
+		projectId,
 		projectName: "Project",
 		name: "acme/app",
 		host: "github.com",
@@ -49,10 +51,10 @@ function addMonitor(store: CodeMonitorStore) {
 	});
 }
 
-function addCommit(store: CodeMonitorStore, monitorId: string, sha = "c1") {
+function addCommit(store: CodeMonitorStore, monitorId: string, sha = "c1", projectId = "p1") {
 	return store.insertCommit({
 		monitorId,
-		projectId: "p1",
+		projectId,
 		branch: "main",
 		sha,
 		shortSha: sha.slice(0, 8),
@@ -94,6 +96,27 @@ describe("CodeMonitorStore", () => {
 		expect(store.listCommits(monitor.id)).toHaveLength(1);
 	});
 
+	it("migrates existing monitors and persists type restrictions across updates and restarts", () => {
+		const { dir, store } = open();
+		const monitor = addMonitor(store);
+		expect(monitor.autoDispatchTags).toBeNull();
+		store.close();
+		const legacy = openSqliteDatabase(codeMonitorDbPath(dir));
+		legacy.exec("ALTER TABLE code_monitors DROP COLUMN auto_dispatch_tags");
+		legacy.close();
+		const migrated = new CodeMonitorStore(codeMonitorDbPath(dir));
+		expect(migrated.getMonitor(monitor.id)?.autoDispatchTags).toBeNull();
+		migrated.updateMonitor(monitor.id, { autoDispatchTags: ["rce", "ssrf"] });
+		migrated.updateMonitor(monitor.id, { enabled: false });
+		migrated.close();
+		const reopened = new CodeMonitorStore(codeMonitorDbPath(dir));
+		expect(reopened.getMonitor(monitor.id)?.autoDispatchTags).toEqual(["rce", "ssrf"]);
+		expect(reopened.listMonitors()[0]?.autoDispatchTags).toEqual(["rce", "ssrf"]);
+		reopened.updateMonitor(monitor.id, { autoDispatchTags: null });
+		expect(reopened.getMonitor(monitor.id)?.autoDispatchTags).toBeNull();
+		reopened.close();
+	});
+
 	it("counts security verdicts and pending ones separately", () => {
 		const { store } = open();
 		const monitor = addMonitor(store);
@@ -105,6 +128,7 @@ describe("CodeMonitorStore", () => {
 			severity: "high",
 			vulnType: "路径穿越",
 			vulnCategory: "web",
+			vulnTags: ["path-traversal" as const],
 			reason: "补了规范化",
 			judgedAt: Date.now(),
 		});
@@ -127,6 +151,7 @@ describe("CodeMonitorStore", () => {
 			severity: "high",
 			vulnType: null,
 			vulnCategory: "other",
+			vulnTags: ["other"],
 			reason: "x",
 			judgedAt: Date.now(),
 		});
@@ -207,6 +232,7 @@ describe("CodeMonitorStore", () => {
 			severity: "high" as const,
 			vulnType: "路径穿越",
 			vulnCategory: "web" as const,
+			vulnTags: ["path-traversal" as const],
 			reason: "fix",
 			judgedAt: 1,
 		};
@@ -220,6 +246,7 @@ describe("CodeMonitorStore", () => {
 			severity: null,
 			vulnType: null,
 			vulnCategory: null,
+			vulnTags: [],
 			reason: "model down",
 			judgedAt: 1,
 		});
@@ -233,15 +260,121 @@ describe("CodeMonitorStore", () => {
 			failed: 1,
 			dispatchFailed: 1,
 			review: 1,
-			attention: 3,
+			attention: 4,
+			reproducing: 1,
+			finished: 0,
 		});
 		const inbox = store.listActivity("p1", "attention", 1, 20);
-		expect(inbox.total).toBe(3);
-		expect(inbox.items.map((row) => row.id).sort()).toEqual([review.id, failed.id, dispatchFailed.id].sort());
+		expect(inbox.total).toBe(4);
+		expect(inbox.items.map((row) => row.id).sort()).toEqual(
+			[review.id, failed.id, dispatchFailed.id, dispatched.id].sort(),
+		);
 		expect(store.listActivity("p1", "all", 1, 20).total).toBe(5);
 		// The category narrowing keeps the status filter but drops other classes.
 		expect(store.listActivity("p1", "all", 1, 20, "web").total).toBe(4);
 		expect(store.listActivity("p1", "all", 1, 20, "memory").total).toBe(0);
+	});
+
+	it("filters multiple detailed tags before pagination and intersects project, category and status", () => {
+		const { dir, store } = open();
+		const monitor = addMonitor(store);
+		const otherMonitor = addMonitor(store, "p2");
+		const matchingIds: string[] = [];
+		for (const sha of ["ssrf-1", "ssrf-2", "ssrf-3", "xss", "memory", "other-project"]) {
+			const otherProject = sha === "other-project";
+			const row = addCommit(store, otherProject ? otherMonitor.id : monitor.id, sha, otherProject ? "p2" : "p1");
+			const tags: CodeVulnTag[] =
+				sha === "memory"
+					? ["use-after-free", "info-disclosure"]
+					: sha === "xss"
+						? ["xss"]
+						: ["ssrf", "info-disclosure"];
+			store.setVerdict(row.id, {
+				verdict: "security",
+				confidence: 0.9,
+				cve: null,
+				severity: "high",
+				vulnCategory: sha === "memory" ? "memory" : "web",
+				vulnType: null,
+				vulnTags: tags,
+				reason: "diff evidence",
+				judgedAt: 1,
+			});
+			if (sha.startsWith("ssrf")) matchingIds.push(row.id);
+		}
+		const first = store.listActivity("p1", "all", 1, 2, "web", "ssrf");
+		const second = store.listActivity("p1", "all", 2, 2, "web", "ssrf");
+		expect(first.total).toBe(3);
+		expect(second.total).toBe(3);
+		expect(first.items).toHaveLength(2);
+		expect(second.items).toHaveLength(1);
+		expect([...first.items, ...second.items].map((row) => row.id).sort()).toEqual(matchingIds.sort());
+		expect(store.listActivity("p1", "all", 1, 20, null, "info-disclosure").total).toBe(4);
+		expect(store.listActivity("p1", "all", 1, 20, "memory", "info-disclosure").total).toBe(1);
+		expect(store.listActivity("p1", "all", 1, 20, "memory", "ssrf").total).toBe(0);
+		store.setStatus(matchingIds[0], "dispatched", "engine-1", null);
+		expect(store.listActivity("p1", "review", 1, 20, "web", "ssrf").total).toBe(2);
+		store.close();
+		const reopened = new CodeMonitorStore(codeMonitorDbPath(dir));
+		expect(reopened.getCommit(matchingIds[0])?.vulnTags).toEqual(["ssrf", "info-disclosure"]);
+		reopened.close();
+	});
+
+	it.each(["pending", "failed", "not_security"] as const)(
+		"clears stale tags when rejudgment changes to %s",
+		(verdict) => {
+			const { store } = open();
+			const row = addCommit(store, addMonitor(store).id);
+			const security = {
+				verdict: "security" as const,
+				confidence: 0.9,
+				cve: null,
+				severity: null,
+				vulnType: "SSRF",
+				vulnCategory: "web" as const,
+				vulnTags: ["ssrf" as const],
+				reason: "fix",
+				judgedAt: 1,
+			};
+			store.setVerdict(row.id, security);
+			store.setVerdict(row.id, { ...security, verdict });
+			expect(store.getCommit(row.id)?.vulnTags).toEqual([]);
+			expect(store.listActivity("p1", "all", 1, 20, null, "ssrf").total).toBe(0);
+			store.close();
+		},
+	);
+
+	it("upgrades old databases using explicit type names and leaves unknown findings unclassified", () => {
+		const { dir, store } = open();
+		const monitor = addMonitor(store);
+		const known = addCommit(store, monitor.id, "known");
+		const unknown = addCommit(store, monitor.id, "unknown");
+		for (const row of [known, unknown]) {
+			store.setVerdict(row.id, {
+				verdict: "security",
+				confidence: 0.9,
+				cve: null,
+				severity: null,
+				vulnType: row.id === known.id ? "路径穿越" : "请求处理缺陷",
+				vulnCategory: "web",
+				vulnTags: [],
+				reason: "fix",
+				judgedAt: 1,
+			});
+		}
+		store.close();
+		const legacy = openSqliteDatabase(codeMonitorDbPath(dir));
+		legacy.exec("ALTER TABLE code_commits DROP COLUMN vuln_tags");
+		legacy.close();
+		const upgraded = new CodeMonitorStore(codeMonitorDbPath(dir));
+		expect(upgraded.getCommit(known.id)?.vulnTags).toEqual(["path-traversal"]);
+		expect(upgraded.listActivity("p1", "all", 1, 20, "web", "path-traversal").total).toBe(1);
+		expect(upgraded.getCommit(unknown.id)).toMatchObject({ vulnType: "请求处理缺陷", vulnTags: [] });
+		upgraded.close();
+		const reopened = new CodeMonitorStore(codeMonitorDbPath(dir));
+		expect(reopened.listCommits(monitor.id)).toHaveLength(2);
+		expect(reopened.getCommit(known.id)?.vulnTags).toEqual(["path-traversal"]);
+		reopened.close();
 	});
 
 	it("deletes a project's monitors and history together", () => {

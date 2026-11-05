@@ -113,6 +113,32 @@ function number(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+/** fetch hides DNS/TLS/socket errors in cause, sometimes as an AggregateError. */
+function networkErrorDetail(error: unknown): string {
+	const queue: unknown[] = [error];
+	const seen = new Set<unknown>();
+	const details: string[] = [];
+	for (let index = 0; index < queue.length && index < 12; index += 1) {
+		const current = queue[index];
+		if (seen.has(current)) continue;
+		seen.add(current);
+		if (!isRecord(current)) {
+			details.push(String(current));
+			continue;
+		}
+		const message = typeof current.message === "string" ? current.message : "";
+		const fields = ["code", "syscall", "hostname", "address", "port"].flatMap((key) => {
+			const value = current[key];
+			return typeof value === "string" || typeof value === "number" ? [`${key}=${value}`] : [];
+		});
+		const detail = [message, fields.length > 0 ? `[${fields.join(", ")}]` : ""].filter(Boolean).join(" ");
+		if (detail && !details.includes(detail)) details.push(detail);
+		if (current.cause !== undefined) queue.push(current.cause);
+		if (Array.isArray(current.errors)) queue.push(...current.errors.slice(0, 8));
+	}
+	return details.join(" ← ") || "未知网络错误";
+}
+
 /** Validate the API override and strip a trailing slash. */
 export function normalizeApiBase(raw: string): string {
 	const trimmed = raw.trim();
@@ -228,10 +254,16 @@ export class GithubClient {
 		const wait = this.minRequestIntervalMs - (Date.now() - this.lastRequestAt);
 		if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
 		this.lastRequestAt = Date.now();
+		const url = this.url(path, query);
+		const startedAt = Date.now();
+		const redact = (value: string): string => {
+			const safe = value.replace(/([a-z][a-z\d+.-]*:\/\/)[^/\s@]+@/gi, "$1[redacted]@");
+			return this.token ? safe.replaceAll(this.token, "[redacted]") : safe;
+		};
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 		try {
-			const response = await this.fetchImpl(this.url(path, query), {
+			const response = await this.fetchImpl(url, {
 				headers: {
 					accept: "application/vnd.github+json",
 					"x-github-api-version": API_VERSION,
@@ -262,7 +294,9 @@ export class GithubClient {
 							? "仓库或分支不存在，或令牌无权访问"
 							: `GitHub API 返回 ${response.status}`;
 				throw new GithubApiError(
-					body ? `${reason}：${body}` : reason,
+					redact(
+						`${reason}（HTTP ${response.status}；GET ${url}；${Date.now() - startedAt}ms）${body ? `：${body}` : ""}`,
+					),
 					response.status,
 					remaining === null ? null : Number(remaining),
 					reset === null ? null : Number(reset) * 1000,
@@ -272,8 +306,13 @@ export class GithubClient {
 			return (await response.json()) as T;
 		} catch (error) {
 			if (error instanceof GithubApiError) throw error;
-			if (error instanceof Error && error.name === "AbortError") throw new Error("GitHub API 请求超时");
-			throw new Error(`GitHub API 请求失败：${error instanceof Error ? error.message : String(error)}`);
+			const context = `GET ${url}；${Date.now() - startedAt}ms`;
+			if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
+				throw new Error(redact(`GitHub API 请求超时（${context}）`), { cause: error });
+			}
+			throw new Error(redact(`GitHub API 请求失败（${context}）：${networkErrorDetail(error)}`).slice(0, 3000), {
+				cause: error,
+			});
 		} finally {
 			clearTimeout(timer);
 		}

@@ -7,6 +7,7 @@ import type {
 	SessionTreeNode,
 	ThinkingLevel,
 } from "@earendil-works/pi-coding-agent";
+import type { CodeVulnTag } from "./code-vuln-tags.ts";
 import type { DroidDevice, DroidToken } from "./droid.ts";
 import type { UiLanguage } from "./i18n-messages.ts";
 import type { IosDevice, IosToken } from "./ios.ts";
@@ -1057,7 +1058,15 @@ export type SentinelCodeCheckStatus = "running" | "ok" | "error";
 export type SentinelCodeJobStatus = "queued" | "running" | "done" | "failed";
 
 /** Which slice of the project activity feed to read. */
-export type SentinelCodeActivityFilter = "attention" | "review" | "failed" | "dispatch_failed" | "pending" | "all";
+export type SentinelCodeActivityFilter =
+	| "attention"
+	| "review"
+	| "failed"
+	| "dispatch_failed"
+	| "pending"
+	| "reproducing"
+	| "finished"
+	| "all";
 
 export interface SentinelCodeActivityCounts {
 	attention: number;
@@ -1066,6 +1075,8 @@ export interface SentinelCodeActivityCounts {
 	dispatchFailed: number;
 	pending: number;
 	anomalies: number;
+	reproducing: number;
+	finished: number;
 }
 
 export interface SentinelCodeActivityView {
@@ -1116,6 +1127,8 @@ export interface SentinelCodeCheckJob {
  */
 export type SentinelCodeCommitStatus = "new" | "dispatching" | "dispatched" | "ignored";
 
+export type SentinelCodeReproductionStage = "git" | "engineering" | "paused" | "completed" | "stopped" | "failed";
+
 /**
  * Coarse vulnerability class the judge must pick for a security verdict:
  * web (injection, XSS, SSRF, auth bypass, path traversal, …), memory (overflow,
@@ -1152,6 +1165,8 @@ export interface SentinelCodeMonitor {
 	autoDispatch: boolean;
 	/** When set, auto-dispatch only these vulnerability classes; null means all. */
 	autoDispatchCategories: SentinelVulnCategory[] | null;
+	/** Also require at least one matching detailed tag; null means all types. */
+	autoDispatchTags: CodeVulnTag[] | null;
 	/** Minutes between automatic checks when `scheduleKind` is interval; 0 = manual. */
 	intervalMinutes: number;
 	scheduleKind: SentinelCodeScheduleKind;
@@ -1196,8 +1211,12 @@ export interface SentinelCodeCommit {
 	vulnType: string | null;
 	/** Required coarse class on a security verdict; null otherwise. */
 	vulnCategory: SentinelVulnCategory | null;
+	/** Validated detailed tags; an empty list means a finding still needs classification. */
+	vulnTags: CodeVulnTag[];
 	reason: string | null;
 	status: SentinelCodeCommitStatus;
+	/** Persisted progress, synchronized with the linked engineering run. */
+	reproductionStage: SentinelCodeReproductionStage | null;
 	/** Engine started for this finding, once dispatched. */
 	engineId: string | null;
 	/** Another finding in the same monitor already covers this one. */
@@ -1260,6 +1279,8 @@ export interface SentinelCodeMonitorInput {
 	autoDispatch?: boolean;
 	/** Categories eligible for auto-dispatch; null/empty means all categories. */
 	autoDispatchCategories?: SentinelVulnCategory[] | null;
+	/** Null allows all types; a nonempty list requires at least one matching tag. */
+	autoDispatchTags?: CodeVulnTag[] | null;
 	enabled?: boolean;
 }
 
@@ -2286,6 +2307,7 @@ export type SentinelClientMessage =
 	| {
 			type: "code_monitor_branches";
 			requestId: number;
+			projectId: string;
 			url: string;
 			/** An existing monitor lets the server reuse its stored token. */
 			monitorId?: string;
@@ -2301,10 +2323,12 @@ export type SentinelClientMessage =
 	| { type: "dismiss_code_monitor_import" }
 	| {
 			type: "list_code_activity";
+			requestId: number;
 			projectId: string;
 			filter: SentinelCodeActivityFilter;
 			/** Optional vuln-category narrowing on top of the status filter. */
 			category?: SentinelVulnCategory | null;
+			tag?: CodeVulnTag | null;
 			page: number;
 			pageSize: number;
 	  }
@@ -2328,6 +2352,7 @@ export type SentinelClientMessage =
 			ids: string[];
 			autoDispatch?: boolean;
 			autoDispatchCategories?: SentinelVulnCategory[] | null;
+			autoDispatchTags?: CodeVulnTag[] | null;
 	  }
 	/** Project-wide check and queue logs, for the troubleshooting tab. */
 	| { type: "list_code_monitor_logs"; projectId: string };
@@ -2432,7 +2457,8 @@ export type SentinelServerMessage =
 	| { type: "poc_source_result"; action: string; id?: string; ok: boolean; error?: string }
 	| { type: "code_monitors"; monitors: SentinelCodeMonitor[] }
 	| { type: "code_monitor_import"; state: SentinelCodeImportState | null }
-	| { type: "code_activity"; view: SentinelCodeActivityView }
+	| { type: "code_activity"; requestId: number; view: SentinelCodeActivityView }
+	| { type: "code_activity_error"; requestId: number; error: string }
 	| { type: "code_monitor_detail"; detail: SentinelCodeMonitorDetail }
 	/** Answer to `list_code_monitor_logs`: project-wide check and queue history. */
 	| {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Empty } from "antd";
+import type { CodeVulnTag } from "../../src/code-vuln-tags.ts";
 import { AboutPage } from "./components/AboutPage.tsx";
 import { ApiModelPage } from "./components/ApiModelPage.tsx";
 import { ApprovalQueue } from "./components/ApprovalQueue.tsx";
@@ -34,6 +35,7 @@ import { PermissionsPanel } from "./components/PermissionsPanel.tsx";
 import { PluginPanel } from "./components/PluginPanel.tsx";
 import { PluginUiOverlay, type PluginUiCallResult, type PluginUiContext } from "./components/PluginUiOverlay.tsx";
 import { CodeIntelPage, type BranchProbe } from "./components/CodeIntelPage.tsx";
+import { CodeActivityRequest } from "./code-activity-request.ts";
 import { PocPage } from "./components/PocPage.tsx";
 import { PocSourcesPanel } from "./components/PocSourcesPanel.tsx";
 import { type PresetImportNotice, PresetPanel } from "./components/PresetPanel.tsx";
@@ -489,6 +491,11 @@ export function App() {
 	const [codeImport, setCodeImport] = useState<SentinelCodeImportState | null>(null);
 	const [codeActivity, setCodeActivity] = useState<SentinelCodeActivityView | null>(null);
 	const [codeActivityLoading, setCodeActivityLoading] = useState(false);
+	const [codeActivityError, setCodeActivityError] = useState<string | null>(null);
+	const codeActivityRequest = useMemo(() => new CodeActivityRequest((loading, error) => {
+		setCodeActivityLoading(loading);
+		setCodeActivityError(error);
+	}, setCodeActivity), []);
 	const [codeMonitorLogs, setCodeMonitorLogs] = useState<{
 		checks: SentinelCodeCheckLog[];
 		jobs: SentinelCodeCheckJob[];
@@ -1438,8 +1445,8 @@ export function App() {
 					setCodeImport(message.state);
 					break;
 				case "code_activity":
-					setCodeActivity(message.view);
-					setCodeActivityLoading(false);
+				case "code_activity_error":
+					codeActivityRequest.accept(message);
 					break;
 				case "code_monitor_detail":
 					setCodeMonitorDetail(message.detail);
@@ -1726,6 +1733,7 @@ export function App() {
 				if (!open) {
 					// A check in flight dies with the socket; do not leave spinners stuck.
 					setCodeCheckingIds([]);
+					codeActivityRequest.disconnect();
 					return;
 				}
 				// Every (re)connect re-reads the whole view. A dropped socket misses
@@ -1754,6 +1762,7 @@ export function App() {
 		}, 15000);
 		return () => {
 			window.clearInterval(poll);
+			codeActivityRequest.dispose();
 			connection.close();
 		};
 	}, [handleServerMessage, authReady]);
@@ -1801,11 +1810,15 @@ export function App() {
 			page: number,
 			pageSize: number,
 			category: SentinelVulnCategory | null = null,
+			tag: CodeVulnTag | null = null,
+			background = false,
 		) => {
-			setCodeActivityLoading(true);
-			send({ type: "list_code_activity", projectId, filter, page, pageSize, category });
+			codeActivityRequest.load({ projectId, filter, page, pageSize, category, tag }, (request) => {
+				if (!connectionRef.current?.connected) throw new Error(t("连接已断开，请等待重连后重试"));
+				connectionRef.current.send(request);
+			}, background);
 		},
-		[send],
+		[codeActivityRequest],
 	);
 
 	const loadPluginBuildLog = useCallback(
@@ -3284,6 +3297,7 @@ export function App() {
 							onImportConsumed={() => setWebFuzzImport(null)} />
 					) : page === "codeintel" ? (
 						<CodeIntelPage
+							connected={connected}
 							project={snapshot?.project ?? null}
 							monitors={codeMonitors}
 							detail={codeMonitorDetail}
@@ -3306,6 +3320,7 @@ export function App() {
 								...(patch.autoDispatchCategories === undefined
 									? {}
 									: { autoDispatchCategories: patch.autoDispatchCategories }),
+								...(patch.autoDispatchTags === undefined ? {} : { autoDispatchTags: patch.autoDispatchTags }),
 							});
 						}}
 							onOpen={(id) => send({ type: "get_code_monitor", id })}
@@ -3313,6 +3328,7 @@ export function App() {
 							importState={codeImport}
 							activity={codeActivity}
 							activityLoading={codeActivityLoading}
+							activityError={codeActivityError}
 							onLoadActivity={loadCodeActivity}
 							onImport={importCodeMonitors}
 							onDismissImport={dismissCodeMonitorImport}

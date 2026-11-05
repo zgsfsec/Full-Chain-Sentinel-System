@@ -52,6 +52,7 @@ import {
 } from "antd";
 import type { TableColumnsType } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CODE_VULN_TAGS, type CodeVulnTag } from "../../../src/code-vuln-tags.ts";
 import { DEFAULT_CRON_EXPRESSION, nextCronOccurrences, validateCronExpression } from "../../../src/cron.ts";
 import { getLanguage, t } from "../i18n.ts";
 import type {
@@ -73,6 +74,7 @@ import type {
 } from "../types.ts";
 import { Page, Section } from "../ui/Page.tsx";
 import { CronGrid } from "./CronGrid.tsx";
+import { CodeReproductionProgress } from "./CodeReproductionProgress.tsx";
 import "./code-intel.css";
 
 const { Link: Anchor, Text, Paragraph } = Typography;
@@ -142,6 +144,89 @@ const ACTIVITY_CATEGORY_OPTIONS: Array<{ value: SentinelVulnCategory | null; lab
 	...CATEGORY_OPTIONS,
 ];
 
+const VULN_TAG_TEXT =
+	getLanguage() === "en"
+		? {
+				label: "Vulnerability tags",
+				all: "All tags",
+				unclassified: "Needs tags",
+				hint: "Rejudge this finding to add detailed tags",
+			}
+		: { label: "细分标签", all: "全部标签", unclassified: "待细分", hint: "可重判此记录，补充细分标签" };
+
+function vulnTagLabel(id: CodeVulnTag): string {
+	const tag = CODE_VULN_TAGS.find((tag) => tag.id === id);
+	return tag ? tag[getLanguage()] : id;
+}
+
+const DISPATCH_TYPE_TEXT = getLanguage() === "en" ? {
+	label: "Reproduce vulnerability types", all: "All types", custom: "Only chosen types",
+	choose: "Select vulnerability types", required: "Select at least one vulnerability type",
+	hint: "A finding must match the category and at least one chosen type. Confidence must be at least 65%. Findings without matching tags remain available for manual reproduction.",
+} : {
+	label: "复现漏洞类型", all: "全部类型", custom: "仅所选漏洞类型",
+	choose: "选择要自动复现的漏洞类型", required: "请至少选择一种漏洞类型",
+	hint: "需同时符合复现类别，并命中任一所选类型，且置信度 ≥ 65% 才会自动复现。未命中或缺少细分标签的发现仍可手动复现。",
+};
+
+function dispatchTagOptions(categories: SentinelVulnCategory[]) {
+	return CODE_VULN_TAGS.filter((tag) => categories.length === 0 || categories.some(
+		(category) => (tag.categories as readonly string[]).includes(category),
+	)).map((tag) => ({ value: tag.id, label: vulnTagLabel(tag.id) }));
+}
+
+/** Compact rows show two tags; keyboard focus and hover reveal the full list. */
+function CodeVulnerabilityTags({ commit, expanded = false }: { commit: SentinelCodeCommit; expanded?: boolean }) {
+	if (commit.verdict !== "security") return <Text type="secondary">—</Text>;
+	if (commit.vulnTags.length === 0) {
+		return (
+			<Tooltip title={VULN_TAG_TEXT.hint}>
+				<Text type="secondary" tabIndex={0}>
+					{VULN_TAG_TEXT.unclassified}
+				</Text>
+			</Tooltip>
+		);
+	}
+	const tags = expanded ? commit.vulnTags : commit.vulnTags.slice(0, 2);
+	const labels = commit.vulnTags.map(vulnTagLabel).join(" · ");
+	const content = (
+		<span
+			className={`code-intel-vuln-tags${expanded ? " code-intel-vuln-tags--expanded" : ""}`}
+			tabIndex={expanded ? undefined : 0}
+			aria-label={labels}
+		>
+			{tags.map((id) => (
+				<Tag key={id} color="geekblue">{vulnTagLabel(id)}</Tag>
+			))}
+			{!expanded && commit.vulnTags.length > 2 ? (
+				<Tag className="code-intel-vuln-tags__more">+{commit.vulnTags.length - 2}</Tag>
+			) : null}
+		</span>
+	);
+	return expanded ? content : <Tooltip title={labels}>{content}</Tooltip>;
+}
+
+function CodeErrorDetail({ error }: { error: string | null }) {
+	if (!error) return <>—</>;
+	return (
+		<Tooltip title={error}>
+			<Button
+				type="link"
+				danger
+				className="code-intel-error-link"
+				onClick={() => Modal.info({
+					title: getLanguage() === "en" ? "Request failure details" : "请求失败详情",
+					width: 760,
+					okText: t("关闭"),
+					content: <Paragraph copyable className="code-intel-error-detail">{error}</Paragraph>,
+				})}
+			>
+				{error}
+			</Button>
+		</Tooltip>
+	);
+}
+
 /** Host of a Git address, for the token-help link. Null when it cannot be read. */
 function hostFromUrl(value: string): string | null {
 	const trimmed = value.trim();
@@ -180,6 +265,7 @@ export interface BranchProbe {
 }
 
 export interface CodeIntelPageProps {
+	connected: boolean;
 	project: SentinelProjectInfo | null;
 	monitors: SentinelCodeMonitor[];
 	detail: SentinelCodeMonitorDetail | null;
@@ -192,6 +278,7 @@ export interface CodeIntelPageProps {
 	importState: SentinelCodeImportState | null;
 	activity: SentinelCodeActivityView | null;
 	activityLoading: boolean;
+	activityError: string | null;
 	onImport: (inputs: SentinelCodeMonitorInput[]) => void;
 	onDismissImport: () => void;
 	onLoadActivity: (
@@ -200,13 +287,19 @@ export interface CodeIntelPageProps {
 		page: number,
 		pageSize: number,
 		category?: SentinelVulnCategory | null,
+		tag?: CodeVulnTag | null,
+		background?: boolean,
 	) => void;
 	/** Project-wide check and queue logs for the log tab; null until first load. */
 	logs: { checks: SentinelCodeCheckLog[]; jobs: SentinelCodeCheckJob[] } | null;
 	onLoadLogs: (projectId: string) => void;
 	onSetDispatch: (
 		ids: string[],
-		patch: { autoDispatch?: boolean; autoDispatchCategories?: SentinelVulnCategory[] | null },
+		patch: {
+			autoDispatch?: boolean;
+			autoDispatchCategories?: SentinelVulnCategory[] | null;
+			autoDispatchTags?: CodeVulnTag[] | null;
+		},
 	) => void;
 	onUpdate: (id: string, input: SentinelCodeMonitorInput) => void;
 	onDelete: (id: string) => void;
@@ -222,7 +315,7 @@ export interface CodeIntelPageProps {
 	onRejudge: (commitId: string) => void;
 	onProbeBranches: (
 		requestId: number,
-		input: { url: string; token?: string; apiBaseUrl?: string; monitorId?: string },
+		input: { projectId: string; url: string; token?: string; apiBaseUrl?: string; monitorId?: string },
 	) => void;
 }
 
@@ -239,6 +332,7 @@ interface EditorState {
 	cronExpression: string;
 	autoDispatch: boolean;
 	autoDispatchCategories: SentinelVulnCategory[];
+	autoDispatchTags: CodeVulnTag[];
 	enabled: boolean;
 }
 
@@ -256,6 +350,7 @@ function emptyEditor(): EditorState {
 		cronExpression: "",
 		autoDispatch: false,
 		autoDispatchCategories: [],
+		autoDispatchTags: [],
 		enabled: true,
 	};
 }
@@ -425,6 +520,7 @@ function nextCheckText(monitor: SentinelCodeMonitor): string {
 }
 
 export function CodeIntelPage({
+	connected,
 	project,
 	monitors,
 	detail,
@@ -437,6 +533,7 @@ export function CodeIntelPage({
 	importState,
 	activity,
 	activityLoading,
+	activityError,
 	onImport,
 	onDismissImport,
 	onLoadActivity,
@@ -472,6 +569,7 @@ export function CodeIntelPage({
 	const [view, setView] = useState<"activity" | "monitors" | "logs">("activity");
 	const [activityFilter, setActivityFilter] = useState<SentinelCodeActivityFilter>("attention");
 	const [activityCategory, setActivityCategory] = useState<SentinelVulnCategory | null>(null);
+	const [activityTag, setActivityTag] = useState<CodeVulnTag | null>(null);
 	const [activityPage, setActivityPage] = useState(1);
 	const [activityPageSize, setActivityPageSize] = useState(20);
 	const [activitySelectedIds, setActivitySelectedIds] = useState<string[]>([]);
@@ -484,6 +582,8 @@ export function CodeIntelPage({
 	const [dispatchSwitch, setDispatchSwitch] = useState<"keep" | "on" | "off">("on");
 	const [dispatchCats, setDispatchCats] = useState<"keep" | "all" | "custom">("keep");
 	const [dispatchCategoryList, setDispatchCategoryList] = useState<SentinelVulnCategory[]>([]);
+	const [dispatchTypes, setDispatchTypes] = useState<"keep" | "all" | "custom">("keep");
+	const [dispatchTagList, setDispatchTagList] = useState<CodeVulnTag[]>([]);
 	const probeSeq = useRef(0);
 	/** requestId → address, so queued probes land on the right row. */
 	const probeRequests = useRef(new Map<number, string>());
@@ -521,7 +621,7 @@ export function CodeIntelPage({
 	const activityRows = activity?.items ?? [];
 	const activityCounts =
 		(rows.length > 0 ? activity?.counts : null) ??
-		({ attention: 0, review: 0, failed: 0, dispatchFailed: 0, pending: 0, anomalies: 0 } as const);
+		({ attention: 0, review: 0, failed: 0, dispatchFailed: 0, pending: 0, anomalies: 0, reproducing: 0, finished: 0 } as const);
 	const activityAnomalies = rows.filter((monitor) => Boolean(monitor.lastError));
 	const editingMonitor = editor?.monitor ?? null;
 	const createRepos = useMemo(() => repoLines(bulkUrls), [bulkUrls]);
@@ -539,9 +639,20 @@ export function CodeIntelPage({
 		setMonitorPage((page) => Math.min(page, lastPage));
 	}, [monitorPageSize, filteredMonitors.length]);
 	useEffect(() => {
-		if (!project) return;
-		onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory);
-	}, [project?.id, activityFilter, activityCategory, activityPage, activityPageSize, monitors, onLoadActivity]);
+		if (!project || !connected) return;
+		onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag);
+	}, [
+		project?.id, activityFilter, activityCategory, activityTag,
+		activityPage, activityPageSize, connected, onLoadActivity,
+	]);
+	// Push events refresh quietly; polling catches up when a broadcast was missed.
+	useEffect(() => {
+		if (!project || !connected || view !== "activity") return;
+		const refresh = () => onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag, true);
+		refresh();
+		const timer = setInterval(refresh, 10_000);
+		return () => clearInterval(timer);
+	}, [project?.id, connected, view, monitors, activityFilter, activityPage, activityPageSize, activityCategory, activityTag, onLoadActivity]);
 	useEffect(() => {
 		if (view === "logs" && project) onLoadLogs(project.id);
 		// The parent supplies an inline callback; load only when the scope or tab changes.
@@ -570,6 +681,7 @@ export function CodeIntelPage({
 		setActivityPage(1);
 		setActivityFilter("attention");
 		setActivityCategory(null);
+		setActivityTag(null);
 		setEditor(null);
 		setBatchOpen(false);
 		setDispatchOpen(false);
@@ -594,8 +706,9 @@ export function CodeIntelPage({
 		}
 		const requestId = ++probeSeq.current;
 		probeRequests.current.set(requestId, url);
-		onProbeBranches(requestId, { url, ...probeConfig.current });
-	}, [onProbeBranches]);
+		if (!project) return;
+		onProbeBranches(requestId, { url, projectId: project.id, ...probeConfig.current });
+	}, [onProbeBranches, project?.id]);
 
 	const resetProbes = useCallback(() => {
 		if (probeTimer.current) {
@@ -654,6 +767,7 @@ export function CodeIntelPage({
 		setView("activity");
 		setActivityFilter(filter);
 		setActivityCategory(null);
+		setActivityTag(null);
 		setActivityPage(1);
 		setActivitySelectedIds([]);
 	};
@@ -686,6 +800,7 @@ export function CodeIntelPage({
 			cronExpression: monitor.cronExpression ?? "",
 			autoDispatch: monitor.autoDispatch,
 			autoDispatchCategories: monitor.autoDispatchCategories ?? [],
+			autoDispatchTags: monitor.autoDispatchTags ?? [],
 			enabled: monitor.enabled,
 		});
 	};
@@ -704,21 +819,21 @@ export function CodeIntelPage({
 		setDispatchSwitch("on");
 		setDispatchCats("keep");
 		setDispatchCategoryList([]);
+		setDispatchTypes("keep");
+		setDispatchTagList([]);
 		setDispatchOpen(true);
 	};
 
 	const applyBatchDispatch = () => {
 		const ids = dispatchAll ? rows.map((row) => row.id) : selectedIds;
-		if (ids.length === 0 || (dispatchCats === "custom" && dispatchCategoryList.length === 0)) return;
-		const patch: { autoDispatch?: boolean; autoDispatchCategories?: SentinelVulnCategory[] | null } = {};
+		if (!canApplyDispatch) return;
+		const patch: Parameters<CodeIntelPageProps["onSetDispatch"]>[1] = {};
 		if (dispatchSwitch !== "keep") patch.autoDispatch = dispatchSwitch === "on";
 		if (dispatchCats === "all") patch.autoDispatchCategories = null;
 		else if (dispatchCats === "custom" && dispatchCategoryList.length > 0)
 			patch.autoDispatchCategories = dispatchCategoryList;
-		if (patch.autoDispatch === undefined && patch.autoDispatchCategories === undefined) {
-			setDispatchOpen(false);
-			return;
-		}
+		if (dispatchTypes === "all") patch.autoDispatchTags = null;
+		else if (dispatchTypes === "custom") patch.autoDispatchTags = dispatchTagList;
 		onSetDispatch(ids, patch);
 		setDispatchOpen(false);
 	};
@@ -769,6 +884,7 @@ export function CodeIntelPage({
 			autoDispatch: editor.autoDispatch,
 			autoDispatchCategories:
 				editor.autoDispatch && editor.autoDispatchCategories.length > 0 ? editor.autoDispatchCategories : null,
+			autoDispatchTags: editor.autoDispatchTags.length > 0 ? editor.autoDispatchTags : null,
 			enabled: editor.enabled,
 		};
 		if (editor.mode === "create") {
@@ -800,8 +916,9 @@ export function CodeIntelPage({
 	const dispatchTargetCount = dispatchAll ? rows.length : selectedIds.length;
 	const canApplyDispatch =
 		dispatchTargetCount > 0 &&
-		(dispatchSwitch !== "keep" || dispatchCats !== "keep") &&
-		(dispatchCats !== "custom" || dispatchCategoryList.length > 0);
+		(dispatchSwitch !== "keep" || dispatchCats !== "keep" || dispatchTypes !== "keep") &&
+		(dispatchCats !== "custom" || dispatchCategoryList.length > 0) &&
+		(dispatchTypes !== "custom" || dispatchTagList.length > 0);
 
 	const renderMonitorActions = (monitor: SentinelCodeMonitor) => (
 		<div className="code-intel-actions">
@@ -1015,25 +1132,17 @@ export function CodeIntelPage({
 			key: "duration",
 			width: 80,
 			align: "right",
-			render: (_value, check) =>
-				check.endedAt === null ? "—" : `${((check.endedAt - check.startedAt) / 1000).toFixed(1)}s`,
+			render: (_value, check) => {
+				if (check.endedAt === null) return "—";
+				const elapsed = Math.max(0, check.endedAt - check.startedAt);
+				return elapsed < 1000 ? `${elapsed}ms` : `${(elapsed / 1000).toFixed(1)}s`;
+			},
 		},
 		{
 			title: t("错误"),
 			dataIndex: "error",
 			key: "error",
-			render: (error: string | null) =>
-				error ? (
-					<Tooltip title={error}>
-						<span className="code-intel-line">
-							<Text type="danger" className="code-intel-line__text">
-								{error}
-							</Text>
-						</span>
-					</Tooltip>
-				) : (
-					"—"
-				),
+			render: (error: string | null) => <CodeErrorDetail error={error} />,
 		},
 	];
 
@@ -1096,18 +1205,7 @@ export function CodeIntelPage({
 			title: t("错误"),
 			dataIndex: "error",
 			key: "error",
-			render: (error: string | null) =>
-				error ? (
-					<Tooltip title={error}>
-						<span className="code-intel-line">
-							<Text type="danger" className="code-intel-line__text">
-								{error}
-							</Text>
-						</span>
-					</Tooltip>
-				) : (
-					"—"
-				),
+			render: (error: string | null) => <CodeErrorDetail error={error} />,
 		},
 	];
 
@@ -1126,6 +1224,11 @@ export function CodeIntelPage({
 	const canRejudge = (commit: SentinelCodeCommit): boolean =>
 		commit.status !== "dispatching" && commit.verdict !== "pending" && busyId !== commit.id;
 
+	const reproduce = (commitId: string) => {
+		onDispatch(commitId);
+		showActivity("reproducing");
+	};
+
 	const renderCommitActions = (commit: SentinelCodeCommit, showDetail: boolean) => {
 		const rejudge = commit.verdict === "failed";
 		return (
@@ -1142,7 +1245,7 @@ export function CodeIntelPage({
 						icon={rejudge ? <ReloadOutlined /> : <ExperimentOutlined />}
 						loading={busyId === commit.id}
 						disabled={rejudge ? !canRejudge(commit) : !canDispatch(commit)}
-						onClick={() => (rejudge ? onRejudge(commit.id) : onDispatch(commit.id))}
+						onClick={() => (rejudge ? onRejudge(commit.id) : reproduce(commit.id))}
 					>
 						{rejudge ? t("重判") : t("复现")}
 					</Button>
@@ -1231,6 +1334,11 @@ export function CodeIntelPage({
 			),
 		},
 		{
+			title: getLanguage() === "en" ? "Reproduction progress" : "复现进度",
+			key: "reproduction", width: 245,
+			render: (_value, commit) => <CodeReproductionProgress commit={commit} />,
+		},
+		{
 			title: t("判定"),
 			key: "verdict",
 			width: 180,
@@ -1275,6 +1383,12 @@ export function CodeIntelPage({
 			),
 		},
 		{
+			title: VULN_TAG_TEXT.label,
+			key: "vulnTags",
+			width: 250,
+			render: (_value, commit) => <CodeVulnerabilityTags commit={commit} />,
+		},
+		{
 			title: t("状态"),
 			key: "status",
 			width: 120,
@@ -1285,7 +1399,10 @@ export function CodeIntelPage({
 							<Tag color="red">{t("下发失败")}</Tag>
 						</Tooltip>
 					);
-				if (commit.status === "dispatching") return <Tag color="processing">{t("复现中")}</Tag>;
+				if (["git", "engineering"].includes(commit.reproductionStage ?? "")) return <Tag color="processing">{t("复现中")}</Tag>;
+				if (commit.reproductionStage === "paused") return <Tag color="gold">{t("已暂停")}</Tag>;
+				if (commit.reproductionStage === "completed") return <Tag color="green">{getLanguage() === "en" ? "Finished" : "已结束"}</Tag>;
+				if (commit.reproductionStage === "stopped") return <Tag>{getLanguage() === "en" ? "Stopped" : "已停止"}</Tag>;
 				if (commit.verdict === "pending") return <Tag color="processing">{t("判定中")}</Tag>;
 				if (commit.status === "ignored") return <Tag>{t("已忽略")}</Tag>;
 				if (commit.engineId || commit.status === "dispatched")
@@ -1339,6 +1456,8 @@ export function CodeIntelPage({
 
 	const renderActivity = () => (
 		<Space direction="vertical" size={12} style={{ width: "100%" }}>
+			{activityError ? <Alert type="error" showIcon title={activityError}
+				action={<Button size="small" disabled={!connected} onClick={() => project && onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag)}>{t("重试")}</Button>} /> : null}
 			<div className="code-intel-activity-bar">
 				<Segmented
 					size="small"
@@ -1349,6 +1468,8 @@ export function CodeIntelPage({
 							label: t("待处理（{n}）", { n: activityCounts.attention }),
 						},
 						{ value: "review", label: t("待复现（{n}）", { n: activityCounts.review }) },
+						{ value: "reproducing", label: getLanguage() === "en" ? `Reproducing (${activityCounts.reproducing})` : `复现中（${activityCounts.reproducing}）` },
+						{ value: "finished", label: getLanguage() === "en" ? `Finished (${activityCounts.finished})` : `已结束（${activityCounts.finished}）` },
 						{ value: "failed", label: t("判定失败（{n}）", { n: activityCounts.failed }) },
 						{
 							value: "dispatch_failed",
@@ -1363,18 +1484,49 @@ export function CodeIntelPage({
 						setActivitySelectedIds([]);
 					}}
 				/>
-				<Select
-					size="small"
-					style={{ minWidth: 120 }}
-					aria-label={t("复现类别")}
-					value={activityCategory}
-					options={ACTIVITY_CATEGORY_OPTIONS}
-					onChange={(value) => {
-						setActivityCategory(value);
-						setActivityPage(1);
-						setActivitySelectedIds([]);
-					}}
-				/>
+				<Space size={8} wrap>
+					<Select
+						size="small"
+						style={{ minWidth: 120 }}
+						aria-label={t("复现类别")}
+						value={activityCategory}
+						options={ACTIVITY_CATEGORY_OPTIONS}
+						onChange={(value) => {
+							setActivityCategory(value);
+							setActivityTag(null);
+							setActivityPage(1);
+							setActivitySelectedIds([]);
+						}}
+					/>
+					<Select
+						size="small"
+						className="code-intel-tag-filter"
+						aria-label={VULN_TAG_TEXT.label}
+						placeholder={VULN_TAG_TEXT.all}
+						value={activityTag}
+						allowClear
+						showSearch
+						optionFilterProp="label"
+						options={CODE_VULN_TAGS
+							.filter((tag) => !activityCategory || (tag.categories as readonly string[]).includes(activityCategory))
+							.map((tag) => ({ value: tag.id, label: vulnTagLabel(tag.id) }))}
+						onChange={(value: CodeVulnTag | undefined) => {
+							setActivityTag(value ?? null);
+							setActivityPage(1);
+							setActivitySelectedIds([]);
+						}}
+					/>
+					{activityCategory || activityTag ? (
+						<Button size="small" type="text" onClick={() => {
+							setActivityCategory(null);
+							setActivityTag(null);
+							setActivityPage(1);
+							setActivitySelectedIds([]);
+						}}>
+							{t("清空筛选")}
+						</Button>
+					) : null}
+				</Space>
 			</div>
 
 			{activitySelected.length > 0 ? (
@@ -1387,6 +1539,7 @@ export function CodeIntelPage({
 							disabled={dispatchableSelected.length === 0}
 							onClick={() => {
 								for (const commit of dispatchableSelected) onDispatch(commit.id);
+								showActivity("reproducing");
 								setActivitySelectedIds([]);
 							}}
 						>
@@ -1431,10 +1584,11 @@ export function CodeIntelPage({
 					emptyText: (
 						<Empty
 							description={
-								activityFilter === "attention" && !activityCategory ? t("没有需要处理的动态") : t("没有符合条件的记录")
+								activityFilter === "attention" && !activityCategory && !activityTag
+									? t("没有需要处理的动态") : t("没有符合条件的记录")
 							}
 						>
-							{activityFilter !== "all" || activityCategory ? (
+							{activityFilter !== "all" || activityCategory || activityTag ? (
 								<Button onClick={() => showActivity("all")}>{t("清空筛选")}</Button>
 							) : null}
 						</Empty>
@@ -1461,6 +1615,11 @@ export function CodeIntelPage({
 				expandable={{
 					expandedRowRender: (commit) => (
 						<Space direction="vertical" size={8} style={{ width: "100%" }}>
+							<CodeReproductionProgress commit={commit} expanded />
+							<div className="code-intel-vuln-detail">
+								<Text strong>{VULN_TAG_TEXT.label}</Text>
+								<CodeVulnerabilityTags commit={commit} expanded />
+							</div>
 							<Paragraph style={{ margin: 0 }}>
 								<Text strong>{t("判断依据")}</Text>
 								<br />
@@ -1476,7 +1635,7 @@ export function CodeIntelPage({
 					),
 				}}
 				tableLayout="fixed"
-				scroll={{ x: 1586 }}
+				scroll={{ x: 2081 }}
 			/>
 		</Space>
 	);
@@ -1514,13 +1673,7 @@ export function CodeIntelPage({
 								title: t("错误"),
 								key: "error",
 								ellipsis: true,
-								render: (_value, monitor) => (
-									<Tooltip title={monitor.lastError}>
-										<Text type="danger" className="code-intel-line__text">
-											{monitor.lastError}
-										</Text>
-									</Tooltip>
-								),
+								render: (_value, monitor) => <CodeErrorDetail error={monitor.lastError} />,
 							},
 							...columns.filter((column) => column.key === "actions"),
 						]}
@@ -1575,6 +1728,11 @@ export function CodeIntelPage({
 					<span>
 						{t("监控仓库")} → {t("安全更新")} → {t("复现")}
 					</span>
+					<Tooltip title={getLanguage() === "en"
+						? "GitHub API requests use the project's proxy and selected node. Without a project proxy, requests use the console network. Model requests are unchanged."
+						: "GitHub API 请求复用项目代理及所选节点；项目未启用代理时使用控制台网络。监测模型请求保持现状。"}>
+						<Tag color="blue">{getLanguage() === "en" ? "GitHub API: project proxy" : "GitHub API：跟随项目代理"}</Tag>
+					</Tooltip>
 					<Tooltip
 						title={t(
 							"监控仓库分支上的新提交，由监测模型判断是否为安全修复；确认后交给工程复现漏洞。仓库凭据只存本机，源码准备时短暂传给容器内的 git。",
@@ -1593,6 +1751,7 @@ export function CodeIntelPage({
 						onClick={() => {
 							if (!project) return;
 							onRefresh();
+							if (view === "activity") onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag);
 							if (view === "logs") onLoadLogs(project.id);
 						}}
 					>
@@ -2160,6 +2319,20 @@ export function CodeIntelPage({
 								<Switch checked={editor.enabled} onChange={(checked) => setEditor({ ...editor, enabled: checked })} />
 							</Form.Item>
 						</Space>
+						<Form.Item label={DISPATCH_TYPE_TEXT.label} extra={DISPATCH_TYPE_TEXT.hint} style={{ marginTop: 16 }}>
+							<Select<CodeVulnTag[]>
+								mode="multiple"
+								aria-label={DISPATCH_TYPE_TEXT.label}
+								style={{ width: "100%" }}
+								value={editor.autoDispatchTags}
+								options={dispatchTagOptions([])}
+								placeholder={DISPATCH_TYPE_TEXT.all}
+								disabled={!editor.autoDispatch}
+								allowClear
+								optionFilterProp="label"
+								onChange={(value) => setEditor({ ...editor, autoDispatchTags: value })}
+							/>
+						</Form.Item>
 					</Form>
 				) : null}
 			</Modal>
@@ -2200,6 +2373,7 @@ export function CodeIntelPage({
 				cancelText={t("取消")}
 				okButtonProps={{ disabled: !canApplyDispatch }}
 				width={520}
+				styles={{ body: { maxHeight: "65vh", overflowY: "auto" } }}
 				destroyOnHidden
 			>
 				<Form layout="vertical">
@@ -2228,7 +2402,11 @@ export function CodeIntelPage({
 						<Space direction="vertical" size={8} style={{ width: "100%" }}>
 							<Radio.Group
 								value={dispatchCats}
-								onChange={(event) => setDispatchCats(event.target.value as "keep" | "all" | "custom")}
+								onChange={(event) => {
+									const mode = event.target.value as "keep" | "all" | "custom";
+									setDispatchCats(mode);
+									if (mode === "custom") setDispatchTagList((tags) => tags.filter((tag) => dispatchTagOptions(dispatchCategoryList).some((option) => option.value === tag)));
+								}}
 							>
 								<Radio value="keep">{t("保持不变")}</Radio>
 								<Radio value="all">{t("全部类别")}</Radio>
@@ -2241,7 +2419,34 @@ export function CodeIntelPage({
 									value={dispatchCategoryList}
 									options={CATEGORY_OPTIONS}
 									placeholder={t("选择要自动复现的类别")}
-									onChange={(value) => setDispatchCategoryList(value as SentinelVulnCategory[])}
+									onChange={(value: SentinelVulnCategory[]) => {
+										setDispatchCategoryList(value);
+										setDispatchTagList((tags) => tags.filter((tag) => dispatchTagOptions(value).some((option) => option.value === tag)));
+									}}
+								/>
+							) : null}
+						</Space>
+					</Form.Item>
+					<Form.Item label={DISPATCH_TYPE_TEXT.label} extra={DISPATCH_TYPE_TEXT.hint}
+						validateStatus={dispatchTypes === "custom" && dispatchTagList.length === 0 ? "error" : undefined}
+						help={dispatchTypes === "custom" && dispatchTagList.length === 0 ? DISPATCH_TYPE_TEXT.required : undefined}>
+						<Space direction="vertical" size={8} style={{ width: "100%" }}>
+							<Radio.Group value={dispatchTypes} onChange={(event) => setDispatchTypes(event.target.value as "keep" | "all" | "custom")}>
+								<Radio value="keep">{t("保持不变")}</Radio>
+								<Radio value="all">{DISPATCH_TYPE_TEXT.all}</Radio>
+								<Radio value="custom">{DISPATCH_TYPE_TEXT.custom}</Radio>
+							</Radio.Group>
+							{dispatchTypes === "custom" ? (
+								<Select<CodeVulnTag[]>
+									mode="multiple"
+									aria-label={DISPATCH_TYPE_TEXT.label}
+									style={{ width: "100%" }}
+									value={dispatchTagList}
+									options={dispatchTagOptions(dispatchCats === "custom" ? dispatchCategoryList : [])}
+									placeholder={DISPATCH_TYPE_TEXT.choose}
+									allowClear
+									optionFilterProp="label"
+									onChange={setDispatchTagList}
 								/>
 							) : null}
 						</Space>
@@ -2279,6 +2484,12 @@ export function CodeIntelPage({
 							<Descriptions.Item label={t("下次检查")}>{nextCheckText(detail.monitor)}</Descriptions.Item>
 							<Descriptions.Item label={t("自动复现")}>
 								{detail.monitor.autoDispatch ? t("开") : t("关")}
+							</Descriptions.Item>
+							<Descriptions.Item label={t("复现类别")} span={2}>
+								{detail.monitor.autoDispatchCategories?.map((category) => CATEGORY_LABELS[category]).join("、") || t("全部类别")}
+							</Descriptions.Item>
+							<Descriptions.Item label={DISPATCH_TYPE_TEXT.label} span={2}>
+								{detail.monitor.autoDispatchTags === null ? DISPATCH_TYPE_TEXT.all : detail.monitor.autoDispatchTags.map(vulnTagLabel).join("、") || DISPATCH_TYPE_TEXT.required}
 							</Descriptions.Item>
 							{detail.monitor.lastError ? (
 								<Descriptions.Item label={t("最近错误")} span={2}>
@@ -2319,10 +2530,15 @@ export function CodeIntelPage({
 												dataSource={detail.commits}
 												pagination={{ pageSize: 20, showSizeChanger: false }}
 												tableLayout="fixed"
-												scroll={{ x: 1452 }}
+												scroll={{ x: 1947 }}
 												expandable={{
 													expandedRowRender: (commit) => (
 														<Space direction="vertical" size={8} style={{ width: "100%" }}>
+															<CodeReproductionProgress commit={commit} expanded />
+															<div className="code-intel-vuln-detail">
+																<Text strong>{VULN_TAG_TEXT.label}</Text>
+																<CodeVulnerabilityTags commit={commit} expanded />
+															</div>
 															<Paragraph style={{ margin: 0 }}>
 																<Text strong>{t("判断依据")}</Text>
 																<br />

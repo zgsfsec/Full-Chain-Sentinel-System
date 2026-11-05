@@ -14,6 +14,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { CODE_VULN_TAGS, type CodeVulnTag, normalizeCodeVulnTags } from "./code-vuln-tags.ts";
 import type {
 	SentinelCodeActivityCounts,
 	SentinelCodeActivityFilter,
@@ -25,6 +26,7 @@ import type {
 	SentinelCodeCommitStatus,
 	SentinelCodeJobStatus,
 	SentinelCodeMonitor,
+	SentinelCodeReproductionStage,
 	SentinelCodeVerdict,
 	SentinelVulnCategory,
 	SentinelVulnSeverity,
@@ -36,7 +38,8 @@ const REVIEW_SQL =
 const PENDING_SQL = "verdict = 'pending' AND status != 'ignored'";
 const FAILED_SQL = "verdict = 'failed' AND status != 'ignored'";
 const DISPATCH_FAILED_SQL = "verdict = 'security' AND error IS NOT NULL AND status != 'ignored'";
-const DISPATCHING_SQL = "status = 'dispatching'";
+const DISPATCHING_SQL = "reproduction_stage IN ('git', 'engineering', 'paused')";
+const FINISHED_SQL = "reproduction_stage IN ('completed', 'stopped')";
 const ATTENTION_SQL = `(${PENDING_SQL}) OR (${FAILED_SQL}) OR (${DISPATCH_FAILED_SQL}) OR (${DISPATCHING_SQL}) OR (${REVIEW_SQL})`;
 
 function activityWhere(filter: SentinelCodeActivityFilter): string {
@@ -49,6 +52,10 @@ function activityWhere(filter: SentinelCodeActivityFilter): string {
 			return `project_id = ? AND (${DISPATCH_FAILED_SQL})`;
 		case "pending":
 			return `project_id = ? AND (${PENDING_SQL})`;
+		case "reproducing":
+			return `project_id = ? AND (${DISPATCHING_SQL})`;
+		case "finished":
+			return `project_id = ? AND (${FINISHED_SQL})`;
 		case "all":
 			return "project_id = ?";
 		default:
@@ -76,6 +83,7 @@ CREATE TABLE IF NOT EXISTS code_monitors (
   baselines TEXT NOT NULL DEFAULT '{}',
   auto_dispatch INTEGER NOT NULL DEFAULT 0,
   auto_dispatch_categories TEXT,
+  auto_dispatch_tags TEXT,
   interval_minutes INTEGER NOT NULL DEFAULT 60,
   schedule_kind TEXT NOT NULL DEFAULT 'interval',
   cron_expression TEXT,
@@ -102,8 +110,10 @@ CREATE TABLE IF NOT EXISTS code_commits (
   severity TEXT,
   vuln_type TEXT,
   vuln_category TEXT,
+  vuln_tags TEXT NOT NULL DEFAULT '[]',
   reason TEXT,
   status TEXT NOT NULL DEFAULT 'new',
+  reproduction_stage TEXT,
   engine_id TEXT,
   duplicate_of TEXT,
   error TEXT,
@@ -182,6 +192,7 @@ export interface CodeCommitVerdict {
 	severity: SentinelVulnSeverity | null;
 	vulnType: string | null;
 	vulnCategory: SentinelVulnCategory | null;
+	vulnTags: CodeVulnTag[];
 	reason: string | null;
 	judgedAt: number | null;
 }
@@ -200,6 +211,7 @@ interface MonitorRow {
 	baselines: string;
 	auto_dispatch: number;
 	auto_dispatch_categories: string | null;
+	auto_dispatch_tags: string | null;
 	interval_minutes: number;
 	schedule_kind: string;
 	cron_expression: string | null;
@@ -229,8 +241,10 @@ interface CommitRow {
 	severity: string | null;
 	vuln_type: string | null;
 	vuln_category: string | null;
+	vuln_tags: string;
 	reason: string | null;
 	status: string;
+	reproduction_stage: SentinelCodeReproductionStage | null;
 	engine_id: string | null;
 	duplicate_of: string | null;
 	error: string | null;
@@ -361,6 +375,12 @@ function toMonitor(row: MonitorRow): StoredCodeMonitor {
 		baselines: parseBaselines(row.baselines),
 		autoDispatch: row.auto_dispatch === 1,
 		autoDispatchCategories: parseCategories(row.auto_dispatch_categories),
+		autoDispatchTags:
+			row.auto_dispatch_tags === null
+				? null
+				: parseStringArray(row.auto_dispatch_tags).filter((value): value is CodeVulnTag =>
+						CODE_VULN_TAGS.some((tag) => tag.id === value),
+					),
 		intervalMinutes: row.interval_minutes,
 		scheduleKind: row.schedule_kind === "cron" ? "cron" : "interval",
 		cronExpression: row.cron_expression,
@@ -389,11 +409,14 @@ function toCommit(row: CommitRow): SentinelCodeCommit {
 		cve: row.cve,
 		severity: row.severity as SentinelVulnSeverity | null,
 		vulnType: row.vuln_type,
+		vulnTags:
+			row.verdict === "security" ? normalizeCodeVulnTags(parseStringArray(row.vuln_tags), row.vuln_category) : [],
 		vulnCategory: (VULN_CATEGORIES.includes(row.vuln_category as SentinelVulnCategory)
 			? row.vuln_category
 			: null) as SentinelVulnCategory | null,
 		reason: row.reason,
 		status: row.status as SentinelCodeCommitStatus,
+		reproductionStage: row.reproduction_stage,
 		engineId: row.engine_id,
 		duplicateOf: row.duplicate_of,
 		error: row.error,
@@ -415,9 +438,18 @@ export class CodeMonitorStore {
 		this.db.exec("PRAGMA journal_mode = WAL");
 		this.db.exec(SCHEMA);
 		this.addScheduleColumns();
+		this.addVulnerabilityTagsColumn();
+		const columns = this.db.prepare("PRAGMA table_info(code_commits)").all() as Array<{ name: string }>;
+		if (!columns.some((column) => column.name === "reproduction_stage")) {
+			this.db.exec("ALTER TABLE code_commits ADD COLUMN reproduction_stage TEXT");
+			this.db.exec("UPDATE code_commits SET reproduction_stage = 'engineering' WHERE engine_id IS NOT NULL");
+		}
 		// A crash mid-dispatch leaves "dispatching" behind with no run behind it;
 		// the engine is only created at the end, so back to "new" is the truth.
-		this.db.prepare("UPDATE code_commits SET status = 'new' WHERE status = 'dispatching'").run();
+		this.db
+			.prepare(`UPDATE code_commits SET status = 'new', reproduction_stage = 'failed',
+			error = '服务重启，源码准备中断，请重新复现' WHERE status = 'dispatching'`)
+			.run();
 	}
 
 	/** Databases created before cron scheduling have no strategy columns. */
@@ -433,11 +465,36 @@ export class CodeMonitorStore {
 		if (!names.includes("auto_dispatch_categories")) {
 			this.db.exec("ALTER TABLE code_monitors ADD COLUMN auto_dispatch_categories TEXT");
 		}
+		if (!names.includes("auto_dispatch_tags")) {
+			this.db.exec("ALTER TABLE code_monitors ADD COLUMN auto_dispatch_tags TEXT");
+		}
 		const commitColumns = this.db.prepare("PRAGMA table_info(code_commits)").all() as unknown as Array<{
 			name: string;
 		}>;
 		if (!commitColumns.some((column) => column.name === "vuln_category")) {
 			this.db.exec("ALTER TABLE code_commits ADD COLUMN vuln_category TEXT");
+		}
+	}
+
+	/** Preserve existing findings and copy only explicit, recognized type names. */
+	private addVulnerabilityTagsColumn(): void {
+		const columns = this.db.prepare("PRAGMA table_info(code_commits)").all() as Array<{ name: string }>;
+		if (columns.some((column) => column.name === "vuln_tags")) return;
+		this.db.exec("BEGIN IMMEDIATE");
+		try {
+			this.db.exec("ALTER TABLE code_commits ADD COLUMN vuln_tags TEXT NOT NULL DEFAULT '[]'");
+			const rows = this.db
+				.prepare("SELECT id, vuln_type, vuln_category FROM code_commits WHERE verdict = 'security'")
+				.all() as Array<{ id: string; vuln_type: string | null; vuln_category: string | null }>;
+			const update = this.db.prepare("UPDATE code_commits SET vuln_tags = ? WHERE id = ?");
+			for (const row of rows) {
+				const tags = normalizeCodeVulnTags([row.vuln_type], row.vuln_category);
+				if (tags.length > 0) update.run(JSON.stringify(tags), row.id);
+			}
+			this.db.exec("COMMIT");
+		} catch (error) {
+			this.db.exec("ROLLBACK");
+			throw error;
 		}
 	}
 
@@ -501,6 +558,7 @@ export class CodeMonitorStore {
 		baselines: Record<string, string>;
 		autoDispatch: boolean;
 		autoDispatchCategories?: SentinelVulnCategory[] | null;
+		autoDispatchTags?: CodeVulnTag[] | null;
 		intervalMinutes: number;
 		scheduleKind: "interval" | "cron";
 		cronExpression: string | null;
@@ -512,9 +570,9 @@ export class CodeMonitorStore {
 			.prepare(
 				`INSERT INTO code_monitors
 					(id, project_id, project_name, name, host, owner, repo, repo_url, api_base_url,
-					 branches, baselines, auto_dispatch, auto_dispatch_categories, interval_minutes,
+					 branches, baselines, auto_dispatch, auto_dispatch_categories, auto_dispatch_tags, interval_minutes,
 					 schedule_kind, cron_expression, enabled, created_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				id,
@@ -530,6 +588,7 @@ export class CodeMonitorStore {
 				JSON.stringify(monitor.baselines),
 				monitor.autoDispatch ? 1 : 0,
 				monitor.autoDispatchCategories ? JSON.stringify(monitor.autoDispatchCategories) : null,
+				monitor.autoDispatchTags ? JSON.stringify(monitor.autoDispatchTags) : null,
 				monitor.intervalMinutes,
 				monitor.scheduleKind,
 				monitor.cronExpression,
@@ -556,6 +615,7 @@ export class CodeMonitorStore {
 			baselines?: Record<string, string>;
 			autoDispatch?: boolean;
 			autoDispatchCategories?: SentinelVulnCategory[] | null;
+			autoDispatchTags?: CodeVulnTag[] | null;
 			intervalMinutes?: number;
 			scheduleKind?: "interval" | "cron";
 			cronExpression?: string | null;
@@ -569,7 +629,7 @@ export class CodeMonitorStore {
 			.prepare(
 				`UPDATE code_monitors SET
 					name = ?, host = ?, owner = ?, repo = ?, repo_url = ?, api_base_url = ?,
-					branches = ?, baselines = ?, auto_dispatch = ?, auto_dispatch_categories = ?,
+					branches = ?, baselines = ?, auto_dispatch = ?, auto_dispatch_categories = ?, auto_dispatch_tags = ?,
 					interval_minutes = ?, schedule_kind = ?, cron_expression = ?, enabled = ?
 				 WHERE id = ?`,
 			)
@@ -584,6 +644,7 @@ export class CodeMonitorStore {
 				JSON.stringify(next.baselines),
 				next.autoDispatch ? 1 : 0,
 				next.autoDispatchCategories ? JSON.stringify(next.autoDispatchCategories) : null,
+				next.autoDispatchTags ? JSON.stringify(next.autoDispatchTags) : null,
 				next.intervalMinutes,
 				next.scheduleKind,
 				next.cronExpression,
@@ -698,18 +759,26 @@ export class CodeMonitorStore {
 		page: number,
 		pageSize: number,
 		category: SentinelVulnCategory | null = null,
+		tag: CodeVulnTag | null = null,
 	): { items: SentinelCodeCommit[]; total: number } {
-		const where = activityWhere(filter);
-		const categoryClause = category ? " AND vuln_category = ?" : "";
-		const params = category ? [projectId, category] : [projectId];
+		let where = activityWhere(filter);
+		const params: string[] = [projectId];
+		if (category) {
+			where += " AND vuln_category = ?";
+			params.push(category);
+		}
+		if (tag) {
+			where += " AND verdict = 'security' AND EXISTS (SELECT 1 FROM json_each(vuln_tags) WHERE value = ?)";
+			params.push(tag);
+		}
 		const safePage = Math.max(1, Math.floor(page));
 		const safeSize = Math.min(200, Math.max(1, Math.floor(pageSize)));
 		const totalRow = this.db
-			.prepare(`SELECT COUNT(*) AS total FROM code_commits WHERE ${where}${categoryClause}`)
+			.prepare(`SELECT COUNT(*) AS total FROM code_commits WHERE ${where}`)
 			.get(...params) as unknown as { total: number } | undefined;
 		const rows = this.db
 			.prepare(
-				`SELECT * FROM code_commits WHERE ${where}${categoryClause}
+				`SELECT * FROM code_commits WHERE ${where}
 				 ORDER BY authored_at DESC, created_at DESC, id DESC LIMIT ? OFFSET ?`,
 			)
 			.all(...params, safeSize, (safePage - 1) * safeSize) as unknown as CommitRow[];
@@ -723,6 +792,8 @@ export class CodeMonitorStore {
 					SUM(CASE WHEN ${PENDING_SQL} THEN 1 ELSE 0 END) AS pending,
 					SUM(CASE WHEN ${FAILED_SQL} THEN 1 ELSE 0 END) AS failed,
 					SUM(CASE WHEN ${DISPATCH_FAILED_SQL} THEN 1 ELSE 0 END) AS dispatch_failed,
+					SUM(CASE WHEN ${DISPATCHING_SQL} THEN 1 ELSE 0 END) AS reproducing,
+					SUM(CASE WHEN ${FINISHED_SQL} THEN 1 ELSE 0 END) AS finished,
 					SUM(CASE WHEN ${REVIEW_SQL} THEN 1 ELSE 0 END) AS review,
 					SUM(CASE WHEN ${ATTENTION_SQL} THEN 1 ELSE 0 END) AS attention,
 					COUNT(*) AS total
@@ -733,6 +804,8 @@ export class CodeMonitorStore {
 					pending: number;
 					failed: number;
 					dispatch_failed: number;
+					reproducing: number;
+					finished: number;
 					review: number;
 					attention: number;
 					total: number;
@@ -744,6 +817,8 @@ export class CodeMonitorStore {
 			dispatchFailed: Number(row?.dispatch_failed ?? 0),
 			review: Number(row?.review ?? 0),
 			attention: Number(row?.attention ?? 0),
+			reproducing: Number(row?.reproducing ?? 0),
+			finished: Number(row?.finished ?? 0),
 		};
 	}
 
@@ -960,7 +1035,7 @@ export class CodeMonitorStore {
 		this.db
 			.prepare(
 				`UPDATE code_commits SET verdict = ?, confidence = ?, cve = ?, severity = ?,
-				 vuln_type = ?, vuln_category = ?, reason = ?, judged_at = ? WHERE id = ?`,
+				 vuln_type = ?, vuln_category = ?, vuln_tags = ?, reason = ?, judged_at = ? WHERE id = ?`,
 			)
 			.run(
 				verdict.verdict,
@@ -969,6 +1044,9 @@ export class CodeMonitorStore {
 				verdict.severity,
 				verdict.vulnType,
 				verdict.vulnCategory,
+				JSON.stringify(
+					verdict.verdict === "security" ? normalizeCodeVulnTags(verdict.vulnTags, verdict.vulnCategory) : [],
+				),
 				verdict.reason,
 				verdict.judgedAt,
 				id,
@@ -977,8 +1055,31 @@ export class CodeMonitorStore {
 
 	setStatus(id: string, status: SentinelCodeCommitStatus, engineId: string | null, error: string | null): void {
 		this.db
-			.prepare("UPDATE code_commits SET status = ?, engine_id = ?, error = ? WHERE id = ?")
-			.run(status, engineId, error, id);
+			.prepare("UPDATE code_commits SET status = ?, engine_id = ?, error = ?, reproduction_stage = ? WHERE id = ?")
+			.run(
+				status,
+				engineId,
+				error,
+				error ? "failed" : status === "dispatching" ? "git" : status === "dispatched" ? "engineering" : null,
+				id,
+			);
+	}
+
+	/** Only emit a change when the linked engine actually moves to another stage. */
+	syncEngineStage(engineId: string, stage: SentinelCodeReproductionStage): boolean {
+		const result = this.db
+			.prepare(`UPDATE code_commits SET reproduction_stage = ?
+			WHERE engine_id = ? AND reproduction_stage IS NOT ?`)
+			.run(stage, engineId, stage);
+		return Number(result.changes ?? 0) > 0;
+	}
+
+	linkedEngineIds(): string[] {
+		return (
+			this.db.prepare("SELECT DISTINCT engine_id FROM code_commits WHERE engine_id IS NOT NULL").all() as Array<{
+				engine_id: string;
+			}>
+		).map((row) => row.engine_id);
 	}
 
 	setDuplicateOf(id: string, duplicateOf: string): void {

@@ -136,6 +136,30 @@ afterAll(() => {
 	rmSync(tempRoot, { recursive: true, force: true });
 });
 
+test("activity responses echo the request id on success and failure", async () => {
+	send({ type: "list_code_activity", requestId: 710, projectId, filter: "reproducing", page: 1, pageSize: 20 });
+	const success = await waitFor((message) => message.type === "code_activity" && message.requestId === 710);
+	expect(success).toMatchObject({
+		type: "code_activity",
+		requestId: 710,
+		view: { total: 0, counts: { reproducing: 0, finished: 0 } },
+	});
+	send({
+		type: "list_code_activity",
+		requestId: 711,
+		projectId: "missing-project",
+		filter: "all",
+		page: 1,
+		pageSize: 20,
+	});
+	const failure = await waitFor((message) => message.type === "code_activity_error" && message.requestId === 711);
+	expect(failure).toMatchObject({
+		type: "code_activity_error",
+		requestId: 711,
+		error: expect.stringContaining("项目不存在"),
+	});
+});
+
 test("each project reports its own session count, not just the active one", async () => {
 	const workDir = (await refreshedProject()).cwd;
 	expect((await refreshedProject()).sessionCount).toBe(0);
