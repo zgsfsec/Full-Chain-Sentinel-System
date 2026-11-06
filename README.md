@@ -6,7 +6,7 @@
 
 > **仅用于已获得书面授权的目标。** 自动执行模式可运行任意命令，使用者须自行承担操作后果。使用前请阅读[授权声明与安全边界](docs/security.md)。
 
-[交流群](#community) · [快速开始](#quick-start) · [核心能力](#capabilities) · [文档导航](#documentation) · [许可](#license)
+[交流群](#community) · [快速开始](#quick-start) · [核心能力](#capabilities) · [常见问题 Q&A](#faq) · [文档导航](#documentation) · [许可](#license)
 
 <a id="community"></a>
 
@@ -279,6 +279,12 @@ Windows 解压 `sentinel-web-windows-x64.zip` 后，在 PowerShell 运行 `.\sen
 配置条件、操作步骤与限制见[功能详解](docs/features.md)、[使用指南](docs/usage.md)与[安全边界](docs/security.md)。
 
 ---
+
+<a id="faq"></a>
+
+## 常见问题 Q&A
+
+使用中的常见问题与解答集中维护在独立页面：[查看常见问题 Q&A](docs/faq.md)。
 
 <a id="documentation"></a>
 
