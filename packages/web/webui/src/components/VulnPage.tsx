@@ -78,6 +78,10 @@ const STATUS_COLORS: Record<SentinelVulnStatus, string> = {
 
 const STATUSES: readonly SentinelVulnStatus[] = ["pending", "confirmed", "false_positive", "fixed"];
 
+function formatVulnNumber(number: number): string {
+	return String(number).padStart(4, "0");
+}
+
 function formatWhen(value: string): string {
 	const date = new Date(value);
 	if (Number.isNaN(date.getTime())) return value;
@@ -477,10 +481,41 @@ export function VulnPage({
 	const columns: ProColumns<SentinelVulnSummary>[] = [
 		{
 			title: t("编号"),
-			dataIndex: "label",
-			key: "label",
+			dataIndex: "number",
+			key: "number",
 			width: 96,
-			render: (_, item) => <Text className="table-mono">{item.label}</Text>,
+			render: (_, item) => <Text className="table-mono">{formatVulnNumber(item.number)}</Text>,
+		},
+		{
+			title: t("标题"),
+			dataIndex: "title",
+			key: "title",
+			width: 280,
+			ellipsis: { showTitle: true },
+		},
+		{
+			title: t("目标"),
+			dataIndex: "target",
+			key: "target",
+			width: 220,
+			ellipsis: true,
+			render: (_, item) => (
+				<Text className="table-mono" title={item.target}>
+					{item.target}
+				</Text>
+			),
+		},
+		{
+			title: t("关联资产"),
+			dataIndex: "assetLabel",
+			key: "asset",
+			width: 180,
+			render: (_, item) =>
+				item.assetLabel ? (
+					<Tag className="vulnhub-asset-label" variant="filled">{item.assetLabel}</Tag>
+				) : (
+					<Text type="secondary">—</Text>
+				),
 		},
 		{
 			title: t("等级"),
@@ -519,37 +554,6 @@ export function VulnPage({
 					<ReviewChip review={item.review} />
 				</Space>
 			),
-		},
-		{
-			title: t("目标"),
-			dataIndex: "target",
-			key: "target",
-			width: 220,
-			ellipsis: true,
-			render: (_, item) => (
-				<Text className="table-mono" title={item.target}>
-					{item.target}
-				</Text>
-			),
-		},
-		{
-			title: t("关联资产"),
-			dataIndex: "assetLabel",
-			key: "asset",
-			width: 180,
-			render: (_, item) =>
-				item.assetLabel ? (
-					<Tag className="vulnhub-asset-label" variant="filled">{item.assetLabel}</Tag>
-				) : (
-					<Text type="secondary">—</Text>
-				),
-		},
-		{
-			title: t("标题"),
-			dataIndex: "title",
-			key: "title",
-			width: 280,
-			ellipsis: { showTitle: true },
 		},
 		{
 			title: t("来源"),
@@ -950,7 +954,7 @@ export function VulnDetailBody({
 		);
 
 	const metaItems: DescriptionsProps["items"] = [
-		{ key: "label", label: t("编号"), children: <Text code>{vuln.label}</Text> },
+		{ key: "label", label: t("编号"), children: <Text code>{formatVulnNumber(vuln.number)}</Text> },
 		{ key: "target", label: t("目标"), children: <Text code>{vuln.target}</Text> },
 		...(vuln.assetId
 			? [

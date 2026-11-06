@@ -180,10 +180,15 @@ test("the page states the project, the totals and the severity breakdown", () =>
 
 test("the ledger shows the columns and the submitted content", () => {
 	const html = renderPage();
-	for (const title of ["编号", "等级", "状态", "目标", "标题", "来源", "提交时间", "操作"]) {
-		expect(html).toContain(title);
-	}
-	expect(html).toContain("E2E-0001");
+	const header = html.match(/<thead\b[^>]*>([\s\S]*?)<\/thead>/)?.[1] ?? "";
+	const titles = [...header.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
+		.map((match) => match[1].replace(/<[^>]*>/g, "").trim())
+		.filter(Boolean);
+	expect(titles).toEqual(["编号", "标题", "目标", "关联资产", "等级", "状态", "来源", "提交时间", "操作"]);
+	expect(html).toContain(">0001</span>");
+	expect(html).toContain(">0002</span>");
+	expect(html).not.toContain("E2E-0001");
+	expect(html).not.toContain("E2E-0002");
 	expect(html).toContain("未授权访问");
 	expect(html).toContain("10.0.0.5");
 	expect(html).toContain("工程任务「内网打点」");
@@ -292,6 +297,8 @@ test("the detail pane shows provenance, review opinion and the timeline", () => 
 		}),
 	);
 	expect(html).toContain("内网打点 / Web 面侦察");
+	expect(html).toContain("<code>0001</code>");
+	expect(html).not.toContain("E2E-0001");
 	expect(html).toContain("10.0.0.5 侦察");
 	expect(html).toContain("评审意见");
 	expect(html).toContain("证据不足以支撑结论");
