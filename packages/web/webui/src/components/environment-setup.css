@@ -1,0 +1,164 @@
+.envsetup-steps {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 16px;
+	margin: 0;
+	padding: 0 0 20px;
+	list-style: none;
+	border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+.envsetup-step {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	min-width: 0;
+	color: var(--ant-color-text-secondary);
+}
+
+.envsetup-step__number {
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 28px;
+	height: 28px;
+	border: 1px solid var(--ant-color-border);
+	border-radius: 50%;
+	font-size: 13px;
+}
+
+.envsetup-step.is-active .envsetup-step__number {
+	background: var(--ant-color-primary);
+	border-color: var(--ant-color-primary);
+	color: var(--ant-color-bg-container);
+}
+
+.envsetup-step.is-active strong,
+.envsetup-step.is-complete strong {
+	color: var(--ant-color-text);
+}
+
+.envsetup-step strong,
+.envsetup-step div > span {
+	display: block;
+	font-size: 13px;
+	line-height: 22px;
+}
+
+.envsetup-step div > span {
+	font-size: 12px;
+}
+
+.envsetup-task {
+	min-width: 0;
+	color: var(--ant-color-text-secondary);
+	font-size: 13px;
+	line-height: 1.8;
+	overflow-wrap: anywhere;
+}
+
+.envsetup-task h3 {
+	margin: 0 0 8px;
+	color: var(--ant-color-text);
+	font-size: 17px;
+	font-weight: 600;
+}
+
+.envsetup-task p {
+	max-width: 84ch;
+	margin: 0 0 12px;
+}
+
+.envsetup-task .ant-tabs-nav {
+	margin-bottom: 12px;
+}
+
+.envsetup-task .envsetup-command {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	max-width: 640px;
+	margin: 0 0 12px;
+	padding: 10px 12px;
+	background: var(--ant-color-fill-quaternary);
+	border: 1px solid var(--ant-color-border-secondary);
+	border-radius: 6px;
+}
+
+.envsetup-command code {
+	margin: 0;
+	padding: 0;
+	background: none;
+	border: 0;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.envsetup-instructions {
+	max-width: 84ch;
+	margin: 0 0 16px;
+	padding-inline-start: 20px;
+}
+
+.envsetup-instructions li + li {
+	margin-top: 6px;
+}
+
+.envsetup-actions {
+	margin-block: 4px 16px;
+}
+
+.envsetup-details {
+	padding-top: 12px;
+	border-top: 1px solid var(--ant-color-border-secondary);
+}
+
+.envsetup-details summary {
+	width: fit-content;
+	cursor: pointer;
+	color: var(--ant-color-text);
+}
+
+.envsetup-details > div {
+	margin-top: 12px;
+}
+
+.envsetup-details pre {
+	max-height: 200px;
+	margin: 6px 0;
+	padding: 12px;
+	overflow: auto;
+	background: var(--ant-color-fill-quaternary);
+	border-radius: 6px;
+	font-size: 12px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.envsetup-target {
+	scroll-margin-block: 16px;
+}
+
+.envhub-row__body {
+	overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+	.envsetup-steps {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+
+@media (max-width: 480px) {
+	.envsetup-steps {
+		grid-template-columns: 1fr;
+		gap: 12px;
+	}
+	.envsetup-step div {
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: 0 10px;
+	}
+}
