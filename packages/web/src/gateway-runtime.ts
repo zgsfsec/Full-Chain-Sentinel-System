@@ -3,10 +3,23 @@ export const GATEWAY_RUNTIME = String.raw`#!/bin/sh
 set -eu
 root=/run/sentinel-gateway
 mkdir -p "$root"
+families="4 6"
+[ ! -f "$root/families" ] || families=$(cat "$root/families")
+
+ipv6_enabled() {
+  [ -d /proc/sys/net/ipv6 ] || return 1
+  # Check default as well: new tunnel interfaces must not enable unprotected IPv6.
+  for setting in /proc/sys/net/ipv6/conf/*/disable_ipv6; do
+    [ -r "$setting" ] && [ "$(cat "$setting")" = 1 ] || return 0
+  done
+  return 1
+}
 
 block() {
-  iptables -C OUTPUT ! -o lo -j REJECT 2>/dev/null || iptables -I OUTPUT 1 ! -o lo -j REJECT
-  ip6tables -C OUTPUT ! -o lo -j REJECT 2>/dev/null || ip6tables -I OUTPUT 1 ! -o lo -j REJECT
+  iptables -C OUTPUT ! -o lo -j REJECT 2>/dev/null || iptables -I OUTPUT 1 ! -o lo -j REJECT || return 1
+  if [ "$families" = "4 6" ]; then
+    ip6tables -C OUTPUT ! -o lo -j REJECT 2>/dev/null || ip6tables -I OUTPUT 1 ! -o lo -j REJECT || return 1
+  fi
 }
 
 healthy() {
@@ -30,7 +43,7 @@ stop_client() {
   if ip link show wg0 >/dev/null 2>&1; then wg-quick down /etc/wireguard/wg0.conf >/dev/null 2>&1 || true; fi
   ip link del wg0 2>/dev/null || true
   ip link del tun0 2>/dev/null || true
-  for family in 4 6; do
+  for family in $families; do
     ip -"$family" rule flush || return 1
     while ip -"$family" rule del pref 0 2>/dev/null; do :; done
     ip -"$family" rule restore < "$root/rules$family" || return 1
@@ -38,9 +51,11 @@ stop_client() {
     ip -"$family" route restore < "$root/routes$family" || return 1
   done
   iptables -D OUTPUT ! -o lo -j REJECT 2>/dev/null || true
-  ip6tables -D OUTPUT ! -o lo -j REJECT 2>/dev/null || true
   iptables-restore < "$root/iptables" || return 1
-  ip6tables-restore < "$root/ip6tables" || return 1
+  if [ "$families" = "4 6" ]; then
+    ip6tables -D OUTPUT ! -o lo -j REJECT 2>/dev/null || true
+    ip6tables-restore < "$root/ip6tables" || return 1
+  fi
 }
 
 start_client() {
@@ -66,7 +81,7 @@ start_client() {
       wg-quick up /etc/wireguard/wg0.conf >> "$root/client.log" 2>&1 || return 1
       if [ "$(cat "$config/kill-switch")" = true ]; then
         ip route del default 2>/dev/null || true
-        ip -6 route del default 2>/dev/null || true
+        if [ "$families" = "4 6" ]; then ip -6 route del default 2>/dev/null || true; fi
       fi
       ;;
     openvpn)
@@ -93,22 +108,39 @@ start_client() {
 }
 
 case "$1" in
-  init)
-    for tool in ip iptables ip6tables iptables-save ip6tables-save iptables-restore ip6tables-restore curl timeout; do
+  init|probe)
+    step="checking gateway tools"
+    trap 'result=$?; if [ "$result" -ne 0 ]; then echo "gateway init failed: $step (exit $result)" >&2; fi' EXIT
+    families=4
+    if ipv6_enabled; then families="4 6"; fi
+    tools="ip iptables iptables-save iptables-restore curl timeout"
+    if [ "$families" = "4 6" ]; then tools="$tools ip6tables ip6tables-save ip6tables-restore"; fi
+    for tool in $tools; do
       command -v "$tool" >/dev/null || { echo "missing gateway tool: $tool" >&2; exit 1; }
     done
     rm -rf "$root"
     mkdir -p "$root"
+    echo "$families" > "$root/families"
+    step="creating TUN device"
     mkdir -p /dev/net
     [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200
-    for family in 4 6; do
+    for family in $families; do
+      step="saving IPv$family routing rules"
       ip -"$family" rule save > "$root/rules$family"
+      step="saving IPv$family routes"
       ip -"$family" route save table all > "$root/routes$family"
     done
+    step="saving IPv4 firewall"
     iptables-save > "$root/iptables"
-    ip6tables-save > "$root/ip6tables"
+    if [ "$families" = "4 6" ]; then
+      step="saving IPv6 firewall"
+      ip6tables-save > "$root/ip6tables"
+    fi
+    step="blocking gateway output"
     block
     touch "$root/ready"
+    trap - EXIT
+    if [ "$1" = probe ]; then echo "gateway-ready: $families"; exit 0; fi
     # PID 1 keeps the namespace alive independently of the selected client.
     while :; do
       if [ ! -d "$root/switching" ] && [ -f "$root/active/hash" ] && ! healthy; then

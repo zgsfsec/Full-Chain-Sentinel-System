@@ -160,8 +160,18 @@ export async function ensureGateway(
 		],
 		{ timeoutMs: 10000 },
 	);
-	if (initialized.code !== 0)
-		return { ok: false, error: t("网关初始化失败，请确认工具镜像包含 iproute2、iptables 和 curl") };
+	if (initialized.code !== 0) {
+		// PID 1 only logs initialization and containment errors; client logs stay
+		// inside the gateway so proxy configuration and credentials are not exposed.
+		const logs = await runDocker(["logs", "--tail", "20", sidecar], { timeoutMs: 10000 });
+		const detail = (logs.code === 0 ? `${logs.stdout}\n${logs.stderr}` : initialized.stderr).trim().slice(-2000);
+		return {
+			ok: false,
+			error: t("网关初始化失败：{error}", {
+				error: detail || t("初始化未在规定时间内完成，请检查网关容器日志与 Docker 网络权限"),
+			}),
+		};
+	}
 	const current = await runDocker(["exec", sidecar, "sh", "/etc/sentinel-gateway/runtime.sh", "status"], {
 		timeoutMs: 15000,
 	});

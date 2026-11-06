@@ -58,6 +58,8 @@ case "$cmd" in
 	pause|unpause) exit 0 ;;
 	image|build) exit 0 ;;
 	run)
+		# The disposable environment probe never administers the host network.
+		case "$*" in *"sentinel-gateway probe") printf 'gateway-ready: 4 6\\n'; exit 0 ;; esac
 		# docker run -d --name <name> --network <mode> ...: remember the new container
 		# as running, with the network it was created on. A container's network mode
 		# is fixed at creation, which is exactly what the console inspects for.

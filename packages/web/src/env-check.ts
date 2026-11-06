@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONTAINER_NETWORK, readContainerNetwork } from "./container-network.ts";
 import { runDocker, SENTINEL_IMAGE } from "./docker.ts";
+import { GATEWAY_RUNTIME } from "./gateway-runtime.ts";
 import { t } from "./i18n.ts";
 import { resolveLibraryRole } from "./model-library.ts";
 import { DEFAULT_TEST_URL } from "./node-test.ts";
@@ -285,6 +286,52 @@ async function checkContainerRun(): Promise<SentinelEnvItem> {
 		GROUP_CONTAINER,
 		t("启动一次性容器"),
 		echoed ? t("容器可启动，镜像内 shell 可用") : t("容器可启动"),
+		true,
+	);
+}
+
+async function checkGatewayRuntime(): Promise<SentinelEnvItem> {
+	// The probe runs the real initialization in a disposable, isolated namespace.
+	const result = await runDocker(
+		[
+			"run",
+			"--rm",
+			"--pull=never",
+			"--network",
+			"none",
+			"--cap-add",
+			"NET_ADMIN",
+			"--cap-add",
+			"NET_RAW",
+			"--sysctl",
+			"net.ipv4.conf.all.src_valid_mark=1",
+			...(existsSync("/dev/net/tun") ? ["--device", "/dev/net/tun"] : []),
+			"--entrypoint",
+			"sh",
+			process.env.SENTINEL_GATEWAY_IMAGE || SENTINEL_IMAGE,
+			"-c",
+			GATEWAY_RUNTIME,
+			"sentinel-gateway",
+			"probe",
+		],
+		{ timeoutMs: 30000 },
+	);
+	if (result.code !== 0 || !result.stdout.includes("gateway-ready:")) {
+		return failed(
+			"gateway-runtime",
+			GROUP_CONTAINER,
+			t("网关初始化"),
+			result.stderr.trim().slice(-2000) || t("网关未返回就绪标记"),
+			t("检查网关镜像中的网络工具、TUN 设备和 Docker NET_ADMIN 权限；IPv6 已禁用时可仅使用 IPv4"),
+		);
+	}
+	return passed(
+		"gateway-runtime",
+		GROUP_CONTAINER,
+		t("网关初始化"),
+		result.stdout.includes("gateway-ready: 4 6")
+			? t("IPv4 / IPv6 网关初始化通过")
+			: t("IPv4 网关初始化通过（IPv6 已禁用）"),
 		true,
 	);
 }
@@ -725,6 +772,9 @@ export async function checkEnvironment(options: EnvCheckOptions): Promise<Sentin
 					dockerReady ? t("工具镜像不可用") : t("Docker 不可用"),
 					true,
 				),
+		dockerReady
+			? await checkGatewayRuntime()
+			: skipped("gateway-runtime", GROUP_CONTAINER, t("网关初始化"), t("Docker 不可用"), true),
 		await checkProjectContainers(options.agentDir),
 		await checkProxySidecars(options.agentDir),
 		await checkProjectMounts(options.agentDir),
