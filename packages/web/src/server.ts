@@ -6,7 +6,7 @@
  * local operator; every connected console receives the same event stream.
  */
 
-import { randomBytes, X509Certificate } from "node:crypto";
+import { createHash, randomBytes, X509Certificate } from "node:crypto";
 import { createReadStream, mkdtempSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createSecureServer } from "node:https";
@@ -85,6 +85,8 @@ import type {
 } from "./protocol.ts";
 import { checkProxyConnection } from "./proxy-check.ts";
 import { switchProjectNode } from "./proxy-switch.ts";
+import { handleReportApi } from "./report-api.ts";
+import { submitReport } from "./report-content.ts";
 import { VulnReviewer } from "./reviewer.ts";
 import { SubscriptionScheduler } from "./subscription-scheduler.ts";
 import { createTerminal } from "./terminal.ts";
@@ -529,6 +531,25 @@ export async function startSentinelServer(
 		? new EngineManager(
 				agentDir,
 				{
+					archiveReport: async (engine, markdown) => {
+						const project = listProjects(agentDir).projects.find((entry) => entry.id === engine.projectId);
+						if (!project) throw new Error("工程所属项目不存在，无法归档报告。");
+						await submitReport({
+							store: runtime.reports,
+							provenance: {
+								projectId: project.id,
+								projectName: project.name,
+								source: "engine",
+								engineId: engine.id,
+								engineName: engine.name,
+							},
+							key: `engine:${engine.id}:${createHash("sha256").update(markdown).digest("hex")}`,
+							title: `${engine.name.slice(0, 110)} 总报告`,
+							markdown,
+							workDir: project.workDir,
+							container: project.container,
+						});
+					},
 					onChange: (engine) => {
 						broadcast({ type: "engine_update", engine });
 						codeMonitors?.syncEngine(engine.id, engine.status);
@@ -1410,6 +1431,14 @@ export async function startSentinelServer(
 					project: () => runtime.snapshot().project,
 					authorized: () => !authEnabled || hasValidSession(currentAuth(), request),
 				});
+				return;
+			}
+			if (path === "/api/reports" || path.startsWith("/api/reports/")) {
+				handleReportApi(request, response, runtime.reports, (id) =>
+					agentDir
+						? listProjects(agentDir).projects.some((project) => project.id === id)
+						: runtime.snapshot().project?.id === id,
+				);
 				return;
 			}
 			if (path === "/api/assets/import" && request.method === "GET") {
@@ -2698,6 +2727,8 @@ export async function startSentinelServer(
 					const purgedLibraryAssets = runtime.purgeProjectAssetLibrary(message.id);
 					const purgedWebSearch = runtime.purgeProjectWebSearch(message.id);
 					const purgedSupervisor = runtime.purgeProjectSupervisor(message.id);
+					const purgedReports = runtime.reports.purgeProject(message.id);
+					console.error(`[sentinel-server] 删除项目报告 ${purgedReports} 份`);
 					// Detach before the work directory goes: the live sessions holding it
 					// must be closed first, or their managers would write into a deleted path.
 					if (wasActive) await runtime.detachProject(target.workDir);

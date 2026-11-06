@@ -5,6 +5,11 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 // into the workflow when the operator changes a session's loadout.
 const TOOL_WORKFLOW_ROUTES: readonly { tools: readonly string[]; guideline: string }[] = [
 	{
+		tools: ["report_submit"],
+		guideline:
+			"完成实质测试任务或自主目标后，先上报已确认的漏洞，再用 report_submit 提交 Markdown 总结和证据图片，成功后再 goal_complete 或最终回复。普通问答、解释和中间进度不生成报告。图片使用项目内路径，外链先下载；提交失败时修正后重试，如无法修正须如实说明，不能声称已归档。",
+	},
+	{
 		tools: ["web_extract"],
 		guideline:
 			"需要核实公开页面的正文时：用 web_extract 读取相关公告或技术资料；搜索摘要不足以支撑结论。仅传公开 URL，不向第三方提交内部地址、凭据或私有报文，并遵守查询预算。",

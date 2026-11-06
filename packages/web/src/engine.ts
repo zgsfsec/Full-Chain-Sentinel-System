@@ -114,6 +114,8 @@ const COMMANDER_BASH_DENYLIST: RegExp[] = [
 ];
 
 export interface EngineHooks {
+	/** Save the final report and images before marking the engineering run complete. */
+	archiveReport?(engine: SentinelEngine, report: string): Promise<void>;
 	/** An engine's stored state changed; consoles refresh the board. */
 	onChange(engine: SentinelEngine): void;
 	/** One commander decision-log step, live. */
@@ -1071,7 +1073,7 @@ export class EngineManager {
 				}
 			},
 			board: () => this.store.getEngine(entry.engine.id)?.tasks ?? entry.engine.tasks,
-			finish: (report, reproduction) => {
+			finish: async (report, reproduction) => {
 				if (entry.engine.status !== "running") {
 					return { ok: false, error: t("工程未在运行中，不能结束；请先继续工程") };
 				}
@@ -1099,6 +1101,27 @@ export class EngineManager {
 					!board.some((task) => task.status === "done")
 				) {
 					return { ok: false, error: "尚无完成的验证任务，请使用 inconclusive 或 failed 如实记录阻塞。" };
+				}
+				const completingEngine = entry.engine;
+				try {
+					await this.hooks.archiveReport?.(completingEngine, report);
+				} catch (error) {
+					return { ok: false, error: `报告归档失败，请修正后重试：${errorText(error)}` };
+				}
+				if (
+					this.disposed ||
+					this.live.get(entry.engine.id) !== entry ||
+					entry.engine !== completingEngine ||
+					entry.engine.status !== "running"
+				) {
+					return { ok: false, error: "归档期间工程已暂停或结束，未更改工程状态。" };
+				}
+				if (
+					this.store
+						.getEngine(entry.engine.id)
+						?.tasks.some((task) => task.status === "queued" || task.status === "running")
+				) {
+					return { ok: false, error: "归档期间新增了未结束的任务，请处理后重新提交总报告。" };
 				}
 				this.disableActiveSchedule(entry, "completed");
 				this.store.setEngineReport(entry.engine.id, report, result);

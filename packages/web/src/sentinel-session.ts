@@ -294,6 +294,8 @@ import type {
 } from "./protocol.ts";
 import { createReplayTools, type ReplayToolContext } from "./replay-tool.ts";
 import { ensureReplayd, type ReplaydStatus } from "./replayd.ts";
+import { createReportTool } from "./report-tool.ts";
+import { ReportStore, reportsDbPath } from "./reports.ts";
 import { readSessionDroid, SESSION_DROID_CUSTOM_TYPE } from "./session-droid.ts";
 import { readSessionIos, SESSION_IOS_CUSTOM_TYPE } from "./session-ios.ts";
 import { readSessionMode, SESSION_MODE_CUSTOM_TYPE } from "./session-mode.ts";
@@ -571,6 +573,7 @@ export class SentinelRuntime {
 	private readonly subagentStore: SubagentStore;
 	private readonly subagents: SubagentRegistry;
 	private readonly vulnerabilities: VulnerabilityStore;
+	readonly reports: ReportStore;
 	private readonly pocs: PocStore;
 	private readonly apiModels: ApiModelStore;
 	private readonly droids: DroidStore;
@@ -624,6 +627,7 @@ export class SentinelRuntime {
 		this.sessionDir = getDefaultSessionDir(this.cwd, this.agentDir);
 		this.subagentStore = new SubagentStore(subagentDbPath(this.agentDir));
 		this.vulnerabilities = new VulnerabilityStore(vulnerabilityDbPath(this.agentDir));
+		this.reports = new ReportStore(reportsDbPath(this.agentDir));
 		// Seed the built-in presets before anything reads the store: a fresh
 		// console must offer them from its very first session.
 		ensureBuiltinPresets(this.agentDir);
@@ -945,6 +949,24 @@ export class SentinelRuntime {
 			projectId: managed.projectId,
 		};
 		const customTools: ToolDefinition[] = [
+			createReportTool({
+				store: this.reports,
+				workDir: cwd,
+				container,
+				provenance: () => {
+					if (!sessionProject) return undefined;
+					const goal = managed.goal?.goal.status === "active" ? managed.goal.goal : undefined;
+					return {
+						projectId: sessionProject.id,
+						projectName: sessionProject.name,
+						source: task ? "engine" : goal ? "goal" : "session",
+						sessionId: manager.getSessionId(),
+						sessionName: manager.getSessionName(),
+						...(goal ? { goalId: goal.id } : {}),
+						...(task ? { engineId: task.engineId, taskId: task.taskId, taskName: task.taskTitle } : {}),
+					};
+				},
+			}),
 			// The agent names the conversation once the task is clear; task
 			// sessions keep their engine prefix so the sidebar badge holds.
 			createSessionTitleTool({
@@ -5006,6 +5028,7 @@ export class SentinelRuntime {
 		this.activeKey = undefined;
 		this.subagentStore.close();
 		this.vulnerabilities.close();
+		this.reports.close();
 		this.pocs.close();
 		this.apiModels.close();
 		this.droids.close();

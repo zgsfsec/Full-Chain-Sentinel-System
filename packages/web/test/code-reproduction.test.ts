@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { type CodeReproductionResult, parseCodeReproductionResult } from "../src/code-reproduction.ts";
 import type { CommanderPort } from "../src/commander-tools.ts";
-import { EngineManager } from "../src/engine.ts";
+import { type EngineHooks, EngineManager } from "../src/engine.ts";
 import { EngineStore } from "../src/engine-store.ts";
 import type { SentinelEngine } from "../src/protocol.ts";
 import { openSqliteDatabase } from "../src/sqlite.ts";
@@ -118,11 +118,11 @@ test("migrating an old completed report leaves its reproduction conclusion unkno
 	expect(store.getEngine("old")?.reproduction).toBeNull();
 });
 
-function finishHarness(doctrines = ["oss-1day-repro"]) {
+function finishHarness(doctrines = ["oss-1day-repro"], archiveReport?: EngineHooks["archiveReport"]) {
 	const dir = directory();
 	const manager = new EngineManager(
 		dir,
-		{ onChange: () => {}, onCommanderEvent: () => {}, onTaskEvent: () => {} },
+		{ onChange: () => {}, onCommanderEvent: () => {}, onTaskEvent: () => {}, archiveReport },
 		async () => {
 			throw new Error("No provider session expected");
 		},
@@ -140,25 +140,30 @@ function finishHarness(doctrines = ["oss-1day-repro"]) {
 		gateMode: "auto",
 	});
 	// Exercise the real commander finish boundary without opening a model session.
-	const entry = { engine, reportSettled: false };
-	const port = (
-		manager as unknown as { commanderPort(entry: { engine: SentinelEngine; reportSettled: boolean }): CommanderPort }
-	).commanderPort(entry);
-	return { port, store, engine };
+	type Entry = { engine: SentinelEngine; reportSettled: boolean };
+	const internals = manager as unknown as {
+		emptyLive(engine: SentinelEngine): Entry;
+		live: Map<string, Entry>;
+		commanderPort(entry: Entry): CommanderPort;
+	};
+	const entry = internals.emptyLive(engine);
+	internals.live.set(engine.id, entry);
+	const port = internals.commanderPort(entry);
+	return { port, store, engine, manager, entry };
 }
 
-test("OSS finish refuses absent conclusions and unexecuted confirmation without mutating the report", () => {
+test("OSS finish refuses absent conclusions and unexecuted confirmation without mutating the report", async () => {
 	const { port, store, engine } = finishHarness();
-	expect(port.finish("report").ok).toBe(false);
-	expect(port.finish("report", confirmed).ok).toBe(false);
-	expect(port.finish("report", { outcome: "not_reproduced", summary: "no trigger" }).ok).toBe(false);
+	expect((await port.finish("report")).ok).toBe(false);
+	expect((await port.finish("report", confirmed)).ok).toBe(false);
+	expect((await port.finish("report", { outcome: "not_reproduced", summary: "no trigger" })).ok).toBe(false);
 	expect(store.getEngine(engine.id)?.status).toBe("running");
 	expect(store.getEngine(engine.id)?.report).toBeNull();
-	expect(port.finish("build blocked", { outcome: "failed", summary: "Compiler missing" }).ok).toBe(true);
+	expect((await port.finish("build blocked", { outcome: "failed", summary: "Compiler missing" })).ok).toBe(true);
 	expect(store.getEngine(engine.id)?.reproduction?.outcome).toBe("failed");
 });
 
-test("OSS finish still waits for outstanding work and persists an explicit conclusion after completion", () => {
+test("OSS finish still waits for outstanding work and persists an explicit conclusion after completion", async () => {
 	const { port, store, engine } = finishHarness();
 	const task = store.createTask({
 		engineId: engine.id,
@@ -169,15 +174,67 @@ test("OSS finish still waits for outstanding work and persists an explicit concl
 		roundLimit: 2,
 		attempt: 1,
 	});
-	expect(port.finish("report", confirmed).ok).toBe(false);
+	expect((await port.finish("report", confirmed)).ok).toBe(false);
 	store.updateTask(task.id, { status: "done" });
-	expect(port.finish("report", confirmed).ok).toBe(true);
+	expect((await port.finish("report", confirmed)).ok).toBe(true);
 	expect(store.getEngine(engine.id)?.status).toBe("completed");
 	expect(store.getEngine(engine.id)?.reproduction).toEqual(confirmed);
 });
 
-test("ordinary engineering can finish without a reproduction conclusion", () => {
+test("ordinary engineering can finish without a reproduction conclusion", async () => {
 	const { port, store, engine } = finishHarness(["standard"]);
-	expect(port.finish("ordinary report").ok).toBe(true);
+	expect((await port.finish("ordinary report")).ok).toBe(true);
 	expect(store.getEngine(engine.id)?.reproduction).toBeNull();
+});
+
+test("archiving must succeed before an engine is completed, and failures can be retried", async () => {
+	let fail = true;
+	const harness = finishHarness(["standard"], async (engine, report) => {
+		expect(engine.status).toBe("running");
+		expect(report).toBe("final");
+		if (fail) throw new Error("missing.png");
+	});
+	expect(await harness.port.finish("final")).toMatchObject({
+		ok: false,
+		error: expect.stringContaining("missing.png"),
+	});
+	expect(harness.store.getEngine(harness.engine.id)?.report).toBeNull();
+	expect(harness.store.getEngine(harness.engine.id)?.status).toBe("running");
+	fail = false;
+	expect(await harness.port.finish("final")).toEqual({ ok: true });
+	expect(harness.store.getEngine(harness.engine.id)?.report).toBe("final");
+});
+
+test("a pause during asynchronous archiving cannot be overwritten by completion", async () => {
+	let release = () => {};
+	const harness = finishHarness(
+		["standard"],
+		() =>
+			new Promise<void>((resolve) => {
+				release = resolve;
+			}),
+	);
+	const finish = harness.port.finish("final");
+	await harness.manager.pauseEngine(harness.engine.id);
+	release();
+	expect((await finish).ok).toBe(false);
+	expect(harness.store.getEngine(harness.engine.id)?.status).toBe("paused");
+});
+
+test("an earlier finish cannot complete a replaced running engine while archiving", async () => {
+	let release = () => {};
+	const harness = finishHarness(
+		["standard"],
+		() =>
+			new Promise<void>((resolve) => {
+				release = resolve;
+			}),
+	);
+	const finish = harness.port.finish("final");
+	// Pause/resume and task updates replace this snapshot while keeping the live entry.
+	harness.entry.engine = { ...harness.entry.engine, status: "running" };
+	release();
+	expect((await finish).ok).toBe(false);
+	expect(harness.store.getEngine(harness.engine.id)?.report).toBeNull();
+	expect(harness.store.getEngine(harness.engine.id)?.status).toBe("running");
 });

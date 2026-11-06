@@ -54,7 +54,7 @@ export interface CommanderPort {
 	/** The task board right now, for `list_tasks`. */
 	board(): SentinelEngineTask[];
 	/** Declare the engine finished; refused while work is outstanding. */
-	finish(report: string, reproduction?: CodeReproductionResult): { ok: boolean; error?: string };
+	finish(report: string, reproduction?: CodeReproductionResult): MaybePromise<{ ok: boolean; error?: string }>;
 }
 
 const TASK_STATUS_LABELS: Record<SentinelEngineTaskStatus, string> = {
@@ -337,7 +337,7 @@ export function createCommanderTools(port: CommanderPort): ToolDefinition[] {
 		name: "engine_done",
 		label: "Finish engine",
 		description:
-			"Declare the engineering run finished and submit the final report (markdown). Refused while tasks are queued or running: settle those first (abort or let them finish), then call this.",
+			"Archive the final Markdown report and its local images in the project report center, then finish the engineering run. Relative image paths use /work. Download remote images into the project first. If archiving fails, correct the report and retry. Refused while tasks are queued or running: settle those first.",
 		parameters: Type.Object({
 			report: Type.String({
 				description:
@@ -385,7 +385,7 @@ export function createCommanderTools(port: CommanderPort): ToolDefinition[] {
 			),
 		}),
 		async execute(_toolCallId, params): Promise<AgentToolResult> {
-			const result = port.finish(params.report.trim(), params.reproduction);
+			const result = await port.finish(params.report.trim(), params.reproduction);
 			if (!result.ok) {
 				return {
 					content: [{ type: "text", text: `不能结束工程：${result.error}` }],
