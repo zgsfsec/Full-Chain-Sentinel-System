@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Empty } from "antd";
 import type { CodeVulnTag } from "../../src/code-vuln-tags.ts";
 import { AboutPage } from "./components/AboutPage.tsx";
+import { ReportCenterPage } from "./components/ReportCenterPage.tsx";
 import { ApiModelPage } from "./components/ApiModelPage.tsx";
 import { ApprovalQueue } from "./components/ApprovalQueue.tsx";
 import { AuthGate } from "./components/AuthGate.tsx";
@@ -354,6 +355,7 @@ export function App() {
 	const [errors, setErrors] = useState<string[]>([]);
 	/** The one page the content area shows; navigation lives in the sider. */
 	const [page, setPage] = useState<SentinelPageId>("dashboard");
+	const [reportRefresh, setReportRefresh] = useState(0);
 	const [webFuzzImport, setWebFuzzImport] = useState<{ projectId: string; flowId: string } | null>(null);
 	/**
 	 * Console authentication: the console renders only once the session is
@@ -2161,6 +2163,9 @@ export function App() {
 		if (filesOpen) loadFiles(filePathRef.current);
 		if (subagentsOpen) send({ type: "get_state" });
 		switch (page) {
+			case "reports":
+				setReportRefresh((value) => value + 1);
+				break;
 			case "dashboard":
 				send({ type: "get_state" });
 				send({ type: "list_sessions" });
@@ -3277,6 +3282,8 @@ export function App() {
 							onSetNode={(id, nodeTag) => runProxyAction(() => send({ type: "set_proxy_node", id, nodeTag }))}
 							testingId={testingProxyId}
 						/>
+					) : page === "reports" ? (
+						<ReportCenterPage key={snapshot?.project?.id ?? "none"} projectId={snapshot?.project?.id ?? null} projects={projects} refreshToken={reportRefresh} />
 					) : page === "vulns" ? (
 						<VulnPage
 							items={vulnItems}

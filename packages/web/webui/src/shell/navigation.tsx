@@ -23,6 +23,7 @@ import {
 	DashboardOutlined,
 	EyeOutlined,
 	FileSearchOutlined,
+	FileTextOutlined,
 	GlobalOutlined,
 	InfoCircleOutlined,
 	LockOutlined,
@@ -70,6 +71,7 @@ export const NAV_GROUPS: { group: string; items: MenuEntry[] }[] = [
 		group: "资产与工具",
 		items: [
 			{ page: "vulns", label: t("漏洞"), icon: BugOutlined },
+			{ page: "reports", label: getLanguage() === "en" ? "Reports" : "报告中心", icon: FileTextOutlined },
 			{ page: "assets", label: t("资产库"), icon: DatabaseOutlined },
 			{ page: "mitm", label: getLanguage() === "en" ? "MITM Center" : "MITM 中心", icon: SwapOutlined },
 			{ page: "webfuzz", label: "WebFuzz", icon: SendOutlined },

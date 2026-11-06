@@ -1,0 +1,41 @@
+.report-project-select { width: 230px; max-width: 100%; }
+.report-center { display: grid; gap: 16px; min-width: 0; }
+.report-title-button.ant-btn { display: block; max-width: 100%; height: auto; padding: 0; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.report-reader { min-width: 0; }
+.report-reader__toolbar { margin-bottom: 20px; }
+.report-document { max-width: 1040px; margin: 0 auto; padding: 40px 56px 56px; background: var(--ant-color-bg-container, #fff); border: 1px solid var(--ant-color-border-secondary, #e4e4e7); border-radius: 8px; color: var(--ant-color-text, #18181b); }
+.report-document__head { padding-bottom: 24px; margin-bottom: 28px; border-bottom: 1px solid var(--ant-color-border-secondary, #e4e4e7); }
+.report-document__eyebrow { color: var(--ant-color-text-secondary, #52525b); font-size: 11px; font-weight: 600; letter-spacing: 0.12em; }
+.report-document__head h1 { margin: 12px 0 16px; font-size: 27px; font-weight: 650; line-height: 1.45; overflow-wrap: anywhere; }
+.report-document__head .ant-typography { font-size: 12px; overflow-wrap: anywhere; }
+.report-markdown { line-height: 1.85; font-size: 14px; overflow-wrap: anywhere; }
+.report-markdown h1, .report-markdown h2, .report-markdown h3, .report-markdown h4 { margin: 1.6em 0 0.7em; line-height: 1.5; font-weight: 600; color: inherit; }
+.report-markdown h1 { font-size: 25px; }
+.report-markdown h2 { font-size: 20px; padding-bottom: 8px; border-bottom: 1px solid var(--ant-color-border-secondary, #e4e4e7); }
+.report-markdown h3 { font-size: 17px; }
+.report-markdown > :first-child { margin-top: 0; }
+.report-markdown p, .report-markdown .report-paragraph { margin: 0 0 1em; }
+.report-markdown ul, .report-markdown ol { padding-left: 24px; margin-bottom: 1em; }
+.report-markdown li + li { margin-top: 4px; }
+.report-markdown blockquote { margin: 18px 0; padding: 8px 16px; color: var(--ant-color-text-secondary, #52525b); border-left: 3px solid var(--ant-color-border, #d4d4d8); background: var(--ant-color-fill-quaternary, #fafafa); }
+.report-markdown pre, .report-source { display: block; max-width: 100%; overflow-x: auto; margin: 18px 0; padding: 16px; border: 1px solid var(--ant-color-border-secondary, #e4e4e7); border-radius: 6px; background: var(--ant-color-fill-quaternary, #fafafa); color: var(--ant-color-text, #18181b); font: 12px/1.8 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; overflow-wrap: normal; }
+.report-source { white-space: pre-wrap; overflow-wrap: anywhere; }
+.report-markdown :not(pre) > code { padding: 2px 5px; border-radius: 4px; background: var(--ant-color-fill-tertiary, #f0f0f2); color: inherit; font-size: 0.9em; }
+.report-markdown pre code { background: transparent; color: inherit; }
+.report-markdown__table { max-width: 100%; overflow-x: auto; margin: 20px 0; border: 1px solid var(--ant-color-border-secondary, #e4e4e7); border-radius: 6px; }
+.report-markdown table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.report-markdown th, .report-markdown td { padding: 10px 12px; border-bottom: 1px solid var(--ant-color-border-secondary, #e4e4e7); text-align: left; min-width: 90px; }
+.report-markdown th { background: var(--ant-color-fill-quaternary, #fafafa); color: var(--ant-color-text-secondary, #52525b); font-weight: 500; }
+.report-markdown tr:last-child td { border-bottom: 0; }
+.report-markdown .ant-image { max-width: 100%; }
+.report-markdown .ant-image img { max-width: 100%; height: auto; border: 1px solid var(--ant-color-border-secondary, #e4e4e7); border-radius: 6px; }
+.report-markdown a { text-decoration: underline; text-underline-offset: 3px; }
+.report-image-missing { color: var(--ant-color-text-secondary, #52525b); }
+.report-markdown hr { margin: 28px 0; border: 0; border-top: 1px solid var(--ant-color-border-secondary, #e4e4e7); }
+@media (max-width: 700px) {
+	.report-document { padding: 24px 18px; }
+	.report-document__head h1 { font-size: 22px; }
+	.report-reader__toolbar > .ant-space { width: 100%; }
+	.report-center .ant-pro-table-list-toolbar-container { flex-wrap: wrap; }
+	.report-center .ant-pro-table-list-toolbar-right { flex-wrap: wrap; }
+}

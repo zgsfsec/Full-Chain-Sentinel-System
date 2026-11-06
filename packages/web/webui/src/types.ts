@@ -26,6 +26,7 @@ export type SentinelPageId =
 	| "projects"
 	| "proxies"
 	| "vulns"
+	| "reports"
 	| "assets"
 	| "mitm"
 	| "webfuzz"
