@@ -614,7 +614,7 @@ export function WebFuzzPage({
 						/>
 						<Popover
 							trigger="click"
-							placement="bottomRight"
+							placement="bottom"
 							title={tx("发送选项", "Send options")}
 							content={
 								<div className="webfuzz-options">

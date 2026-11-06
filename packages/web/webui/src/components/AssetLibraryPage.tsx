@@ -241,11 +241,12 @@ export function AssetLibraryPage({
 			title: t("资产"),
 			dataIndex: "name",
 			key: "name",
+			width: 240,
 			ellipsis: { showTitle: true },
 			render: (_, item) => (
-				<Text className="table-mono" title={item.name}>
+				<Button type="link" className="assethub-asset-link table-mono" title={item.name} onClick={() => onOpen(item.id)}>
 					{item.name}
-				</Text>
+				</Button>
 			),
 		},
 		{
@@ -357,7 +358,7 @@ export function AssetLibraryPage({
 				dataSource={items}
 				search={false}
 				options={false}
-				scroll={{ x: 980 }}
+				scroll={{ x: 1320 }}
 				rowSelection={{
 					selectedRowKeys: selectedIds,
 					onChange: (keys) => setSelected(new Set(keys as string[])),

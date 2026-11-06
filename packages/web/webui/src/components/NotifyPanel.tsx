@@ -425,7 +425,7 @@ export function NotifyPanel({
 									variant="filled"
 									title={entry.error ?? undefined}
 								>
-									{entry.channel === "dingtalk" ? t("钉钉") : t("飞书")}
+									{entry.channel === "dingtalk" ? t("钉钉") : entry.channel === "wecom" ? t("企业微信") : t("飞书")}
 									{entry.ok ? t(" 成功") : t(" 失败")}
 								</Tag>
 							))}

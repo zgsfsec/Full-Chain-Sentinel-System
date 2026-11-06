@@ -122,7 +122,7 @@ export function AboutPage({
 				</div>
 			</div>
 
-			<Descriptions bordered size="small" column={2} items={items} className="about-descriptions" />
+			<Descriptions bordered size="small" column={{ xs: 1, sm: 1, lg: 2 }} items={items} className="about-descriptions" />
 
 			<Alert
 				type="warning"

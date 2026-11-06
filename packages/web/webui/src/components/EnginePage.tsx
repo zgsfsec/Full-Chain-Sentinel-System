@@ -588,7 +588,8 @@ export function EnginePage(props: EnginePageProps) {
 			title: t("工程"),
 			dataIndex: "name",
 			key: "name",
-			render: (_, engine) => <Text strong>{engine.name}</Text>,
+			width: 280,
+			render: (_, engine) => <Button type="link" size="small" className="engine-list__name" onClick={(event) => { event.stopPropagation(); openBoard(engine.id); }}>{engine.name}</Button>,
 		},
 		{
 			title: t("状态"),
@@ -603,6 +604,7 @@ export function EnginePage(props: EnginePageProps) {
 		{
 			title: t("进度"),
 			key: "progress",
+			width: 220,
 			render: (_, engine) => {
 				const running = engine.tasks.filter((task) => task.status === "running").length;
 				const queued = engine.tasks.filter((task) => task.status === "queued").length;
@@ -654,7 +656,7 @@ export function EnginePage(props: EnginePageProps) {
 			description={
 				props.hasProject
 					? t("{project} · {count} 个工程", {
-							project: props.engines[0]?.projectName ?? "",
+							project: props.project?.name ?? "",
 							count: props.engines.length,
 						})
 					: t("请先选择项目")
@@ -678,6 +680,7 @@ export function EnginePage(props: EnginePageProps) {
 				search={false}
 				options={false}
 				pagination={false}
+				scroll={{ x: 1010 }}
 				onRow={(engine) => ({
 					onClick: () => openBoard(engine.id),
 					style: { cursor: "pointer" },
@@ -986,7 +989,7 @@ function TaskModal(props: {
 
 			<Descriptions
 				size="small"
-				column={2}
+				column={{ xs: 1, sm: 2 }}
 				bordered
 				className="enginehub-taskdesc"
 				items={[

@@ -524,7 +524,7 @@ export function VulnPage({
 			title: t("目标"),
 			dataIndex: "target",
 			key: "target",
-			width: 130,
+			width: 220,
 			ellipsis: true,
 			render: (_, item) => (
 				<Text className="table-mono" title={item.target}>
@@ -548,6 +548,7 @@ export function VulnPage({
 			title: t("标题"),
 			dataIndex: "title",
 			key: "title",
+			width: 280,
 			ellipsis: { showTitle: true },
 		},
 		{
@@ -617,7 +618,7 @@ export function VulnPage({
 				</>
 			}
 			extra={
-				<Space>
+				<Space wrap>
 					<Button
 						icon={<ReloadOutlined />}
 						disabled={stats.byStatus.pending === 0}
@@ -687,7 +688,7 @@ export function VulnPage({
 				search={false}
 				options={false}
 				pagination={false}
-				scroll={{ x: 1120 }}
+				scroll={{ x: 1372 }}
 				rowSelection={{
 					selectedRowKeys: selectedIds,
 					onChange: (keys) => setSelected(new Set(keys as string[])),
@@ -899,7 +900,7 @@ export function VulnDetailBody({
 	}, [vuln.id, vuln.severity, vuln.cvss, vuln.updatedAt]);
 
 	const parsedCvss = Number(cvss);
-	const cvssValid = Number.isFinite(parsedCvss) && parsedCvss >= 0 && parsedCvss <= 10;
+	const cvssValid = cvss.trim() !== "" && Number.isFinite(parsedCvss) && parsedCvss >= 0 && parsedCvss <= 10;
 
 	// Every action below saves immediately: the server records one timeline
 	// entry per change, so piecemeal updates make a readable audit trail
@@ -1056,7 +1057,7 @@ export function VulnDetailBody({
 						) : null}
 				</Space>
 			</div>
-			<Descriptions size="small" column={2} bordered items={metaItems} className="vulnhub-detail__desc" />
+			<Descriptions size="small" column={{ xs: 1, sm: 2 }} bordered items={metaItems} className="vulnhub-detail__desc" />
 
 			<div className="vulnhub-actions">
 				<Space size={8} wrap>
@@ -1099,6 +1100,7 @@ export function VulnDetailBody({
 				<Input
 					size="small"
 					className="vulnhub-cvss-input"
+					aria-label="CVSS"
 					status={cvssValid ? undefined : "error"}
 					value={cvss}
 					spellCheck={false}

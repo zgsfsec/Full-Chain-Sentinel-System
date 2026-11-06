@@ -7,7 +7,7 @@
  */
 import { Alert, Button, Form, Input, Typography } from "antd";
 import { useState } from "react";
-import { t } from "../i18n.ts";
+import { getLanguage, t } from "../i18n.ts";
 import { SettingsNote, SettingsSection } from "../ui/Settings.tsx";
 
 const { Text } = Typography;
@@ -22,7 +22,12 @@ export function SecurityPanel({ username }: { username: string | null }) {
 
 	const submit = async () => {
 		if (busy) return;
+		if (!current || !next || !confirm) return;
 		setSaved(false);
+		if (next.length < 8) {
+			setError(t("密码至少 {n} 个字符", { n: 8 }));
+			return;
+		}
 		if (next !== confirm) {
 			setError(t("两次输入的新密码不一致"));
 			return;
@@ -44,6 +49,8 @@ export function SecurityPanel({ username }: { username: string | null }) {
 			setNext("");
 			setConfirm("");
 			setSaved(true);
+		} catch {
+			setError(getLanguage() === "en" ? "Connection failed. Check your network and try again." : "连接失败，请检查网络后重试。");
 		} finally {
 			setBusy(false);
 		}
@@ -55,34 +62,39 @@ export function SecurityPanel({ username }: { username: string | null }) {
 				<SettingsNote>
 					{t("至少 8 个字符。修改后其他已登录的会话（包括别的浏览器）会全部退出。")}
 				</SettingsNote>
-				<Form layout="vertical" className="security-form" onFinish={() => void submit()} requiredMark={false}>
-					<Form.Item label={t("当前密码")} required>
+				<Form layout="vertical" className="security-form" onFinish={() => void submit()} requiredMark={false} disabled={busy}>
+					<Form.Item label={t("当前密码")} htmlFor="security-current-password" required>
 						<Input.Password
+							id="security-current-password"
+							required
 							value={current}
 							autoComplete="current-password"
 							onChange={(event) => setCurrent(event.target.value)}
 						/>
 					</Form.Item>
-					<Form.Item label={t("新密码")} required>
+					<Form.Item label={t("新密码")} htmlFor="security-new-password" required>
 						<Input.Password
+							id="security-new-password"
+							required
 							value={next}
 							autoComplete="new-password"
 							onChange={(event) => setNext(event.target.value)}
 						/>
 					</Form.Item>
-					<Form.Item label={t("确认新密码")} required>
+					<Form.Item label={t("确认新密码")} htmlFor="security-confirm-password" required>
 						<Input.Password
+							id="security-confirm-password"
+							required
 							value={confirm}
 							autoComplete="new-password"
 							onChange={(event) => setConfirm(event.target.value)}
-							onPressEnter={() => void submit()}
 						/>
 					</Form.Item>
 
 					{error ? <Alert type="error" showIcon title={error} className="ui-page__alert" /> : null}
 					{saved ? <Alert type="success" showIcon title={t("密码已修改。")} className="ui-page__alert" /> : null}
 
-					<Button type="primary" htmlType="submit" loading={busy} disabled={!current || !next}>
+					<Button type="primary" htmlType="submit" loading={busy} disabled={!current || !next || !confirm}>
 						{busy ? t("保存中…") : t("修改密码")}
 					</Button>
 				</Form>

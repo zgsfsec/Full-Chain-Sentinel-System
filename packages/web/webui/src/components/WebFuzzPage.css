@@ -288,7 +288,7 @@
 	overflow-wrap: anywhere;
 }
 .webfuzz-options {
-	width: 290px;
+	width: min(290px, calc(100vw - 48px));
 }
 .webfuzz-options label {
 	display: flex;

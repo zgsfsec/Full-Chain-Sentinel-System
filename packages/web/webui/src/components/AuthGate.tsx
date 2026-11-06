@@ -42,7 +42,11 @@ export function AuthGate({ mode, onDone }: { mode: "setup" | "login"; onDone: ()
 	});
 
 	const submit = async () => {
-		if (busy) return;
+		if (busy || !username.trim() || !password || (mode === "setup" && !confirm)) return;
+		if (mode === "setup" && password.length < 8) {
+			setError(t("密码至少 {n} 个字符", { n: 8 }));
+			return;
+		}
 		if (mode === "setup" && password !== confirm) {
 			setError(t("两次输入的密码不一致"));
 			return;
@@ -109,10 +113,11 @@ export function AuthGate({ mode, onDone }: { mode: "setup" | "login"; onDone: ()
 								{mode === "setup" ? t("首次使用：设置管理员用户名与密码，之后用它登录。") : t("输入你的凭据以继续。")}
 							</Text>
 
-							<Form layout="vertical" className="auth-screen__form" onFinish={() => void submit()} requiredMark={false}>
+							<Form layout="vertical" className="auth-screen__form" onFinish={() => void submit()} requiredMark={false} disabled={busy}>
 								<Form.Item label={t("用户名")} htmlFor={`${formId}-username`} required>
 									<Input
 										id={`${formId}-username`}
+										required
 										value={username}
 										autoComplete="username"
 										autoFocus
@@ -123,22 +128,20 @@ export function AuthGate({ mode, onDone }: { mode: "setup" | "login"; onDone: ()
 								<Form.Item label={t("密码")} htmlFor={`${formId}-password`} required>
 									<Input.Password
 										id={`${formId}-password`}
+										required
 										value={password}
 										autoComplete={mode === "setup" ? "new-password" : "current-password"}
 										onChange={(event) => setPassword(event.target.value)}
-										onPressEnter={() => {
-											if (mode === "login") void submit();
-										}}
 									/>
 								</Form.Item>
 								{mode === "setup" ? (
 									<Form.Item label={t("确认密码")} htmlFor={`${formId}-confirm`} required>
 										<Input.Password
 											id={`${formId}-confirm`}
+											required
 											value={confirm}
 											autoComplete="new-password"
 											onChange={(event) => setConfirm(event.target.value)}
-											onPressEnter={() => void submit()}
 										/>
 									</Form.Item>
 								) : (
@@ -167,7 +170,7 @@ export function AuthGate({ mode, onDone }: { mode: "setup" | "login"; onDone: ()
 									block
 									size="large"
 									loading={busy}
-									disabled={!username.trim() || !password}
+									disabled={!username.trim() || !password || (mode === "setup" && !confirm)}
 								>
 									{mode === "setup" ? t("创建并登录") : t("登录")}
 								</Button>

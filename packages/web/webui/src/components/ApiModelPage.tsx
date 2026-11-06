@@ -131,11 +131,12 @@ function EntityCard({ entity }: { entity: SentinelApiModelEntity }) {
 					search={false}
 					options={false}
 					pagination={false}
+					scroll={{ x: 560 }}
 					dataSource={entity.fields}
 					toolbar={{ title: <Text strong>{t("字段")}</Text> }}
 					columns={[
-						{ title: t("字段"), dataIndex: "name", key: "name" },
-						{ title: t("类型"), dataIndex: "type", key: "type" },
+						{ title: t("字段"), dataIndex: "name", key: "name", width: 180 },
+						{ title: t("类型"), dataIndex: "type", key: "type", width: 100 },
 						{ title: t("说明"), dataIndex: "description", key: "description" },
 					]}
 				/>
@@ -221,7 +222,7 @@ export function ApiModelPage({
 				title={t("业务建模")}
 				description={detail.title}
 				extra={
-					<Space>
+					<Space wrap>
 						<Button size="small" onClick={onClose}>
 							{t("返回列表")}
 						</Button>
@@ -327,7 +328,7 @@ export function ApiModelPage({
 							<Timeline
 								items={events.map((event, index) => ({
 									key: `${event.at}-${index}`,
-									children: (
+									content: (
 										<div className="apimodel-event">
 											<Text type="secondary" className="apimodel-event__time">
 												{formatTime(event.at)}
@@ -350,6 +351,7 @@ export function ApiModelPage({
 			title: t("名称"),
 			dataIndex: "title",
 			key: "title",
+			width: 260,
 			ellipsis: { showTitle: true },
 		},
 		{
@@ -425,7 +427,7 @@ export function ApiModelPage({
 				search={false}
 				options={false}
 				pagination={false}
-				scroll={{ x: 900 }}
+				scroll={{ x: 1060 }}
 				toolbar={{
 					title: (
 						<div className="apimodel-toolbar">

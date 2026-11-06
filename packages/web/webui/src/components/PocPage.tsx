@@ -155,6 +155,7 @@ export function PocPage({
 			title: t("名称"),
 			dataIndex: "name",
 			key: "name",
+			width: 220,
 			ellipsis: { showTitle: true },
 		},
 		{
@@ -201,7 +202,7 @@ export function PocPage({
 				),
 		},
 		{
-			title: "CVE",
+			title: t("参考"),
 			dataIndex: "references",
 			key: "references",
 			width: 160,
@@ -219,8 +220,12 @@ export function PocPage({
 		{
 			title: t("操作"),
 			key: "actions",
-			width: 64,
+			width: 120,
 			render: (_, item) => (
+				<Space size={0}>
+					<Button type="link" size="small" onClick={() => { setOpenId(item.id); onOpen(item.id); }}>
+						{t("查看")}
+					</Button>
 				<Popconfirm
 					title={t("删除模板")}
 					description={t("删除「{id}」？该操作不可恢复。", { id: item.id })}
@@ -241,6 +246,7 @@ export function PocPage({
 						onClick={(event) => event.stopPropagation()}
 					/>
 				</Popconfirm>
+				</Space>
 			),
 		},
 	];
@@ -396,7 +402,7 @@ export function PocPage({
 				tableLayout="fixed"
 				search={false}
 				options={false}
-				toolbar={{ title: <Space size={8}>{toolbarFilters}</Space> }}
+				toolbar={{ title: <Space size={8} wrap className="poc-filters">{toolbarFilters}</Space> }}
 				pagination={{
 					current: Math.max(1, page),
 					pageSize,
@@ -406,7 +412,7 @@ export function PocPage({
 						t("第 {from}-{to} 条 / 共 {total} 条", { from: range[0], to: range[1], total: count }),
 					onChange: (next) => onPageChange(next),
 				}}
-				scroll={{ x: 1080 }}
+				scroll={{ x: 1180 }}
 				onRow={(record) => ({
 					onClick: (event) => {
 						if (event.target instanceof Element && event.target.closest("button, a, .ant-popover")) return;
@@ -416,7 +422,7 @@ export function PocPage({
 					style: { cursor: "pointer" },
 				})}
 				locale={{
-					emptyText: t(
+					emptyText: filters.search || filters.severity || filters.tag ? t("没有符合条件的记录") : t(
 						"暂无模板。点右上「导入 POC」上传 nuclei 模板（可多选 yaml 或 zip）；导入后 Agent 可用 poc_search / poc_read 只读检索。",
 					),
 				}}
