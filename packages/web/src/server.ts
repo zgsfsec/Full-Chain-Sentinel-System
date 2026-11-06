@@ -3438,6 +3438,7 @@ export async function startSentinelServer(
 								message.pageSize,
 								message.category ?? null,
 								message.tag ?? null,
+								message.search ?? "",
 							),
 						});
 					} catch (error) {

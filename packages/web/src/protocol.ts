@@ -2329,6 +2329,7 @@ export type SentinelClientMessage =
 			/** Optional vuln-category narrowing on top of the status filter. */
 			category?: SentinelVulnCategory | null;
 			tag?: CodeVulnTag | null;
+			search?: string;
 			page: number;
 			pageSize: number;
 	  }

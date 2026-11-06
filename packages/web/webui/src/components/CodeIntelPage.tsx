@@ -288,6 +288,7 @@ export interface CodeIntelPageProps {
 		pageSize: number,
 		category?: SentinelVulnCategory | null,
 		tag?: CodeVulnTag | null,
+		search?: string,
 		background?: boolean,
 	) => void;
 	/** Project-wide check and queue logs for the log tab; null until first load. */
@@ -570,6 +571,8 @@ export function CodeIntelPage({
 	const [activityFilter, setActivityFilter] = useState<SentinelCodeActivityFilter>("attention");
 	const [activityCategory, setActivityCategory] = useState<SentinelVulnCategory | null>(null);
 	const [activityTag, setActivityTag] = useState<CodeVulnTag | null>(null);
+	const [activitySearch, setActivitySearch] = useState("");
+	const [activityQuery, setActivityQuery] = useState("");
 	const [activityPage, setActivityPage] = useState(1);
 	const [activityPageSize, setActivityPageSize] = useState(20);
 	const [activitySelectedIds, setActivitySelectedIds] = useState<string[]>([]);
@@ -639,20 +642,30 @@ export function CodeIntelPage({
 		setMonitorPage((page) => Math.min(page, lastPage));
 	}, [monitorPageSize, filteredMonitors.length]);
 	useEffect(() => {
+		const query = activitySearch.trim();
+		if (query === activityQuery) return;
+		const timer = setTimeout(() => {
+			setActivityQuery(query);
+			setActivityPage(1);
+			setActivitySelectedIds([]);
+		}, query ? 300 : 0);
+		return () => clearTimeout(timer);
+	}, [activitySearch, activityQuery]);
+	useEffect(() => {
 		if (!project || !connected) return;
-		onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag);
+		onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag, activityQuery);
 	}, [
-		project?.id, activityFilter, activityCategory, activityTag,
+		project?.id, activityFilter, activityCategory, activityTag, activityQuery,
 		activityPage, activityPageSize, connected, onLoadActivity,
 	]);
 	// Push events refresh quietly; polling catches up when a broadcast was missed.
 	useEffect(() => {
 		if (!project || !connected || view !== "activity") return;
-		const refresh = () => onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag, true);
+		const refresh = () => onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag, activityQuery, true);
 		refresh();
 		const timer = setInterval(refresh, 10_000);
 		return () => clearInterval(timer);
-	}, [project?.id, connected, view, monitors, activityFilter, activityPage, activityPageSize, activityCategory, activityTag, onLoadActivity]);
+	}, [project?.id, connected, view, monitors, activityFilter, activityPage, activityPageSize, activityCategory, activityTag, activityQuery, onLoadActivity]);
 	useEffect(() => {
 		if (view === "logs" && project) onLoadLogs(project.id);
 		// The parent supplies an inline callback; load only when the scope or tab changes.
@@ -682,6 +695,8 @@ export function CodeIntelPage({
 		setActivityFilter("attention");
 		setActivityCategory(null);
 		setActivityTag(null);
+		setActivitySearch("");
+		setActivityQuery("");
 		setEditor(null);
 		setBatchOpen(false);
 		setDispatchOpen(false);
@@ -768,6 +783,8 @@ export function CodeIntelPage({
 		setActivityFilter(filter);
 		setActivityCategory(null);
 		setActivityTag(null);
+		setActivitySearch("");
+		setActivityQuery("");
 		setActivityPage(1);
 		setActivitySelectedIds([]);
 	};
@@ -1457,7 +1474,20 @@ export function CodeIntelPage({
 	const renderActivity = () => (
 		<Space direction="vertical" size={12} style={{ width: "100%" }}>
 			{activityError ? <Alert type="error" showIcon title={activityError}
-				action={<Button size="small" disabled={!connected} onClick={() => project && onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag)}>{t("重试")}</Button>} /> : null}
+				action={<Button size="small" disabled={!connected} onClick={() => project && onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag, activityQuery)}>{t("重试")}</Button>} /> : null}
+			<Input
+				prefix={<SearchOutlined />}
+				allowClear
+				aria-label={getLanguage() === "en" ? "Search activity" : "搜索动态"}
+				placeholder={getLanguage() === "en" ? "Search repositories, commits, CVEs or vulnerability types" : "搜索仓库、提交、CVE、漏洞类型"}
+				value={activitySearch}
+				onChange={(event) => setActivitySearch(event.target.value)}
+				onPressEnter={() => {
+					setActivityQuery(activitySearch.trim());
+					setActivityPage(1);
+					setActivitySelectedIds([]);
+				}}
+			/>
 			<div className="code-intel-activity-bar">
 				<Segmented
 					size="small"
@@ -1516,10 +1546,12 @@ export function CodeIntelPage({
 							setActivitySelectedIds([]);
 						}}
 					/>
-					{activityCategory || activityTag ? (
+					{activityCategory || activityTag || activitySearch ? (
 						<Button size="small" type="text" onClick={() => {
 							setActivityCategory(null);
 							setActivityTag(null);
+							setActivitySearch("");
+							setActivityQuery("");
 							setActivityPage(1);
 							setActivitySelectedIds([]);
 						}}>
@@ -1584,11 +1616,11 @@ export function CodeIntelPage({
 					emptyText: (
 						<Empty
 							description={
-								activityFilter === "attention" && !activityCategory && !activityTag
+								activityFilter === "attention" && !activityCategory && !activityTag && !activityQuery
 									? t("没有需要处理的动态") : t("没有符合条件的记录")
 							}
 						>
-							{activityFilter !== "all" || activityCategory || activityTag ? (
+							{activityFilter !== "all" || activityCategory || activityTag || activityQuery ? (
 								<Button onClick={() => showActivity("all")}>{t("清空筛选")}</Button>
 							) : null}
 						</Empty>
@@ -1751,7 +1783,7 @@ export function CodeIntelPage({
 						onClick={() => {
 							if (!project) return;
 							onRefresh();
-							if (view === "activity") onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag);
+							if (view === "activity") onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag, activityQuery);
 							if (view === "logs") onLoadLogs(project.id);
 						}}
 					>

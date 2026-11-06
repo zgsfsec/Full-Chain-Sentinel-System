@@ -54,6 +54,20 @@ describe("activity request lifecycle", () => {
 		expect(state).toHaveBeenLastCalledWith(false, null);
 	});
 
+	it("discards earlier search results and preserves the query when refreshing", () => {
+		const { request, state, update, send } = setup();
+		request.load({ ...query, search: "SSRF" }, send);
+		request.load({ ...query, search: "XSS" }, send);
+		request.accept({ type: "code_activity", requestId: 1, view });
+		expect(update).not.toHaveBeenCalledWith(view);
+		request.accept({ type: "code_activity", requestId: 2, view });
+		expect(update).toHaveBeenLastCalledWith(view);
+		request.load({ ...query, search: "XSS" }, send, true);
+		expect(send).toHaveBeenLastCalledWith({ type: "list_code_activity", requestId: 3, ...query, search: "XSS" });
+		expect(state).toHaveBeenLastCalledWith(false, null);
+		request.dispose();
+	});
+
 	it("refreshes loaded data without masking the table and retains it on failure", () => {
 		const { request, state, update, send } = setup();
 		request.load(query, send);

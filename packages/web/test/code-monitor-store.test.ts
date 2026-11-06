@@ -320,6 +320,57 @@ describe("CodeMonitorStore", () => {
 		reopened.close();
 	});
 
+	it("searches all project activity before pagination and intersects existing filters", () => {
+		const { store } = open();
+		const monitor = addMonitor(store);
+		const other = addMonitor(store, "p2");
+		const first = addCommit(store, monitor.id, "abc123");
+		const second = addCommit(store, monitor.id, "def456");
+		const foreign = addCommit(store, other.id, "foreign", "p2");
+		const literal = addCommit(store, monitor.id, "%_O'Hara");
+		for (const row of [first, second, foreign]) {
+			store.setVerdict(row.id, {
+				verdict: "security",
+				confidence: 0.9,
+				cve: "CVE-2026-1234",
+				severity: "high",
+				vulnCategory: "web",
+				vulnType: "请求校验缺陷",
+				vulnTags: ["ssrf", "auth-bypass"],
+				reason: "阻止访问内网地址",
+				judgedAt: 1,
+			});
+		}
+		const page1 = store.listActivity("p1", "all", 1, 1, null, null, "  cve-2026-1234  ");
+		const page2 = store.listActivity("p1", "all", 2, 1, null, null, "cve-2026-1234");
+		expect(page1.total).toBe(2);
+		expect(page2.total).toBe(2);
+		expect([...page1.items, ...page2.items].map((row) => row.id).sort()).toEqual([first.id, second.id].sort());
+		for (const search of ["SSRF", "认证绕过", "Authentication bypass", "请求校验", "内网地址"]) {
+			expect(store.listActivity("p1", "all", 1, 20, null, null, search).total).toBe(2);
+		}
+		for (const search of ["ACME/APP", "main", "DEV", "fix traversal", "   "]) {
+			expect(store.listActivity("p1", "all", 1, 20, null, null, search).total).toBe(3);
+		}
+		expect(store.listActivity("p1", "all", 1, 20, null, null, "ABC123").items[0]?.id).toBe(first.id);
+		for (const search of ["%", "_", "O'Hara"]) {
+			expect(store.listActivity("p1", "all", 1, 20, null, null, search).items.map((row) => row.id)).toEqual([
+				literal.id,
+			]);
+		}
+		expect(store.listActivity("p1", "all", 1, 20, null, null, "' OR 1=1 --").total).toBe(0);
+		store.setStatus(first.id, "dispatched", "engine-1", null);
+		expect(store.listActivity("p1", "review", 1, 20, "web", "ssrf", "CVE-2026").items.map((row) => row.id)).toEqual([
+			second.id,
+		]);
+		expect(
+			store.listActivity("p1", "reproducing", 1, 20, "web", "ssrf", "CVE-2026").items.map((row) => row.id),
+		).toEqual([first.id]);
+		expect(store.listActivity("p1", "all", 1, 20, "memory", null, "SSRF").total).toBe(0);
+		expect(store.listActivity("p1", "all", 1, 20, "web", "xss", "CVE-2026").total).toBe(0);
+		store.close();
+	});
+
 	it.each(["pending", "failed", "not_security"] as const)(
 		"clears stale tags when rejudgment changes to %s",
 		(verdict) => {

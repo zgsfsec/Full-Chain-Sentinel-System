@@ -1811,9 +1811,10 @@ export function App() {
 			pageSize: number,
 			category: SentinelVulnCategory | null = null,
 			tag: CodeVulnTag | null = null,
+			search = "",
 			background = false,
 		) => {
-			codeActivityRequest.load({ projectId, filter, page, pageSize, category, tag }, (request) => {
+			codeActivityRequest.load({ projectId, filter, page, pageSize, category, tag, search }, (request) => {
 				if (!connectionRef.current?.connected) throw new Error(t("连接已断开，请等待重连后重试"));
 				connectionRef.current.send(request);
 			}, background);

@@ -1771,6 +1771,7 @@ export type SentinelClientMessage =
 			filter: SentinelCodeActivityFilter;
 			category?: SentinelVulnCategory | null;
 			tag?: CodeVulnTag | null;
+			search?: string;
 			page: number;
 			pageSize: number;
 	  }

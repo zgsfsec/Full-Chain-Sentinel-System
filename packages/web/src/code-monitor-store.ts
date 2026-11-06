@@ -760,6 +760,7 @@ export class CodeMonitorStore {
 		pageSize: number,
 		category: SentinelVulnCategory | null = null,
 		tag: CodeVulnTag | null = null,
+		search = "",
 	): { items: SentinelCodeCommit[]; total: number } {
 		let where = activityWhere(filter);
 		const params: string[] = [projectId];
@@ -770,6 +771,25 @@ export class CodeMonitorStore {
 		if (tag) {
 			where += " AND verdict = 'security' AND EXISTS (SELECT 1 FROM json_each(vuln_tags) WHERE value = ?)";
 			params.push(tag);
+		}
+		const query = search.trim().toLowerCase();
+		if (query) {
+			const fields = ["title", "message", "sha", "author", "branch", "cve", "vuln_type", "reason", "error"];
+			const text = fields.map((field) => `COALESCE(${field}, '')`).join(" || char(10) || ");
+			const matchingTags = CODE_VULN_TAGS.filter((tag) =>
+				[tag.id, tag.zh, tag.en].some((label) => label.toLowerCase().includes(query)),
+			).map((tag) => tag.id);
+			// Literal substring matching: %, _ and quotes are content, never SQL wildcards.
+			where += ` AND (instr(lower(${text}), ?) > 0 OR EXISTS (
+				SELECT 1 FROM code_monitors m WHERE m.id = code_commits.monitor_id
+				AND instr(lower(m.name || char(10) || m.owner || '/' || m.repo || char(10) || m.repo_url), ?) > 0)`;
+			params.push(query, query);
+			if (matchingTags.length > 0) {
+				where += ` OR (verdict = 'security' AND EXISTS (
+					SELECT 1 FROM json_each(vuln_tags) WHERE value IN (${matchingTags.map(() => "?").join(",")})))`;
+				params.push(...matchingTags);
+			}
+			where += ")";
 		}
 		const safePage = Math.max(1, Math.floor(page));
 		const safeSize = Math.min(200, Math.max(1, Math.floor(pageSize)));
