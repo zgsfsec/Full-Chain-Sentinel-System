@@ -1,12 +1,11 @@
-import { ArrowLeftOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import { ProTable, type ProColumns } from "@ant-design/pro-components";
 import { Alert, App, Button, Empty, Flex, Image, Input, Segmented, Select, Skeleton, Space, Tag, Typography } from "antd";
-import { useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useRef, useState } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ReportDetail, ReportPage, ReportSource, ReportSummary } from "../../../src/report-types.ts";
 import { getLanguage } from "../i18n.ts";
-import type { SentinelProjectInfo } from "../types.ts";
 import { Page } from "../ui/Page.tsx";
 import "./ReportCenterPage.css";
 
@@ -43,17 +42,12 @@ export function ReportMarkdown({ report }: { report: ReportDetail }) {
 	</div>;
 }
 
-export function ReportCenterPage({ projectId, projects, refreshToken = 0 }: {
-	projectId: string | null; projects: SentinelProjectInfo[]; refreshToken?: number;
+export function ReportCenterPage({ projectId, refreshToken = 0 }: {
+	projectId: string | null; refreshToken?: number;
 }) {
-	const [selected, setSelected] = useState(projectId ?? projects[0]?.id ?? "");
-	const id = projects.some((project) => project.id === selected) ? selected : projects[0]?.id ?? "";
 	return <Page title={tx("报告中心", "Reports")}
-		description={tx("按项目归档任务报告与证据图片，容器停止后仍可查阅。", "Task reports and evidence images, retained after containers stop.")}
-		extra={<Select aria-label={tx("报告所属项目", "Report project")} className="report-project-select" showSearch optionFilterProp="label"
-			placeholder={tx("选择项目", "Select project")} value={id || undefined} onChange={setSelected}
-			options={projects.map((project) => ({ value: project.id, label: project.name }))} />}>
-		{id ? <ProjectReports key={id} projectId={id} refreshToken={refreshToken} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tx("创建项目后，Agent 提交的报告会显示在这里。", "Create a project to collect reports submitted by agents.")} />}
+		description={tx("按当前项目归档任务报告与证据图片，容器停止后仍可查阅。", "Task reports and evidence for the current project, retained after containers stop.")}>
+		{projectId ? <ProjectReports key={projectId} projectId={projectId} refreshToken={refreshToken} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tx("请先在全局选择项目，再查看报告。", "Select a project in the global navigation to view reports.")} />}
 	</Page>;
 }
 
@@ -143,7 +137,7 @@ function ProjectReports({ projectId, refreshToken }: { projectId: string; refres
 	];
 	return <div className="report-center">
 		{error ? <Alert type="error" showIcon title={error} action={<Button size="small" onClick={() => setRevision((value) => value + 1)}>{tx("重试", "Retry")}</Button>} /> : null}
-		{openId ? <ReportReader key={openId} projectId={projectId} id={openId} refreshToken={refreshToken} onBack={() => setOpenId(null)} onDownload={download} onDelete={remove} downloading={downloading === openId} /> : <ProTable<ReportSummary>
+		{openId ? <ReportReader key={openId} projectId={projectId} id={openId} refreshToken={refreshToken} onBack={() => setOpenId(null)} onSaved={() => setRevision((value) => value + 1)} onDownload={download} onDelete={remove} downloading={downloading === openId} /> : <ProTable<ReportSummary>
 			rowKey="id" columns={columns} dataSource={data?.items ?? []} loading={loading} search={false} options={false}
 			cardBordered headerTitle={`${tx("项目报告", "Project reports")} · ${data?.total ?? 0}`} scroll={{ x: 1050 }}
 			toolBarRender={() => [
@@ -157,32 +151,121 @@ function ProjectReports({ projectId, refreshToken }: { projectId: string; refres
 	</div>;
 }
 
-function ReportReader({ projectId, id, refreshToken, onBack, onDownload, onDelete, downloading }: {
-	projectId: string; id: string; refreshToken: number; onBack: () => void;
+export function ReportEditor({ report, onTitleChange, onMarkdownChange, disabled = false }: {
+	report: ReportDetail; onTitleChange: (value: string) => void; onMarkdownChange: (value: string) => void; disabled?: boolean;
+}) {
+	const markdown = useDeferredValue(report.markdown);
+	return <div className="report-editor">
+		<section className="report-editor__pane" aria-label={tx("编辑报告", "Edit report")}>
+			<div className="report-editor__head"><Typography.Text strong>Markdown</Typography.Text><Typography.Text type="secondary">{tx("修改后点击保存", "Save to apply changes")}</Typography.Text></div>
+			<div className="report-editor__fields">
+				<label htmlFor="report-edit-title">{tx("报告标题", "Report title")}</label>
+				<Input id="report-edit-title" value={report.title} maxLength={120} disabled={disabled} onChange={(event) => onTitleChange(event.target.value)} />
+				<label htmlFor="report-edit-markdown">{tx("报告正文", "Markdown body")}</label>
+				<Input.TextArea id="report-edit-markdown" className="report-editor__input" value={report.markdown} disabled={disabled} spellCheck={false} onChange={(event) => onMarkdownChange(event.target.value)} />
+				<Typography.Text type="secondary" className="report-editor__hint">{tx("支持 Markdown 表格和已有归档图片，请保留图片路径。", "Supports Markdown tables and archived images. Keep existing image paths.")}</Typography.Text>
+			</div>
+		</section>
+		<section className="report-editor__pane" aria-label={tx("报告实时预览", "Live report preview")}>
+			<div className="report-editor__head"><Typography.Text strong>{tx("实时预览", "Live preview")}</Typography.Text></div>
+			<div className="report-editor__preview"><h1>{report.title || tx("未命名报告", "Untitled report")}</h1><ReportMarkdown report={{ ...report, markdown }} /></div>
+		</section>
+	</div>;
+}
+
+function ReportReader({ projectId, id, refreshToken, onBack, onSaved, onDownload, onDelete, downloading }: {
+	projectId: string; id: string; refreshToken: number; onBack: () => void; onSaved: () => void;
 	onDownload: (report: ReportSummary) => Promise<void>; onDelete: (report: ReportSummary) => void; downloading: boolean;
 }) {
+	const { modal, message } = App.useApp();
 	const [report, setReport] = useState<ReportDetail | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [mode, setMode] = useState("preview");
+	const [draft, setDraft] = useState<ReportDetail | null>(null);
+	const [saving, setSaving] = useState(false);
+	const [saveError, setSaveError] = useState<string | null>(null);
+	const restored = useRef(false);
+	const draftKey = `sentinel-report-draft:${projectId}:${id}`;
+	const editing = draft !== null;
+	const dirty = draft !== null && (draft.title !== report?.title || draft.markdown !== report?.markdown);
 	useEffect(() => {
+		if (editing) return;
 		const controller = new AbortController();
 		void reportResponse(reportUrl(projectId, id), { signal: controller.signal })
-			.then(async (response) => { const next = await response.json() as ReportDetail; if (!controller.signal.aborted) { setReport(next); setError(null); } })
+			.then(async (response) => {
+				const next = await response.json() as ReportDetail;
+				if (controller.signal.aborted) return;
+				setReport(next);
+				setError(null);
+				if (restored.current) return;
+				restored.current = true;
+				try {
+					const saved: unknown = JSON.parse(sessionStorage.getItem(draftKey) ?? "null");
+					if (saved && typeof saved === "object" && "title" in saved && typeof saved.title === "string" &&
+						"markdown" in saved && typeof saved.markdown === "string" && "revision" in saved && typeof saved.revision === "string") {
+						setDraft({ ...next, title: saved.title, markdown: saved.markdown, revision: saved.revision });
+						void message.info(tx("已恢复未保存的草稿", "Unsaved draft restored"));
+					}
+				} catch { /* Draft recovery is optional when browser storage is unavailable. */ }
+			})
 			.catch((failure: unknown) => { if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : String(failure)); });
 		return () => controller.abort();
-	}, [projectId, id, refreshToken]);
+	}, [projectId, id, refreshToken, editing, draftKey, message]);
+	useEffect(() => {
+		if (!draft) return;
+		if (!dirty) {
+			try { sessionStorage.removeItem(draftKey); } catch { /* Storage may be disabled. */ }
+			return;
+		}
+		try { sessionStorage.setItem(draftKey, JSON.stringify({ title: draft.title, markdown: draft.markdown, revision: draft.revision })); }
+		catch { /* The in-memory draft remains editable if storage is full or disabled. */ }
+	}, [draft, dirty, draftKey]);
+	useEffect(() => {
+		if (!dirty) return;
+		const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+		window.addEventListener("beforeunload", warn);
+		return () => window.removeEventListener("beforeunload", warn);
+	}, [dirty]);
+	const leave = (action: () => void) => {
+		const discard = () => {
+			try { sessionStorage.removeItem(draftKey); } catch { /* Storage may be disabled. */ }
+			action();
+		};
+		if (!dirty) { discard(); return; }
+		modal.confirm({ title: tx("放弃未保存的修改？", "Discard unsaved changes?"), content: tx("当前修改尚未保存，放弃后将恢复已保存的报告。", "Your changes have not been saved. Discarding restores the saved report."), okText: tx("放弃修改", "Discard changes"), cancelText: tx("继续编辑", "Keep editing"), onOk: discard });
+	};
+	const save = async () => {
+		if (!draft) return;
+		setSaving(true);
+		setSaveError(null);
+		try {
+			const response = await reportResponse(reportUrl(projectId, id), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: draft.title, markdown: draft.markdown, revision: draft.revision }) });
+			setReport(await response.json() as ReportDetail);
+			try { sessionStorage.removeItem(draftKey); } catch { /* Storage may be disabled. */ }
+			setDraft(null);
+			setMode("preview");
+			onSaved();
+			void message.success(tx("报告已保存", "Report saved"));
+		} catch (failure) { setSaveError(failure instanceof Error ? failure.message : String(failure)); }
+		finally { setSaving(false); }
+	};
 	return <section className="report-reader">
 		<Flex justify="space-between" align="center" gap={12} wrap className="report-reader__toolbar">
-			<Button icon={<ArrowLeftOutlined />} onClick={onBack}>{tx("返回列表", "Back to reports")}</Button>
-			{report && !error ? <Space wrap>
+			<Button icon={<ArrowLeftOutlined />} disabled={saving} onClick={() => leave(onBack)}>{tx("返回列表", "Back to reports")}</Button>
+			{report && !error ? editing ? <Space wrap>
+				<Typography.Text type="secondary">{dirty ? tx("有未保存的修改", "Unsaved changes") : tx("编辑模式", "Editing")}</Typography.Text>
+				<Button disabled={saving} onClick={() => leave(() => { setDraft(null); setSaveError(null); })}>{tx("取消编辑", "Cancel editing")}</Button>
+				<Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={!dirty || !draft.title.trim() || !draft.markdown.trim()} onClick={() => void save()}>{tx("保存修改", "Save changes")}</Button>
+			</Space> : <Space wrap>
 				<Segmented value={mode} onChange={setMode} options={[{ label: tx("预览", "Preview"), value: "preview" }, { label: tx("源文", "Markdown"), value: "source" }]} />
+				<Button icon={<EditOutlined />} onClick={() => { setDraft(report); setSaveError(null); }}>{tx("编辑", "Edit")}</Button>
 				<Button icon={<DownloadOutlined />} loading={downloading} onClick={() => void onDownload(report)}>{tx(report.imageCount ? "下载报告和图片" : "下载 Markdown", report.imageCount ? "Download report & images" : "Download Markdown")}</Button>
 				<Button danger icon={<DeleteOutlined />} onClick={() => onDelete(report)}>{tx("删除", "Delete")}</Button>
 			</Space> : null}
 		</Flex>
-		{error ? <Alert type="error" showIcon title={error} /> : report ? <article className="report-document">
+		{saveError ? <Alert className="report-editor__error" type="error" showIcon title={saveError} /> : null}
+		{draft ? <ReportEditor report={draft} disabled={saving} onTitleChange={(title) => setDraft((current) => current ? { ...current, title } : null)} onMarkdownChange={(markdown) => setDraft((current) => current ? { ...current, markdown } : null)} /> : error ? <Alert type="error" showIcon title={error} /> : report ? <article className="report-document">
 			<header className="report-document__head">
-				<div className="report-document__eyebrow">{tx("任务报告", "TASK REPORT")}</div>
 				<h1>{report.title}</h1>
 				<Space wrap size={[12, 8]}><Tag>{sourceLabels[report.source]}</Tag><Typography.Text type="secondary">{report.engineName ?? report.taskName ?? report.sessionName ?? report.sessionId ?? "—"}</Typography.Text><Typography.Text type="secondary">{new Date(report.createdAt).toLocaleString()}</Typography.Text><Typography.Text type="secondary">{tx(`${report.imageCount} 张图片`, `${report.imageCount} images`)}</Typography.Text></Space>
 			</header>

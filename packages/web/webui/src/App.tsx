@@ -3283,7 +3283,7 @@ export function App() {
 							testingId={testingProxyId}
 						/>
 					) : page === "reports" ? (
-						<ReportCenterPage key={snapshot?.project?.id ?? "none"} projectId={snapshot?.project?.id ?? null} projects={projects} refreshToken={reportRefresh} />
+						<ReportCenterPage key={snapshot?.project?.id ?? "none"} projectId={snapshot?.project?.id ?? null} refreshToken={reportRefresh} />
 					) : page === "vulns" ? (
 						<VulnPage
 							items={vulnItems}
