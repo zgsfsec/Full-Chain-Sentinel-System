@@ -11,6 +11,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { type CodeReproductionResult, parseCodeReproductionResult } from "./code-reproduction.ts";
 import type {
 	SentinelEngine,
 	SentinelEngineEvent,
@@ -47,7 +48,8 @@ CREATE TABLE IF NOT EXISTS engines (
   created_at INTEGER NOT NULL,
   started_at INTEGER,
   ended_at INTEGER,
-  report TEXT
+  report TEXT,
+  reproduction TEXT
 );
 CREATE TABLE IF NOT EXISTS engine_tasks (
   id TEXT PRIMARY KEY,
@@ -104,6 +106,7 @@ interface EngineRow {
 	started_at: number | null;
 	ended_at: number | null;
 	report: string | null;
+	reproduction: string | null;
 }
 
 interface TaskRow {
@@ -146,6 +149,10 @@ export class EngineStore {
 		this.addPresetColumns();
 		this.addContinuationColumn();
 		this.addScheduleColumns();
+		const columns = this.db.prepare("PRAGMA table_info(engines)").all() as Array<{ name: string }>;
+		if (!columns.some((column) => column.name === "reproduction")) {
+			this.db.exec("ALTER TABLE engines ADD COLUMN reproduction TEXT");
+		}
 	}
 
 	/**
@@ -253,6 +260,7 @@ export class EngineStore {
 			endedAt: null,
 			schedule: input.schedule ?? null,
 			report: null,
+			reproduction: null,
 			tasks: [],
 		};
 		this.db
@@ -312,8 +320,10 @@ export class EngineStore {
 			.run(schedule ? JSON.stringify(schedule) : null, id);
 	}
 
-	setEngineReport(id: string, report: string): void {
-		this.db.prepare("UPDATE engines SET report = ? WHERE id = ?").run(report, id);
+	setEngineReport(id: string, report: string, reproduction: CodeReproductionResult | null = null): void {
+		this.db
+			.prepare("UPDATE engines SET report = ?, reproduction = ? WHERE id = ?")
+			.run(report, reproduction ? JSON.stringify(reproduction) : null, id);
 	}
 
 	/** Change how this engine's workers are gated; the manager refuses while it runs. */
@@ -539,6 +549,7 @@ function engineFromRow(row: EngineRow, tasks: SentinelEngineTask[]): SentinelEng
 		endedAt: row.ended_at,
 		schedule: scheduleFromRow(row.schedule),
 		report: row.report,
+		reproduction: row.reproduction ? parseCodeReproductionResult(parseJson(row.reproduction, null)) : null,
 		tasks,
 	};
 }

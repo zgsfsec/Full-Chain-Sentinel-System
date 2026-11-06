@@ -544,6 +544,7 @@ export function App() {
 	const [vulnPreview, setVulnPreview] = useState<SentinelFilePreview | null>(null);
 	/** Engineering mode: engines, doctrines, and mirrored event logs. */
 	const [engines, setEngines] = useState<SentinelEngine[]>([]);
+	const [engineEntryId, setEngineEntryId] = useState<string | null>(null);
 	const [doctrines, setDoctrines] = useState<SentinelDoctrineView[]>([]);
 	const doctrineSaveResolverRef = useRef<((error: string | null) => void) | null>(null);
 	/** Preset agents: null until the first list arrives, which the settings page shows. */
@@ -2032,6 +2033,7 @@ export function App() {
 
 	const openPage = useCallback(
 		(next: SentinelPageId) => {
+			setEngineEntryId(null);
 			setPage(next);
 			if (next.startsWith("plugin:")) {
 				openPluginPage(next);
@@ -2156,6 +2158,7 @@ export function App() {
 				break;
 			case "codeintel":
 				send({ type: "list_code_monitors" });
+				send({ type: "list_engines" });
 				break;
 			case "apimodels":
 				send({ type: "list_api_models" });
@@ -3298,6 +3301,10 @@ export function App() {
 							onImportConsumed={() => setWebFuzzImport(null)} />
 					) : page === "codeintel" ? (
 						<CodeIntelPage
+							engines={engines}
+							onOpenEngine={(id) => { openPage("engine"); setEngineEntryId(id); }}
+							onOpenProject={() => openPage("projects")}
+							onOpenModels={() => openPage("settings.model")}
 							connected={connected}
 							project={snapshot?.project ?? null}
 							monitors={codeMonitors}
@@ -3310,7 +3317,7 @@ export function App() {
 								setCodeMonitorBusy("schedule");
 								send({ type: "set_code_monitors_schedule", ids, ...schedule });
 							}}
-							onRefresh={() => send({ type: "list_code_monitors" })}
+							onRefresh={() => { send({ type: "list_code_monitors" }); send({ type: "list_engines" }); }}
 						logs={codeMonitorLogs}
 						onLoadLogs={(projectId) => send({ type: "list_code_monitor_logs", projectId })}
 						onSetDispatch={(ids, patch) => {
@@ -3427,6 +3434,8 @@ export function App() {
 						/>
 					) : page === "engine" ? (
 						<EnginePage
+							key={engineEntryId ?? "list"}
+							initialBoardId={engineEntryId}
 							engines={
 								snapshot?.project
 									? engines.filter((engine) => engine.projectId === snapshot.project?.id)

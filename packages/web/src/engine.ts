@@ -27,6 +27,7 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { parseCodeReproductionResult } from "./code-reproduction.ts";
 import { type CommanderPort, createCommanderTools, formatTaskBoard, retryDecision } from "./commander-tools.ts";
 import { containerWorkPath, dockerBashOperations } from "./docker.ts";
 import { listDoctrines, resolveDoctrines, type SentinelDoctrine } from "./doctrines.ts";
@@ -1070,7 +1071,7 @@ export class EngineManager {
 				}
 			},
 			board: () => this.store.getEngine(entry.engine.id)?.tasks ?? entry.engine.tasks,
-			finish: (report) => {
+			finish: (report, reproduction) => {
 				if (entry.engine.status !== "running") {
 					return { ok: false, error: t("工程未在运行中，不能结束；请先继续工程") };
 				}
@@ -1085,8 +1086,22 @@ export class EngineManager {
 					};
 				}
 				const completedSchedule = entry.engine.schedule;
+				const result = parseCodeReproductionResult(reproduction);
+				if ((entry.engine.doctrines.includes("oss-1day-repro") || reproduction !== undefined) && !result) {
+					return {
+						ok: false,
+						error: "请提交有效的 reproduction 结论及依据；confirmed 必须包含 pocPath、vulnerableEvidence 和 fixedEvidence。",
+					};
+				}
+				if (
+					result &&
+					["confirmed", "not_reproduced"].includes(result.outcome) &&
+					!board.some((task) => task.status === "done")
+				) {
+					return { ok: false, error: "尚无完成的验证任务，请使用 inconclusive 或 failed 如实记录阻塞。" };
+				}
 				this.disableActiveSchedule(entry, "completed");
-				this.store.setEngineReport(entry.engine.id, report);
+				this.store.setEngineReport(entry.engine.id, report, result);
 				this.store.setEngineStatus(entry.engine.id, "completed", null, Date.now());
 				entry.engine = this.store.getEngine(entry.engine.id) ?? entry.engine;
 				this.armScheduler();

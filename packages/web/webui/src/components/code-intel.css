@@ -359,6 +359,9 @@
 }
 
 .code-intel-reproduction__arrow { margin-inline-end: 8px; color: var(--ant-color-text-tertiary, #667085); }
+.code-intel-report { max-height: 60vh; overflow: auto; overflow-wrap: anywhere; }
+.code-intel-report pre { overflow-x: auto; }
+.code-intel-evidence { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
 .code-intel-reproduction .is-active { color: var(--ant-color-primary, #2563eb); font-weight: 600; }
 .code-intel-reproduction .is-finished { color: var(--ant-color-success, #389e0d); }
 .code-intel-reproduction .is-error { color: var(--ant-color-error, #dc2626); }

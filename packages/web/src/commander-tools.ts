@@ -8,6 +8,7 @@
 import type { AgentToolResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import type { CodeReproductionResult } from "./code-reproduction.ts";
 import type { SentinelEngineTask, SentinelEngineTaskStatus } from "./protocol.ts";
 
 /** Dispatch outcome the commander sees as the tool result. */
@@ -53,7 +54,7 @@ export interface CommanderPort {
 	/** The task board right now, for `list_tasks`. */
 	board(): SentinelEngineTask[];
 	/** Declare the engine finished; refused while work is outstanding. */
-	finish(report: string): { ok: boolean; error?: string };
+	finish(report: string, reproduction?: CodeReproductionResult): { ok: boolean; error?: string };
 }
 
 const TASK_STATUS_LABELS: Record<SentinelEngineTaskStatus, string> = {
@@ -342,9 +343,49 @@ export function createCommanderTools(port: CommanderPort): ToolDefinition[] {
 				description:
 					"Final markdown report: per-target outcomes, findings summary (hub labels), failures and why, and what the operator should review next.",
 			}),
+			reproduction: Type.Optional(
+				Type.Object({
+					outcome: Type.Union(
+						[
+							Type.Literal("confirmed"),
+							Type.Literal("not_reproduced"),
+							Type.Literal("inconclusive"),
+							Type.Literal("failed"),
+						],
+						{
+							description:
+								"For security-fix reproduction: confirmed requires actual vulnerable/fixed version comparison; not_reproduced means the test ran but did not trigger; inconclusive means insufficient evidence; failed means environment/build/execution failed. Required for oss-1day-repro engines.",
+						},
+					),
+					summary: Type.String({
+						minLength: 1,
+						maxLength: 4000,
+						description:
+							"Evidence-based conclusion or the concrete blocker. A completed task alone does not prove reproduction.",
+					}),
+					pocPath: Type.Optional(
+						Type.String({
+							maxLength: 8000,
+							description: "PoC path in the project container. Required for confirmed.",
+						}),
+					),
+					vulnerableEvidence: Type.Optional(
+						Type.String({
+							maxLength: 8000,
+							description: "Actual command and observed vulnerable-version output. Required for confirmed.",
+						}),
+					),
+					fixedEvidence: Type.Optional(
+						Type.String({
+							maxLength: 8000,
+							description: "Same test's command and observed fixed-version output. Required for confirmed.",
+						}),
+					),
+				}),
+			),
 		}),
 		async execute(_toolCallId, params): Promise<AgentToolResult> {
-			const result = port.finish(params.report.trim());
+			const result = port.finish(params.report.trim(), params.reproduction);
 			if (!result.ok) {
 				return {
 					content: [{ type: "text", text: `不能结束工程：${result.error}` }],

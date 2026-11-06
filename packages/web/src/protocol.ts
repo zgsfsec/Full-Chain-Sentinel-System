@@ -7,6 +7,7 @@ import type {
 	SessionTreeNode,
 	ThinkingLevel,
 } from "@earendil-works/pi-coding-agent";
+import type { CodeReproductionResult } from "./code-reproduction.ts";
 import type { CodeVulnTag } from "./code-vuln-tags.ts";
 import type { DroidDevice, DroidToken } from "./droid.ts";
 import type { UiLanguage } from "./i18n-messages.ts";
@@ -1556,6 +1557,8 @@ export interface SentinelEngine {
 	schedule: SentinelEngineSchedule | null;
 	/** Final report markdown, once the commander declared the engine done. */
 	report: string | null;
+	/** Explicit reproduction conclusion, when this run reproduces a security fix. */
+	reproduction?: CodeReproductionResult | null;
 	tasks: SentinelEngineTask[];
 }
 

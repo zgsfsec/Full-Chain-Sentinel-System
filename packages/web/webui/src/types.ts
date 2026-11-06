@@ -1,6 +1,7 @@
 /** Client-side view of the Full Chain Sentinel wire protocol (mirrors packages/web/src/protocol.ts). */
 
 import type { CodeVulnTag } from "../../src/code-vuln-tags.ts";
+import type { CodeReproductionResult } from "../../src/code-reproduction.ts";
 import type { UiLanguage } from "../../src/i18n-messages.ts";
 import { t } from "./i18n.ts";
 
@@ -3003,6 +3004,7 @@ export interface SentinelEngine {
 	endedAt: number | null;
 	schedule: SentinelEngineSchedule | null;
 	report: string | null;
+	reproduction?: CodeReproductionResult | null;
 	tasks: SentinelEngineTask[];
 }
 

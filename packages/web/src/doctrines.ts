@@ -106,6 +106,7 @@ const BUILTIN_DOCTRINES: SentinelDoctrine[] = [
 			"交付：",
 			"确认可利用后，用 vuln_submit 提交漏洞：目标写仓库与受影响版本，标题按 CVE 或修复主题，描述包含成因、调用链、影响面，原始数据包/证据写实际命令与输出，复现步骤写清楚 vuln 与 fixed 的对照，CVSS 给出合理评分。没有公开 CVE 时不要编造编号。",
 			"任务结束时汇报：源码目录、构建命令、PoC 路径、漏洞版本输出、修复版本输出、提交的漏洞编号；失败时汇报阻塞原因。指挥官用 engine_done 汇总，不要在没有复现结果时宣称成功。",
+			"engine_done 必须提交 reproduction：outcome 为 confirmed（实际触发且修复版本对照通过）、not_reproduced（测试已运行但未触发）、inconclusive（证据不足）或 failed（构建、环境或执行失败），summary 写证据或具体阻塞。confirmed 必须同时提交 pocPath、vulnerableEvidence、fixedEvidence，包含实际命令及输出；不能把任务完成、静态推测或模型判断当作动态复现成功。",
 		].join("\n"),
 		builtin: true,
 	},

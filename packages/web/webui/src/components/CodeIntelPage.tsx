@@ -68,6 +68,7 @@ import type {
 	SentinelCodeMonitor,
 	SentinelCodeMonitorDetail,
 	SentinelCodeMonitorInput,
+	SentinelEngine,
 	SentinelCodeScheduleKind,
 	SentinelProjectInfo,
 	SentinelVulnCategory,
@@ -75,6 +76,7 @@ import type {
 import { Page, Section } from "../ui/Page.tsx";
 import { CronGrid } from "./CronGrid.tsx";
 import { CodeReproductionProgress } from "./CodeReproductionProgress.tsx";
+import { CodeRecovery, CodeReproductionActions, CodeReproductionResult, CodeReproductionSummary } from "./CodeReproductionResult.tsx";
 import "./code-intel.css";
 
 const { Link: Anchor, Text, Paragraph } = Typography;
@@ -206,24 +208,32 @@ function CodeVulnerabilityTags({ commit, expanded = false }: { commit: SentinelC
 	return expanded ? content : <Tooltip title={labels}>{content}</Tooltip>;
 }
 
-function CodeErrorDetail({ error }: { error: string | null }) {
+function CodeErrorDetail({ error, onOpenProject, onOpenModels, onRetry }: {
+	error: string | null;
+	onOpenProject(): void;
+	onOpenModels(): void;
+	onRetry(): void;
+}) {
+	const [open, setOpen] = useState(false);
 	if (!error) return <>—</>;
 	return (
+		<>
 		<Tooltip title={error}>
 			<Button
 				type="link"
 				danger
 				className="code-intel-error-link"
-				onClick={() => Modal.info({
-					title: getLanguage() === "en" ? "Request failure details" : "请求失败详情",
-					width: 760,
-					okText: t("关闭"),
-					content: <Paragraph copyable className="code-intel-error-detail">{error}</Paragraph>,
-				})}
+				onClick={() => setOpen(true)}
 			>
 				{error}
 			</Button>
 		</Tooltip>
+		<Modal open={open} onCancel={() => setOpen(false)} title={getLanguage() === "en" ? "Request failure details" : "请求失败详情"} width={760}
+			footer={<Space><Button onClick={() => { setOpen(false); onRetry(); }}>{t("重试")}</Button><Button onClick={() => setOpen(false)}>{t("关闭")}</Button></Space>}>
+			<Paragraph copyable className="code-intel-error-detail">{error}</Paragraph>
+			<CodeRecovery error={error} onOpenProject={onOpenProject} onOpenModels={onOpenModels} />
+		</Modal>
+		</>
 	);
 }
 
@@ -265,6 +275,10 @@ export interface BranchProbe {
 }
 
 export interface CodeIntelPageProps {
+	engines: SentinelEngine[];
+	onOpenEngine(id: string): void;
+	onOpenProject(): void;
+	onOpenModels(): void;
 	connected: boolean;
 	project: SentinelProjectInfo | null;
 	monitors: SentinelCodeMonitor[];
@@ -521,6 +535,10 @@ function nextCheckText(monitor: SentinelCodeMonitor): string {
 }
 
 export function CodeIntelPage({
+	engines,
+	onOpenEngine,
+	onOpenProject,
+	onOpenModels,
 	connected,
 	project,
 	monitors,
@@ -601,6 +619,7 @@ export function CodeIntelPage({
 		[monitors, project],
 	);
 	const monitorById = useMemo(() => new Map(rows.map((monitor) => [monitor.id, monitor] as const)), [rows]);
+	const engineById = useMemo(() => new Map(engines.filter((engine) => engine.projectId === project?.id).map((engine) => [engine.id, engine])), [engines, project?.id]);
 	const filteredMonitors = useMemo(() => {
 		const query = monitorQuery.trim().toLowerCase();
 		return rows.filter((monitor) => {
@@ -1159,7 +1178,7 @@ export function CodeIntelPage({
 			title: t("错误"),
 			dataIndex: "error",
 			key: "error",
-			render: (error: string | null) => <CodeErrorDetail error={error} />,
+			render: (error: string | null, row) => <CodeErrorDetail error={error} onOpenProject={onOpenProject} onOpenModels={onOpenModels} onRetry={() => onCheck(row.monitorId)} />,
 		},
 	];
 
@@ -1222,7 +1241,7 @@ export function CodeIntelPage({
 			title: t("错误"),
 			dataIndex: "error",
 			key: "error",
-			render: (error: string | null) => <CodeErrorDetail error={error} />,
+			render: (error: string | null, row) => <CodeErrorDetail error={error} onOpenProject={onOpenProject} onOpenModels={onOpenModels} onRetry={() => onCheck(row.monitorId)} />,
 		},
 	];
 
@@ -1255,7 +1274,7 @@ export function CodeIntelPage({
 						{t("详情")}
 					</Button>
 				) : null}
-				<Tooltip title={rejudge ? t("重判") : t("准备源码并新建工程复现")}>
+				{commit.engineId ? <CodeReproductionActions commit={commit} engine={engineById.get(commit.engineId)} onOpenEngine={onOpenEngine} /> : <Tooltip title={rejudge ? t("重判") : t("准备源码并新建工程复现")}>
 					<Button
 						size="small"
 						type="link"
@@ -1264,9 +1283,9 @@ export function CodeIntelPage({
 						disabled={rejudge ? !canRejudge(commit) : !canDispatch(commit)}
 						onClick={() => (rejudge ? onRejudge(commit.id) : reproduce(commit.id))}
 					>
-						{rejudge ? t("重判") : t("复现")}
+						{rejudge ? t("重判") : commit.error ? (getLanguage() === "en" ? "Retry" : "重试复现") : t("复现")}
 					</Button>
-				</Tooltip>
+				</Tooltip>}
 				<Dropdown
 					trigger={["click"]}
 					placement="bottomRight"
@@ -1356,6 +1375,11 @@ export function CodeIntelPage({
 			render: (_value, commit) => <CodeReproductionProgress commit={commit} />,
 		},
 		{
+			title: getLanguage() === "en" ? "Result" : "复现结果",
+			key: "reproductionResult", width: 120,
+			render: (_value, commit) => <CodeReproductionResult commit={commit} engine={engineById.get(commit.engineId ?? "")} />,
+		},
+		{
 			title: t("判定"),
 			key: "verdict",
 			width: 180,
@@ -1442,7 +1466,7 @@ export function CodeIntelPage({
 		{
 			title: t("操作"),
 			key: "actions",
-			width: 166,
+			width: 260,
 			fixed: screens.lg ? "right" : undefined,
 			render: (_value, commit) => renderCommitActions(commit, true),
 		},
@@ -1460,7 +1484,7 @@ export function CodeIntelPage({
 		{
 			title: t("操作"),
 			key: "actions",
-			width: 114,
+			width: 210,
 			fixed: screens.lg ? "right" : undefined,
 			render: (_value, commit) => renderCommitActions(commit, false),
 		},
@@ -1470,6 +1494,23 @@ export function CodeIntelPage({
 	const dispatchableSelected = activitySelected.filter(canDispatch);
 	const ignorableSelected = activitySelected.filter(canIgnore);
 	const rejudgeableSelected = activitySelected.filter(canRejudge);
+	const renderReproductionDetail = (commit: SentinelCodeCommit) => {
+		const engine = engineById.get(commit.engineId ?? "");
+		const errors = [commit.error, ...(engine?.tasks.filter((task) => ["failed", "blocked", "paused"].includes(task.status)).map((task) => task.error || task.summary) ?? [])].filter((error): error is string => Boolean(error));
+		if (engine?.pauseNote) errors.push(engine.pauseNote);
+		if (engine?.reproduction?.outcome === "failed") errors.push(engine.reproduction.summary);
+		return <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+			{commit.reproductionStage || commit.engineId ? <CodeReproductionSummary commit={commit} engine={engine} /> : null}
+			{[...new Set(errors)].map((error) => <div key={error}>
+				<Paragraph copyable className="code-intel-error-detail">{error}</Paragraph>
+				<CodeRecovery error={error} onOpenProject={onOpenProject} onOpenModels={onOpenModels} />
+			</div>)}
+			<Space wrap>
+				<CodeReproductionActions commit={commit} engine={engine} onOpenEngine={onOpenEngine} />
+				{commit.error && canDispatch(commit) ? <Button size="small" loading={busyId === commit.id} onClick={() => reproduce(commit.id)}>{getLanguage() === "en" ? "Retry reproduction" : "重试复现"}</Button> : null}
+			</Space>
+		</Space>;
+	};
 
 	const renderActivity = () => (
 		<Space direction="vertical" size={12} style={{ width: "100%" }}>
@@ -1648,6 +1689,7 @@ export function CodeIntelPage({
 					expandedRowRender: (commit) => (
 						<Space direction="vertical" size={8} style={{ width: "100%" }}>
 							<CodeReproductionProgress commit={commit} expanded />
+							{renderReproductionDetail(commit)}
 							<div className="code-intel-vuln-detail">
 								<Text strong>{VULN_TAG_TEXT.label}</Text>
 								<CodeVulnerabilityTags commit={commit} expanded />
@@ -1657,7 +1699,6 @@ export function CodeIntelPage({
 								<br />
 								{commit.reason ?? "—"}
 							</Paragraph>
-							{commit.error ? <Alert type="error" showIcon message={commit.error} /> : null}
 							{commit.diff ? (
 								<pre className="code-intel-diff">{commit.diff}</pre>
 							) : (
@@ -1667,7 +1708,7 @@ export function CodeIntelPage({
 					),
 				}}
 				tableLayout="fixed"
-				scroll={{ x: 2081 }}
+				scroll={{ x: 2295 }}
 			/>
 		</Space>
 	);
@@ -1705,7 +1746,7 @@ export function CodeIntelPage({
 								title: t("错误"),
 								key: "error",
 								ellipsis: true,
-								render: (_value, monitor) => <CodeErrorDetail error={monitor.lastError} />,
+								render: (_value, monitor) => <CodeErrorDetail error={monitor.lastError} onOpenProject={onOpenProject} onOpenModels={onOpenModels} onRetry={() => onCheck(monitor.id)} />,
 							},
 							...columns.filter((column) => column.key === "actions"),
 						]}
@@ -2562,11 +2603,12 @@ export function CodeIntelPage({
 												dataSource={detail.commits}
 												pagination={{ pageSize: 20, showSizeChanger: false }}
 												tableLayout="fixed"
-												scroll={{ x: 1947 }}
+												scroll={{ x: 2163 }}
 												expandable={{
 													expandedRowRender: (commit) => (
 														<Space direction="vertical" size={8} style={{ width: "100%" }}>
 															<CodeReproductionProgress commit={commit} expanded />
+															{renderReproductionDetail(commit)}
 															<div className="code-intel-vuln-detail">
 																<Text strong>{VULN_TAG_TEXT.label}</Text>
 																<CodeVulnerabilityTags commit={commit} expanded />

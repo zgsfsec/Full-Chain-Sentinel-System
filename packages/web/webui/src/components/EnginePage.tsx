@@ -292,6 +292,7 @@ function formatRemaining(at: number, now: number): string {
 }
 
 export interface EnginePageProps {
+	initialBoardId?: string | null;
 	engines: SentinelEngine[];
 	doctrines: SentinelDoctrineView[];
 	/** Enabled presets the commander may dispatch with, for the whitelist controls. */
@@ -312,8 +313,8 @@ export interface EnginePageProps {
 type View = "list" | "board" | "create" | "doctrines";
 
 export function EnginePage(props: EnginePageProps) {
-	const [view, setView] = useState<View>("list");
-	const [boardId, setBoardId] = useState<string | null>(null);
+	const [view, setView] = useState<View>(props.initialBoardId ? "board" : "list");
+	const [boardId, setBoardId] = useState<string | null>(props.initialBoardId ?? null);
 	const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 	const [report, setReport] = useState<{ markdown: string; filename: string } | null>(null);
 	const [editingSchedule, setEditingSchedule] = useState(false);
