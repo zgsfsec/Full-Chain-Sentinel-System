@@ -85,6 +85,7 @@ import type {
 	SentinelCodeCheckLog,
 	SentinelVulnCategory,
 	SentinelCodeActivityView,
+	SentinelCodeCommit,
 	SentinelCodeImportState,
 	SentinelCodeMonitor,
 	SentinelCodeMonitorDetail,
@@ -185,6 +186,8 @@ interface LiveTool {
 	startedAt: number;
 	durationMs?: number;
 }
+
+const CODE_DISPATCHING_PATCH: Partial<SentinelCodeCommit> = { status: "dispatching", reproductionStage: "git", error: null };
 
 function commandFromArgs(args: Record<string, unknown> | undefined): string {
 	if (!args) return "";
@@ -492,15 +495,22 @@ export function App() {
 	const [codeActivity, setCodeActivity] = useState<SentinelCodeActivityView | null>(null);
 	const [codeActivityLoading, setCodeActivityLoading] = useState(false);
 	const [codeActivityError, setCodeActivityError] = useState<string | null>(null);
+	const codeDispatchingIdsRef = useRef(new Set<string>());
 	const codeActivityRequest = useMemo(() => new CodeActivityRequest((loading, error) => {
 		setCodeActivityLoading(loading);
 		setCodeActivityError(error);
-	}, setCodeActivity), []);
+	}, (view) => setCodeActivity(view ? {
+		...view,
+		// A read started before the click can still contain the previous status.
+		items: view.items.map((commit) => codeDispatchingIdsRef.current.has(commit.id) && !commit.engineId && commit.status !== "ignored"
+			? { ...commit, ...CODE_DISPATCHING_PATCH } : commit),
+	} : null)), []);
 	const [codeMonitorLogs, setCodeMonitorLogs] = useState<{
 		checks: SentinelCodeCheckLog[];
 		jobs: SentinelCodeCheckJob[];
 	} | null>(null);
-	const codeMonitorDetailRef = useRef<SentinelCodeMonitorDetail | null>(null);
+	/** Only an explicit detail request may open or replace the monitor drawer. */
+	const codeMonitorOpenIdRef = useRef<string | null>(null);
 	/** Android devices: the device page's gateway state. */
 	const [droidState, setDroidState] = useState<{
 		enabled: boolean;
@@ -643,6 +653,17 @@ export function App() {
 
 	const refreshStats = useCallback(() => {
 		connectionRef.current?.send({ type: "get_stats" });
+	}, []);
+
+	const updateCodeCommit = useCallback((id: string, patch: Partial<SentinelCodeCommit>) => {
+		setCodeActivity((current) => current ? {
+			...current,
+			items: current.items.map((commit) => commit.id === id ? { ...commit, ...patch } : commit),
+		} : current);
+		setCodeMonitorDetail((current) => current ? {
+			...current,
+			commits: current.commits.map((commit) => commit.id === id ? { ...commit, ...patch } : commit),
+		} : current);
 	}, []);
 
 	/** Show a directory in the file panel (also used to refresh the current one). */
@@ -1438,8 +1459,13 @@ export function App() {
 					setCodeMonitors(message.monitors);
 					// A check or a dispatch landed; an open detail should show it without
 					// the operator closing and reopening the drawer.
-					const open = codeMonitorDetailRef.current;
-					if (open) send({ type: "get_code_monitor", id: open.monitor.id });
+					const openId = codeMonitorOpenIdRef.current;
+					if (openId && message.monitors.some((monitor) => monitor.id === openId)) {
+						send({ type: "get_code_monitor", id: openId });
+					} else if (openId) {
+						codeMonitorOpenIdRef.current = null;
+						setCodeMonitorDetail(null);
+					}
 					break;
 				}
 				case "code_monitor_import":
@@ -1450,7 +1476,12 @@ export function App() {
 					codeActivityRequest.accept(message);
 					break;
 				case "code_monitor_detail":
-					setCodeMonitorDetail(message.detail);
+					// Mutations also return details; they must not open a drawer or
+					// replace a different monitor the operator is currently inspecting.
+					if (codeMonitorOpenIdRef.current === message.detail.monitor.id) {
+						setCodeMonitorDetail(message.detail);
+					}
+					setCodeMonitorBusy((id) => message.detail.commits.some((commit) => commit.id === id && commit.verdict !== "pending") ? null : id);
 					break;
 				case "code_monitor_logs":
 					setCodeMonitorLogs({ checks: message.checks, jobs: message.jobs });
@@ -1474,15 +1505,20 @@ export function App() {
 						setCodeMonitorBusy(null);
 					}
 					if (!message.ok && message.error) pushError(message.error);
+					if (message.action === "下发复现" && message.id) codeDispatchingIdsRef.current.delete(message.id);
+					if (!message.ok && message.action === "下发复现" && message.id) {
+						updateCodeCommit(message.id, { status: "new", reproductionStage: "failed", error: message.error ?? t("未知错误") });
+					}
 					if (
 						message.ok &&
 						message.action === "检查监控" &&
 						message.id &&
-						codeMonitorDetailRef.current?.monitor.id === message.id
+						codeMonitorOpenIdRef.current === message.id
 					) {
 						send({ type: "get_code_monitor", id: message.id });
 					}
 					if (message.ok && message.action === "删除监控" && message.id) {
+						if (codeMonitorOpenIdRef.current === message.id) codeMonitorOpenIdRef.current = null;
 						setCodeMonitorDetail((current) => (current?.monitor.id === message.id ? null : current));
 					}
 					break;
@@ -1549,7 +1585,7 @@ export function App() {
 					break;
 			}
 		},
-		[pushError],
+		[pushError, updateCodeCommit],
 	);
 
 	const handleSessionEvent = useCallback((event: SessionEventView) => {
@@ -1734,6 +1770,8 @@ export function App() {
 				if (!open) {
 					// A check in flight dies with the socket; do not leave spinners stuck.
 					setCodeCheckingIds([]);
+					codeDispatchingIdsRef.current.clear();
+					setCodeMonitorBusy(null);
 					codeActivityRequest.disconnect();
 					return;
 				}
@@ -2276,6 +2314,7 @@ export function App() {
 	 * populated database.
 	 */
 	useEffect(() => {
+		codeMonitorOpenIdRef.current = null;
 		setCodeMonitorDetail(null);
 		if (page !== "codeintel" || !connected) return;
 		send({ type: "list_code_monitors" });
@@ -2331,9 +2370,6 @@ export function App() {
 	useEffect(() => {
 		assetDetailRef.current = assetDetail;
 	}, [assetDetail]);
-	useEffect(() => {
-		codeMonitorDetailRef.current = codeMonitorDetail;
-	}, [codeMonitorDetail]);
 
 	/** A folder archive belongs to one project's container; drop it on a switch. */
 	useEffect(() => {
@@ -3331,8 +3367,14 @@ export function App() {
 								...(patch.autoDispatchTags === undefined ? {} : { autoDispatchTags: patch.autoDispatchTags }),
 							});
 						}}
-							onOpen={(id) => send({ type: "get_code_monitor", id })}
-							onCloseDetail={() => setCodeMonitorDetail(null)}
+							onOpen={(id) => {
+								codeMonitorOpenIdRef.current = id;
+								send({ type: "get_code_monitor", id });
+							}}
+							onCloseDetail={() => {
+								codeMonitorOpenIdRef.current = null;
+								setCodeMonitorDetail(null);
+							}}
 							importState={codeImport}
 							activity={codeActivity}
 							activityLoading={codeActivityLoading}
@@ -3354,7 +3396,10 @@ export function App() {
 							}}
 							onCheck={(id) => startMonitorChecks([id])}
 							onDispatch={(commitId) => {
+								if (!connected || codeDispatchingIdsRef.current.has(commitId)) return;
+								codeDispatchingIdsRef.current.add(commitId);
 								setCodeMonitorBusy(commitId);
+								updateCodeCommit(commitId, CODE_DISPATCHING_PATCH);
 								send({ type: "dispatch_code_commit", id: commitId });
 							}}
 							onIgnore={(commitId) => send({ type: "ignore_code_commit", id: commitId })}

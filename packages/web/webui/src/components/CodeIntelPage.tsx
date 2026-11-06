@@ -1260,11 +1260,6 @@ export function CodeIntelPage({
 	const canRejudge = (commit: SentinelCodeCommit): boolean =>
 		commit.status !== "dispatching" && commit.verdict !== "pending" && busyId !== commit.id;
 
-	const reproduce = (commitId: string) => {
-		onDispatch(commitId);
-		showActivity("reproducing");
-	};
-
 	const renderCommitActions = (commit: SentinelCodeCommit, showDetail: boolean) => {
 		const rejudge = commit.verdict === "failed";
 		return (
@@ -1281,7 +1276,7 @@ export function CodeIntelPage({
 						icon={rejudge ? <ReloadOutlined /> : <ExperimentOutlined />}
 						loading={busyId === commit.id}
 						disabled={rejudge ? !canRejudge(commit) : !canDispatch(commit)}
-						onClick={() => (rejudge ? onRejudge(commit.id) : reproduce(commit.id))}
+						onClick={() => (rejudge ? onRejudge(commit.id) : onDispatch(commit.id))}
 					>
 						{rejudge ? t("重判") : commit.error ? (getLanguage() === "en" ? "Retry" : "重试复现") : t("复现")}
 					</Button>
@@ -1370,6 +1365,35 @@ export function CodeIntelPage({
 			),
 		},
 		{
+			title: t("状态"),
+			key: "status",
+			width: 120,
+			render: (_value, commit) => {
+				if (commit.status === "dispatching") return <Tag color="processing">{t("复现中")}</Tag>;
+				if (commit.error)
+					return (
+						<Tooltip title={commit.error}>
+							<Tag color="red">{t("下发失败")}</Tag>
+						</Tooltip>
+					);
+				if (["git", "engineering"].includes(commit.reproductionStage ?? "")) return <Tag color="processing">{t("复现中")}</Tag>;
+				if (commit.reproductionStage === "paused") return <Tag color="gold">{t("已暂停")}</Tag>;
+				if (commit.reproductionStage === "completed") return <Tag color="green">{getLanguage() === "en" ? "Finished" : "已结束"}</Tag>;
+				if (commit.reproductionStage === "stopped") return <Tag>{getLanguage() === "en" ? "Stopped" : "已停止"}</Tag>;
+				if (commit.verdict === "pending") return <Tag color="processing">{t("判定中")}</Tag>;
+				if (commit.status === "ignored") return <Tag>{t("已忽略")}</Tag>;
+				if (commit.engineId || commit.status === "dispatched")
+					return (
+						<Tooltip title={commit.engineId}>
+							<Tag color="blue">{t("已下发工程")}</Tag>
+						</Tooltip>
+					);
+				if (commit.verdict === "failed") return <Tag color="orange">{t("判定失败")}</Tag>;
+				if (commit.verdict === "security") return <Tag color="gold">{t("待复现")}</Tag>;
+				return <Tag>{t("非安全")}</Tag>;
+			},
+		},
+		{
 			title: getLanguage() === "en" ? "Reproduction progress" : "复现进度",
 			key: "reproduction", width: 245,
 			render: (_value, commit) => <CodeReproductionProgress commit={commit} />,
@@ -1430,34 +1454,6 @@ export function CodeIntelPage({
 			render: (_value, commit) => <CodeVulnerabilityTags commit={commit} />,
 		},
 		{
-			title: t("状态"),
-			key: "status",
-			width: 120,
-			render: (_value, commit) => {
-				if (commit.error)
-					return (
-						<Tooltip title={commit.error}>
-							<Tag color="red">{t("下发失败")}</Tag>
-						</Tooltip>
-					);
-				if (["git", "engineering"].includes(commit.reproductionStage ?? "")) return <Tag color="processing">{t("复现中")}</Tag>;
-				if (commit.reproductionStage === "paused") return <Tag color="gold">{t("已暂停")}</Tag>;
-				if (commit.reproductionStage === "completed") return <Tag color="green">{getLanguage() === "en" ? "Finished" : "已结束"}</Tag>;
-				if (commit.reproductionStage === "stopped") return <Tag>{getLanguage() === "en" ? "Stopped" : "已停止"}</Tag>;
-				if (commit.verdict === "pending") return <Tag color="processing">{t("判定中")}</Tag>;
-				if (commit.status === "ignored") return <Tag>{t("已忽略")}</Tag>;
-				if (commit.engineId || commit.status === "dispatched")
-					return (
-						<Tooltip title={commit.engineId}>
-							<Tag color="blue">{t("已下发工程")}</Tag>
-						</Tooltip>
-					);
-				if (commit.verdict === "failed") return <Tag color="orange">{t("判定失败")}</Tag>;
-				if (commit.verdict === "security") return <Tag color="gold">{t("待复现")}</Tag>;
-				return <Tag>{t("非安全")}</Tag>;
-			},
-		},
-		{
 			title: t("时间"),
 			key: "authoredAt",
 			width: 180,
@@ -1507,11 +1503,12 @@ export function CodeIntelPage({
 			</div>)}
 			<Space wrap>
 				<CodeReproductionActions commit={commit} engine={engine} onOpenEngine={onOpenEngine} />
-				{commit.error && canDispatch(commit) ? <Button size="small" loading={busyId === commit.id} onClick={() => reproduce(commit.id)}>{getLanguage() === "en" ? "Retry reproduction" : "重试复现"}</Button> : null}
+				{commit.error && canDispatch(commit) ? <Button size="small" loading={busyId === commit.id} onClick={() => onDispatch(commit.id)}>{getLanguage() === "en" ? "Retry reproduction" : "重试复现"}</Button> : null}
 			</Space>
 		</Space>;
 	};
 
+	const showReproductionColumns = activityFilter !== "attention" && activityFilter !== "review";
 	const renderActivity = () => (
 		<Space direction="vertical" size={12} style={{ width: "100%" }}>
 			{activityError ? <Alert type="error" showIcon title={activityError}
@@ -1612,7 +1609,6 @@ export function CodeIntelPage({
 							disabled={dispatchableSelected.length === 0}
 							onClick={() => {
 								for (const commit of dispatchableSelected) onDispatch(commit.id);
-								showActivity("reproducing");
 								setActivitySelectedIds([]);
 							}}
 						>
@@ -1650,7 +1646,7 @@ export function CodeIntelPage({
 				className="code-intel-table"
 				rowKey="id"
 				size="middle"
-				columns={activityColumns}
+				columns={showReproductionColumns ? activityColumns : activityColumns.filter((column) => column.key !== "reproduction" && column.key !== "reproductionResult")}
 				dataSource={activityRows}
 				loading={activityLoading}
 				locale={{
@@ -1708,7 +1704,7 @@ export function CodeIntelPage({
 					),
 				}}
 				tableLayout="fixed"
-				scroll={{ x: 2295 }}
+				scroll={{ x: showReproductionColumns ? 2295 : 1930 }}
 			/>
 		</Space>
 	);
@@ -2536,8 +2532,8 @@ export function CodeIntelPage({
 			>
 				{detail ? (
 					<Space direction="vertical" size={16} style={{ width: "100%" }}>
-						<Descriptions column={2} size="small" bordered>
-							<Descriptions.Item label={t("仓库")} span={2}>
+						<Descriptions column={{ xs: 1, sm: 2 }} size="small" bordered>
+							<Descriptions.Item label={t("仓库")} span="filled">
 								<Anchor href={detail.monitor.repoUrl} target="_blank" rel="noreferrer">
 									{shortRepo(detail.monitor)} · {detail.monitor.host}
 								</Anchor>
@@ -2558,14 +2554,14 @@ export function CodeIntelPage({
 							<Descriptions.Item label={t("自动复现")}>
 								{detail.monitor.autoDispatch ? t("开") : t("关")}
 							</Descriptions.Item>
-							<Descriptions.Item label={t("复现类别")} span={2}>
+							<Descriptions.Item label={t("复现类别")} span="filled">
 								{detail.monitor.autoDispatchCategories?.map((category) => CATEGORY_LABELS[category]).join("、") || t("全部类别")}
 							</Descriptions.Item>
-							<Descriptions.Item label={DISPATCH_TYPE_TEXT.label} span={2}>
+							<Descriptions.Item label={DISPATCH_TYPE_TEXT.label} span="filled">
 								{detail.monitor.autoDispatchTags === null ? DISPATCH_TYPE_TEXT.all : detail.monitor.autoDispatchTags.map(vulnTagLabel).join("、") || DISPATCH_TYPE_TEXT.required}
 							</Descriptions.Item>
 							{detail.monitor.lastError ? (
-								<Descriptions.Item label={t("最近错误")} span={2}>
+								<Descriptions.Item label={t("最近错误")} span="filled">
 									<Text type="danger">{detail.monitor.lastError}</Text>
 								</Descriptions.Item>
 							) : null}
