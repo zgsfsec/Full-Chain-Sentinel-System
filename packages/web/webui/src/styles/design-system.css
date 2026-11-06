@@ -31,6 +31,11 @@
 	font-family: var(--ant-font-family);
 }
 
+/* Nested typography follows solid buttons through hover and disabled states. */
+.ant-btn.ant-btn-variant-solid .ant-typography {
+	color: inherit;
+}
+
 /* First-use terms share the workspace's document surface and brand mark. */
 .consent.consent-gate {
 	background: var(--ant-color-bg-layout);
