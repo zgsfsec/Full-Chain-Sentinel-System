@@ -17,7 +17,7 @@
 	justify-content: flex-start;
 	height: 34px;
 	font-size: 13px;
-	color: #a5b4c9;
+	color: var(--ant-color-text-secondary);
 }
 
 .console-sidebar .console-menu {
@@ -35,11 +35,13 @@
 
 .console-sidebar .console-nav-group {
 	font-size: 11px;
-	letter-spacing: 0.02em;
+	font-weight: 500;
+	letter-spacing: 0;
+	text-transform: none;
 }
 
 .console-sidebar__navigation {
-	scrollbar-color: #334155 transparent;
+	scrollbar-color: var(--ant-color-border) transparent;
 }
 
 .console-sidebar .ant-menu-inline-collapsed > .ant-menu-item-group > .ant-menu-item-group-title {
@@ -65,7 +67,13 @@
 }
 
 .console-sidebar .console-menu .ant-menu-item-selected {
-	font-weight: 500;
+	font-weight: 600;
+}
+
+.console-sidebar .ant-menu-item:focus-visible,
+:is(.console-shell, .console-drawer) .console-sidebar :is(button, a, [role="button"]):focus-visible {
+	outline: 2px solid var(--ant-color-primary);
+	outline-offset: -2px;
 }
 
 .console-sidebar .console-nav-plugin-icon {
@@ -118,7 +126,8 @@
 
 .console-sidebar .session-panel__section {
 	padding: 12px 8px 6px;
-	letter-spacing: 0.02em;
+	letter-spacing: 0;
+	text-transform: none;
 }
 
 .session-panel__group-toggle {

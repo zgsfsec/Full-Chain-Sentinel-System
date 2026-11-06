@@ -46,7 +46,7 @@ export function Page({
 							</Text>
 						) : null}
 					</div>
-					{extra ? <Flex align="center" gap={8}>{extra}</Flex> : null}
+					{extra ? <Flex className="ui-page__actions" align="center" gap={8} wrap>{extra}</Flex> : null}
 				</Flex>
 				{tabs ? <div className="ui-page__tabs">{tabs}</div> : null}
 			</div>
@@ -78,7 +78,7 @@ export function Section({
 	return (
 		<section className={className ? `ui-section ${className}` : "ui-section"}>
 			{title || extra ? (
-				<Flex align="center" justify="space-between" gap={12} className="ui-section__head">
+				<Flex align="center" justify="space-between" gap={12} wrap className="ui-section__head">
 					<div>
 						{title ? <Text strong>{title}</Text> : null}
 						{description ? (

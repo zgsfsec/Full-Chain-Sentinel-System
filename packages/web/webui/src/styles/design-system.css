@@ -1,0 +1,512 @@
+/* Final presentation layer for every console route and portal. Component
+   tokens in ui/theme.ts define the palette; these rules reconcile legacy page
+   layouts and both Table/ProTable densities without changing their behavior. */
+:is(.ant-app-root, .ant-modal, .ant-drawer, .ant-popover, .ant-dropdown) {
+	--border: var(--ant-color-border-secondary);
+	--border-strong: var(--ant-color-border);
+	--console-border: var(--ant-color-border-secondary);
+	--bg: var(--ant-color-bg-layout);
+	--card: var(--ant-color-bg-container);
+	--raised: var(--ant-color-fill-quaternary);
+	--text: var(--ant-color-text);
+	--text-bright: var(--ant-color-text);
+	--dim: var(--ant-color-text-secondary);
+	--faint: var(--ant-color-text-tertiary);
+	--accent: var(--ant-color-primary);
+	--accent-hover: var(--ant-color-primary-hover);
+	--accent-dim: var(--ant-color-primary-bg);
+	--accent-border: var(--ant-color-primary-border);
+	--accent-ring: var(--ant-color-primary-bg);
+	--danger: var(--ant-color-error);
+	--danger-dim: var(--ant-color-error-bg);
+	--ok: var(--ant-color-success);
+	--ok-dim: var(--ant-color-success-bg);
+	--warn: var(--ant-color-warning);
+	--warn-dim: var(--ant-color-warning-bg);
+	--info: var(--ant-color-primary);
+	--info-dim: var(--ant-color-primary-bg);
+	--blue: var(--ant-color-primary);
+	--sans: var(--ant-font-family);
+	--font-mono: var(--mono);
+	font-family: var(--ant-font-family);
+}
+
+/* First-use terms share the workspace's document surface and brand mark. */
+.consent.consent-gate {
+	background: var(--ant-color-bg-layout);
+	backdrop-filter: none;
+}
+
+.consent-gate .consent-card {
+	border: 1px solid var(--ant-color-border-secondary);
+	border-radius: 10px;
+	box-shadow: var(--ant-box-shadow-tertiary);
+}
+
+.consent-gate .consent-mark {
+	border: 1px solid var(--ant-color-primary-border);
+	border-radius: 8px;
+	background: var(--ant-color-primary-bg);
+	color: var(--ant-color-primary);
+}
+
+/* Page alignment: one reading edge for title, filters, data and footer. */
+.console-shell .ui-page__titles {
+	flex: 1 1 240px;
+	min-width: 0;
+}
+
+.console-shell .ui-page__actions {
+	max-width: 100%;
+	margin-inline-start: auto;
+}
+
+.console-shell .ui-page__actions > .ant-space {
+	max-width: 100%;
+	flex-wrap: wrap;
+}
+
+/* Long endpoints and names remain readable in diagnostic/detail records. */
+.ant-descriptions-bordered .ant-descriptions-item-label {
+	white-space: nowrap;
+}
+
+.ant-descriptions .ant-descriptions-item-content {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.console-shell .about-hero {
+	flex-wrap: wrap;
+	background: var(--ant-color-bg-container);
+	border-radius: 8px;
+}
+
+.console-shell .about-hero__mark {
+	background: var(--ant-color-primary);
+	border-radius: 8px;
+	box-shadow: none;
+}
+
+.console-shell .engine-list__name.ant-btn {
+	height: auto;
+	max-width: 100%;
+	padding-inline: 0;
+	text-align: start;
+	white-space: normal;
+}
+
+.console-shell .engine-list__name.ant-btn > span {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.ant-table-wrapper .assethub-asset-link.ant-btn {
+	max-width: 100%;
+	padding-inline: 0;
+	color: var(--ant-color-text);
+	text-align: start;
+}
+
+.assethub-asset-link.ant-btn > span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.poc-filters {
+	width: 100%;
+	max-width: 100%;
+}
+
+.poc-filters > .ant-space-item {
+	min-width: 0;
+	max-width: 100%;
+}
+
+.console-shell .ui-page__title {
+	overflow-wrap: anywhere;
+}
+
+.console-shell .ui-page__body,
+.console-shell .settings-page__content,
+.console-shell .settings-section__body {
+	gap: 16px;
+}
+
+.console-shell .settings-page__content {
+	max-width: none;
+}
+
+.console-shell .settings-page,
+.console-shell .webfuzz-page,
+.webfuzz-history {
+	--raised: var(--ant-color-fill-quaternary);
+	--text: var(--ant-color-text);
+	--text-bright: var(--ant-color-text);
+	--dim: var(--ant-color-text-secondary);
+	--faint: var(--ant-color-text-tertiary);
+	--accent: var(--ant-color-primary);
+	--accent-hover: var(--ant-color-primary-hover);
+	--accent-dim: var(--ant-color-primary-bg);
+	--accent-border: var(--ant-color-primary-border);
+	--danger: var(--ant-color-error);
+	--ok: var(--ant-color-success);
+	--warn: var(--ant-color-warning);
+	--blue: var(--ant-color-primary);
+}
+
+.console-shell :is(.ui-section, .settings-panel, .settings-tile, .code-intel-panel) {
+	border-color: var(--ant-color-border-secondary);
+	border-radius: 8px;
+	box-shadow: none;
+}
+
+.console-shell :is(.settings-panel .settings-section__head, .webfuzz-panel__head, .engine-workspace__panel-head) {
+	padding: 12px 16px;
+	background: var(--ant-color-fill-quaternary);
+	border-color: var(--ant-color-border-secondary);
+}
+
+.console-shell .settings-panel .settings-section__body {
+	padding: 16px;
+}
+
+.console-shell .settings-panel .ant-pro-table {
+	margin: 0;
+}
+
+.console-shell :is(.settings-section__head, .settings-bar) {
+	flex-wrap: wrap;
+	gap: 12px;
+}
+
+.console-shell :is(.settings-bar__title, .settings-section__title, .settings-field__label) {
+	color: var(--ant-color-text);
+	font-size: 14px;
+}
+
+.console-shell :is(.settings-bar__meta, .settings-section__desc, .settings-note, .settings-field__hint) {
+	color: var(--ant-color-text-secondary);
+	font-size: 13px;
+	line-height: 1.65;
+}
+
+.console-shell .settings-page__icon {
+	background: var(--ant-color-primary-bg);
+	color: var(--ant-color-primary);
+	border-radius: 6px;
+}
+
+:is(.superset-strategy, .enginewiz-card, .proxydlg-card, .rolepicker__option).is-on {
+	border-color: var(--ant-color-primary-border);
+	background: var(--ant-color-primary-bg);
+}
+
+/* Canonical data grid, including drawers, dialogs and floating supervision.
+   Equal small/middle/default geometry is intentional: page authors must not
+   accidentally introduce a second table language by passing size="small".
+   Important padding supersedes legacy app.css's important density rules. */
+.ant-table-wrapper .ant-table {
+	font-family: var(--ant-font-family);
+	font-size: 13px;
+	line-height: 22px;
+	font-variant-numeric: tabular-nums;
+	border: 1px solid var(--ant-color-border-secondary);
+	border-radius: 8px;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > :is(th, td),
+.ant-table-wrapper .ant-table-tbody > tr > td,
+.ant-table-wrapper .ant-table-summary > tr > td {
+	padding: 10px 12px !important;
+	border-inline-end: 0;
+	border-bottom: 1px solid var(--ant-color-border-secondary);
+	font-size: 13px;
+	line-height: 22px;
+	vertical-align: middle;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > :is(th, td) {
+	background: var(--ant-table-header-bg, #fafafa);
+	color: var(--ant-color-text-secondary);
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > th:not(:last-child)::before {
+	background: transparent !important;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr:last-child > td {
+	border-bottom: 0;
+}
+
+/* rc-table measures column widths in an invisible zero-height row. */
+.ant-table-wrapper .ant-table-tbody > tr.ant-table-measure-row > td {
+	padding: 0 !important;
+	border: 0;
+	font-size: 0;
+	line-height: 0;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr > td {
+	text-overflow: ellipsis;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr > td:has(.ant-btn) {
+	white-space: nowrap;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr:is(.is-selected, .project-row-active) > td {
+	background: var(--ant-color-primary-bg);
+}
+
+.ant-table-wrapper .ant-table-tbody > tr:focus-within > td {
+	background: var(--ant-color-primary-bg);
+}
+
+.ant-table-wrapper .ant-table-expanded-row > td {
+	white-space: normal;
+}
+
+.ant-table-wrapper .ant-table-cell :is(.ant-btn, a, .ant-typography) {
+	font-size: 13px;
+}
+
+.ant-table-wrapper .ant-table-cell .ant-btn-link {
+	min-height: 24px;
+	padding-block: 0;
+}
+
+.ant-table-wrapper .ant-table-cell .ant-tag {
+	margin-block: 0;
+	font-size: 12px;
+	line-height: 20px;
+	border-radius: 4px;
+}
+
+.ant-tag {
+	border-radius: 4px;
+}
+
+.plugin-page .chip {
+	height: 22px;
+	border-radius: 4px;
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.plugin-page .chip.ok {
+	border-color: var(--ant-color-success-border);
+}
+
+.plugin-page .chip.bad {
+	border-color: var(--ant-color-error-border);
+}
+
+.ant-table-wrapper .table-mono {
+	color: var(--ant-color-text-secondary);
+	font-size: 12px;
+	line-height: 22px;
+}
+
+.ant-table-wrapper .ant-table-placeholder > td {
+	padding: 32px 16px !important;
+	white-space: normal;
+}
+
+.ant-table-wrapper .ant-table-placeholder :is(.ant-empty, .settings-empty) {
+	margin: 0;
+	padding: 8px 0;
+	line-height: 1.7;
+}
+
+/* ProTable's title can be a complete filter form. Allow it to wrap without
+   squeezing the actions or forcing the page wider than the viewport. */
+.ant-pro-table .ant-pro-card {
+	background: transparent;
+	box-shadow: none;
+}
+
+.ant-pro-table .ant-pro-table-list-toolbar {
+	padding: 0 0 12px;
+}
+
+.ant-pro-table .ant-pro-table-list-toolbar-container {
+	min-height: 32px;
+	padding: 0;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.ant-pro-table .ant-pro-table-list-toolbar-left {
+	flex: 1 1 280px;
+	min-width: 0;
+}
+
+.ant-pro-table .ant-pro-table-list-toolbar-title {
+	max-width: 100%;
+	font-size: 14px;
+	font-weight: 500;
+	white-space: normal;
+}
+
+.ant-pro-table .ant-pro-table-list-toolbar-right {
+	min-width: 0;
+	max-width: 100%;
+	margin-inline-start: auto;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+:is(.assethub-toolbar, .gatehub-toolbar, .vulnhub-toolbar, .apimodel-toolbar, .sva-toolbar, .mcphub-toolbar, .plugin-toolbar) {
+	max-width: 100%;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin-bottom: 0;
+}
+
+.console-shell :is(.assethub-stats, .vulnhub-stats, .projstats) {
+	margin-block: 0;
+}
+
+/* Preset tags use the same semantic palette as status tags. Categorical
+   purple/cyan tags retain their meaning and share the same shape and type. */
+.ant-tag:is(.ant-tag-blue, .ant-tag-geekblue) {
+	--status-text: var(--ant-color-primary);
+	--status-bg: var(--ant-color-primary-bg);
+	--status-border: var(--ant-color-primary-border);
+}
+
+.ant-tag.ant-tag-green {
+	--status-text: var(--ant-color-success);
+	--status-bg: var(--ant-color-success-bg);
+	--status-border: var(--ant-color-success-border);
+}
+
+.ant-tag:is(.ant-tag-gold, .ant-tag-orange) {
+	--status-text: var(--ant-color-warning);
+	--status-bg: var(--ant-color-warning-bg);
+	--status-border: var(--ant-color-warning-border);
+}
+
+.ant-tag:is(.ant-tag-red, .ant-tag-volcano) {
+	--status-text: var(--ant-color-error);
+	--status-bg: var(--ant-color-error-bg);
+	--status-border: var(--ant-color-error-border);
+}
+
+.ant-tag:is(.ant-tag-blue, .ant-tag-geekblue, .ant-tag-green, .ant-tag-gold, .ant-tag-orange, .ant-tag-red, .ant-tag-volcano):is(.ant-tag-filled, .ant-tag-outlined):not(.ant-tag-disabled) {
+	color: var(--status-text);
+	background: var(--status-bg);
+}
+
+.ant-tag:is(.ant-tag-blue, .ant-tag-geekblue, .ant-tag-green, .ant-tag-gold, .ant-tag-orange, .ant-tag-red, .ant-tag-volcano).ant-tag-outlined:not(.ant-tag-disabled) {
+	border-color: var(--status-border);
+}
+
+:is(.ant-pro-table-list-toolbar, .ui-page__actions) :is(.ant-input-affix-wrapper, .ant-input-search, .ant-select) {
+	max-width: 100%;
+}
+
+.ant-table-wrapper .ant-table-pagination.ant-pagination,
+.pluginhub-pager,
+.code-intel-repo-pager {
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-block: 12px 0 !important;
+	padding-block: 12px 0;
+	border-top: 1px solid var(--ant-color-border-secondary);
+	font-size: 13px;
+}
+
+.ant-table-wrapper .ant-pagination-total-text {
+	margin-inline-end: auto;
+	color: var(--ant-color-text-secondary);
+}
+
+/* Generated Markdown is also a table surface, but keeps natural text wraps. */
+.markdown-body table {
+	border-collapse: separate;
+	border-spacing: 0;
+	font: 13px/22px var(--ant-font-family);
+	border: 1px solid var(--ant-color-border-secondary);
+	border-radius: 8px;
+}
+
+.markdown-body :is(th, td) {
+	padding: 10px 12px;
+	border: 0;
+	border-bottom: 1px solid var(--ant-color-border-secondary);
+	text-align: start;
+}
+
+.markdown-body th {
+	background: var(--ant-table-header-bg, #fafafa);
+	color: var(--ant-color-text-secondary);
+	font-weight: 600;
+}
+
+:is(.ant-app-root, .ant-modal, .ant-drawer, .ant-popover) :is(button, a, summary, [role="button"]):focus-visible {
+	outline: 2px solid var(--ant-color-primary);
+	outline-offset: 2px;
+}
+
+@media (max-width: 767px) {
+	.modelhub-section-nav .ant-segmented-item-label {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 36px;
+		line-height: 18px;
+		white-space: normal;
+	}
+
+	.console-shell .ui-page__actions {
+		width: 100%;
+		margin-inline-start: 0;
+	}
+
+	.console-shell .settings-section__extra {
+		max-width: 100%;
+		flex: 0 1 auto;
+	}
+
+	.ant-pro-table .ant-pro-table-list-toolbar-left,
+	.ant-pro-table .ant-pro-table-list-toolbar-right {
+		flex-basis: 100%;
+		margin-inline-start: 0;
+	}
+
+	.ant-table-wrapper .ant-pagination-total-text {
+		flex-basis: 100%;
+	}
+
+	.console-shell :is(.assethub-toolbar__search, .vulnhub-toolbar__search, .gatehub-search, .mitm-filters .ant-input-search) {
+		width: 100%;
+		max-width: 100%;
+	}
+
+	.poc-filters > .ant-space-item:first-child {
+		flex-basis: 100%;
+	}
+
+	.poc-filters :is(.poc-filters__search, .poc-filters__tag) {
+		max-width: 100%;
+	}
+
+	.console-shell .about-descriptions .ant-descriptions-item-label {
+		width: 96px;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:is(.ant-app-root, .ant-modal-root, .ant-drawer, .ant-popover) *,
+	:is(.ant-app-root, .ant-modal-root, .ant-drawer, .ant-popover) *::before,
+	:is(.ant-app-root, .ant-modal-root, .ant-drawer, .ant-popover) *::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}

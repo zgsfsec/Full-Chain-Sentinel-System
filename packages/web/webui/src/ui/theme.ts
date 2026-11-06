@@ -1,10 +1,9 @@
 /**
  * The console's Ant Design theme.
  *
- * One direction: a dark navigation rail beside a light, data-dense work area.
- * The sider is intentionally the only dark surface, so the content reads as a
- * document and the navigation reads as chrome. Colors are set here and nowhere
- * else; page code must not hard-code hex values.
+ * White navigation and document surfaces with charcoal actions. Neutral
+ * structure keeps color reserved for meaningful status and severity signals.
+ * Page code reuses these tokens rather than hard-coding its own palette.
  *
  * `cssVar` is on so custom CSS (chat transcript, terminal, plugin frames) can
  * reuse the same tokens instead of duplicating the palette.
@@ -14,25 +13,24 @@ import { theme, type ThemeConfig } from "antd";
 
 /** Seed colors shared by the theme and the few hand-written surfaces. */
 export const CONSOLE_COLORS = {
-	sider: "#0b1322",
-	siderDeep: "#080f1c",
-	primary: "#2563eb",
-	primaryHover: "#3b82f6",
-	primaryActive: "#1d4ed8",
-	success: "#16a34a",
-	warning: "#d97706",
-	danger: "#dc2626",
-	contentBg: "#f4f6f8",
+	sider: "#ffffff",
+	siderDeep: "#fafafa",
+	primary: "#18181b",
+	primaryHover: "#3f3f46",
+	primaryActive: "#09090b",
+	success: "#24836b",
+	warning: "#946200",
+	danger: "#c3444c",
+	contentBg: "#fafafa",
 	card: "#ffffff",
-	border: "#e4e7ec",
-	borderSoft: "#eef1f5",
-	text: "#101828",
-	textSecondary: "#475467",
-	textTertiary: "#667085",
+	border: "#d4d4d8",
+	borderSoft: "#e4e4e7",
+	text: "#18181b",
+	textSecondary: "#52525b",
+	textTertiary: "#71717a",
 } as const;
 
-const FONT_FAMILY =
-	'-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif';
+const FONT_FAMILY = '"Avenir Next", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif';
 
 export const consoleTheme: ThemeConfig = {
 	algorithm: theme.defaultAlgorithm,
@@ -42,11 +40,31 @@ export const consoleTheme: ThemeConfig = {
 		colorPrimary: CONSOLE_COLORS.primary,
 		colorPrimaryHover: CONSOLE_COLORS.primaryHover,
 		colorPrimaryActive: CONSOLE_COLORS.primaryActive,
+		colorPrimaryBg: "#f4f4f5",
+		colorPrimaryBgHover: "#e4e4e7",
+		colorPrimaryBorder: "#a1a1aa",
+		colorPrimaryText: CONSOLE_COLORS.primary,
 		colorInfo: CONSOLE_COLORS.primary,
+		colorInfoBg: "#f4f4f5",
+		colorInfoBorder: "#d4d4d8",
+		colorInfoText: CONSOLE_COLORS.primary,
 		colorLink: CONSOLE_COLORS.primary,
+		colorLinkHover: CONSOLE_COLORS.primaryHover,
+		colorLinkActive: CONSOLE_COLORS.primaryActive,
+		controlItemBgActive: "#f0f0f2",
+		controlItemBgActiveHover: "#e4e4e7",
 		colorSuccess: CONSOLE_COLORS.success,
+		colorSuccessBg: "#edf8f3",
+		colorSuccessBorder: "#c1dfd2",
+		colorSuccessText: CONSOLE_COLORS.success,
 		colorWarning: CONSOLE_COLORS.warning,
+		colorWarningBg: "#fff7e5",
+		colorWarningBorder: "#ead6a9",
+		colorWarningText: CONSOLE_COLORS.warning,
 		colorError: CONSOLE_COLORS.danger,
+		colorErrorBg: "#fff1f2",
+		colorErrorBorder: "#edc5ca",
+		colorErrorText: CONSOLE_COLORS.danger,
 		colorErrorHover: "#ef4444",
 		colorBgLayout: CONSOLE_COLORS.contentBg,
 		colorBgContainer: CONSOLE_COLORS.card,
@@ -57,20 +75,20 @@ export const consoleTheme: ThemeConfig = {
 		colorText: CONSOLE_COLORS.text,
 		colorTextSecondary: CONSOLE_COLORS.textSecondary,
 		colorTextTertiary: CONSOLE_COLORS.textTertiary,
-		colorTextQuaternary: "#98a2b3",
-		colorFillTertiary: "#f2f4f7",
-		colorFillQuaternary: "#f8fafc",
-		borderRadius: 8,
-		borderRadiusLG: 12,
+		colorTextQuaternary: "#a1a1aa",
+		colorFillTertiary: "#f0f0f2",
+		colorFillQuaternary: "#fafafa",
+		borderRadius: 6,
+		borderRadiusLG: 10,
 		borderRadiusSM: 6,
 		borderRadiusXS: 4,
-		controlHeight: 30,
-		controlHeightSM: 24,
-		controlHeightLG: 36,
+		controlHeight: 32,
+		controlHeightSM: 26,
+		controlHeightLG: 40,
 		fontFamily: FONT_FAMILY,
-		fontSize: 13,
+		fontSize: 14,
 		fontSizeSM: 12,
-		lineHeight: 1.5,
+		lineHeight: 1.6,
 		boxShadow: "0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06)",
 		boxShadowSecondary: "0 12px 32px rgba(16, 24, 40, 0.12), 0 4px 12px rgba(16, 24, 40, 0.06)",
 		boxShadowTertiary: "0 1px 2px rgba(16, 24, 40, 0.04)",
@@ -90,7 +108,10 @@ export const consoleTheme: ThemeConfig = {
 			headerPadding: "0 14px",
 			siderBg: CONSOLE_COLORS.sider,
 			triggerBg: CONSOLE_COLORS.siderDeep,
-			triggerColor: "rgba(226, 232, 240, 0.72)",
+			triggerColor: CONSOLE_COLORS.textSecondary,
+			lightSiderBg: CONSOLE_COLORS.sider,
+			lightTriggerBg: CONSOLE_COLORS.siderDeep,
+			lightTriggerColor: CONSOLE_COLORS.textSecondary,
 		},
 		Menu: {
 			itemBorderRadius: 8,
@@ -99,28 +120,35 @@ export const consoleTheme: ThemeConfig = {
 			itemMarginBlock: 1,
 			iconSize: 16,
 			collapsedIconSize: 18,
-			groupTitleColor: "rgba(148, 163, 184, 0.8)",
+			groupTitleColor: CONSOLE_COLORS.textTertiary,
 			groupTitleFontSize: 10.5,
-			darkItemBg: "transparent",
-			darkSubMenuItemBg: "transparent",
-			darkItemColor: "rgba(226, 232, 240, 0.72)",
-			darkItemHoverBg: "rgba(148, 163, 184, 0.1)",
-			darkItemHoverColor: "#ffffff",
-			darkItemSelectedBg: "rgba(59, 130, 246, 0.2)",
-			darkItemSelectedColor: "#ffffff",
-			darkItemDisabledColor: "rgba(148, 163, 184, 0.35)",
-			darkPopupBg: CONSOLE_COLORS.siderDeep,
+			itemBg: "transparent",
+			subMenuItemBg: "transparent",
+			itemColor: CONSOLE_COLORS.textSecondary,
+			itemHoverBg: "#f4f4f5",
+			itemHoverColor: CONSOLE_COLORS.text,
+			itemSelectedBg: "#f0f0f2",
+			itemSelectedColor: CONSOLE_COLORS.text,
+			itemDisabledColor: "#a1a1aa",
+			popupBg: CONSOLE_COLORS.card,
 		},
 		Table: {
-			headerBg: "#f8fafc",
+			headerBg: "#fafafa",
 			headerColor: CONSOLE_COLORS.textSecondary,
 			headerSplitColor: "transparent",
 			borderColor: CONSOLE_COLORS.borderSoft,
-			rowHoverBg: "#f8faff",
-			rowSelectedBg: "#eff4ff",
-			rowSelectedHoverBg: "#e3edff",
-			cellPaddingBlock: 4,
-			cellPaddingInline: 10,
+			rowHoverBg: "#fafafa",
+			rowSelectedBg: "#f4f4f5",
+			rowSelectedHoverBg: "#e4e4e7",
+			cellFontSize: 13,
+			cellFontSizeMD: 13,
+			cellFontSizeSM: 13,
+			cellPaddingBlock: 10,
+			cellPaddingBlockMD: 10,
+			cellPaddingBlockSM: 10,
+			cellPaddingInline: 12,
+			cellPaddingInlineMD: 12,
+			cellPaddingInlineSM: 12,
 			headerBorderRadius: 8,
 			footerBg: "transparent",
 		},
@@ -134,8 +162,8 @@ export const consoleTheme: ThemeConfig = {
 		Button: {
 			fontWeight: 500,
 			defaultShadow: "none",
-			primaryShadow: "0 1px 2px rgba(37, 99, 235, 0.24)",
-			dangerShadow: "0 1px 2px rgba(220, 38, 38, 0.2)",
+			primaryShadow: "none",
+			dangerShadow: "none",
 			paddingInline: 12,
 		},
 		Tabs: {
@@ -149,15 +177,15 @@ export const consoleTheme: ThemeConfig = {
 			contentBg: CONSOLE_COLORS.card,
 		},
 		Segmented: {
-			trackBg: "#f2f4f7",
+			trackBg: CONSOLE_COLORS.contentBg,
 			itemSelectedBg: CONSOLE_COLORS.card,
 		},
 		Descriptions: {
-			labelBg: "#f8fafc",
+			labelBg: "#fafafa",
 			titleMarginBottom: 8,
 		},
 		Form: {
-			labelColor: "#344054",
+			labelColor: CONSOLE_COLORS.textSecondary,
 			labelFontSize: 13,
 			itemMarginBottom: 12,
 			verticalLabelPadding: "0 0 6px",
@@ -167,10 +195,11 @@ export const consoleTheme: ThemeConfig = {
 			paddingInline: 10,
 		},
 		Select: {
-			optionSelectedBg: "#eff4ff",
+			optionSelectedBg: "#f4f4f5",
 		},
 		Tag: {
-			defaultBg: "#f2f4f7",
+			fontSizeSM: 12,
+			defaultBg: CONSOLE_COLORS.contentBg,
 			defaultColor: CONSOLE_COLORS.textSecondary,
 		},
 		Divider: {
@@ -180,28 +209,28 @@ export const consoleTheme: ThemeConfig = {
 			paddingLG: 16,
 		},
 		Tooltip: {
-			colorBgSpotlight: "#101828",
+			colorBgSpotlight: CONSOLE_COLORS.primary,
 		},
 		Badge: {
-			textFontSizeSM: 11,
+			textFontSizeSM: 12,
 		},
 	},
 };
 
-/** Scoped to the sidebar so its inputs and popup menus share the dark rail. */
+/** Scoped to navigation so menus, conversation filters and popups stay light. */
 export const consoleSidebarTheme: ThemeConfig = {
-	algorithm: theme.darkAlgorithm,
+	algorithm: theme.defaultAlgorithm,
 	cssVar: { key: "sentinel-sidebar" },
 	token: {
-		colorBgContainer: "#101b2e",
+		colorBgContainer: CONSOLE_COLORS.card,
 		colorBgElevated: CONSOLE_COLORS.sider,
-		colorBorder: "#29364a",
-		colorText: "#e2e8f0",
-		colorTextSecondary: "#a5b4c9",
-		colorTextTertiary: "#94a3b8",
-		colorTextPlaceholder: "#94a3b8",
-		colorBgTextHover: "rgba(148, 163, 184, 0.1)",
-		controlItemBgActive: "rgba(59, 130, 246, 0.2)",
+		colorBorder: CONSOLE_COLORS.border,
+		colorText: CONSOLE_COLORS.text,
+		colorTextSecondary: CONSOLE_COLORS.textSecondary,
+		colorTextTertiary: CONSOLE_COLORS.textTertiary,
+		colorTextPlaceholder: CONSOLE_COLORS.textTertiary,
+		colorBgTextHover: "#f4f4f5",
+		controlItemBgActive: "#f0f0f2",
 	},
 	components: {
 		Menu: {
@@ -211,30 +240,30 @@ export const consoleSidebarTheme: ThemeConfig = {
 			itemPaddingInline: 16,
 			itemMarginBlock: 1,
 			groupTitleFontSize: 11,
-			groupTitleColor: "#8394ac",
-			darkItemColor: "#cbd5e1",
-			darkItemHoverColor: "#ffffff",
-			darkItemSelectedColor: "#f8fafc",
-			darkItemSelectedBg: "#233c5e",
+			groupTitleColor: CONSOLE_COLORS.textTertiary,
+			itemColor: CONSOLE_COLORS.textSecondary,
+			itemHoverColor: CONSOLE_COLORS.text,
+			itemSelectedColor: CONSOLE_COLORS.text,
+			itemSelectedBg: "#f0f0f2",
 		},
 		Segmented: {
-			trackBg: "rgba(148, 163, 184, 0.08)",
-			itemSelectedBg: "rgba(59, 130, 246, 0.2)",
+			trackBg: "#f4f4f5",
+			itemSelectedBg: CONSOLE_COLORS.card,
 		},
-		Select: { optionSelectedBg: "rgba(59, 130, 246, 0.2)" },
+		Select: { optionSelectedBg: "#f4f4f5" },
 	},
 };
 
-/** Login controls use the same dark palette over the animated backdrop. */
+/** Login forms share the workspace's white surface and charcoal actions. */
 export const consoleAuthTheme: ThemeConfig = {
 	...consoleSidebarTheme,
 	cssVar: { key: "sentinel-auth" },
 	token: {
 		...consoleSidebarTheme.token,
-		colorBgContainerDisabled: "#182338",
-		colorTextDisabled: "#8292aa",
+		colorBgContainerDisabled: "#f4f4f5",
+		colorTextDisabled: "#a1a1aa",
 	},
 	components: {
-		Form: { labelColor: "#cbd5e1" },
+		Form: { labelColor: CONSOLE_COLORS.textSecondary },
 	},
 };

@@ -1,0 +1,282 @@
+/* Scoped to the console: login, terminals and embedded plugin pages own their surfaces. */
+.console-shell {
+	font-family: var(--ant-font-family);
+	color: var(--ant-color-text);
+}
+
+.console-shell .console-main {
+	background: var(--ant-color-bg-layout);
+}
+
+.console-shell .console-sider {
+	box-shadow: inset -1px 0 0 var(--ant-color-border-secondary);
+}
+
+:is(.console-shell, .console-drawer) .console-brand__title {
+	color: var(--ant-color-text);
+}
+
+.console-shell .console-brand__collapse {
+	color: var(--ant-color-text-secondary) !important;
+}
+
+.console-shell .console-brand__collapse:hover {
+	background: var(--ant-color-fill-tertiary) !important;
+	color: var(--ant-color-text) !important;
+}
+
+:is(.console-shell, .console-drawer) .console-sider-footer {
+	border-top-color: var(--ant-color-border-secondary);
+}
+
+:is(.console-shell, .console-drawer) .console-sider-footer__row {
+	color: var(--ant-color-text-secondary);
+}
+
+:is(.console-shell, .console-drawer) .console-sider-footer__version {
+	color: var(--ant-color-text-tertiary);
+	opacity: 1;
+}
+
+.console-shell .console-content {
+	padding: 20px 24px 24px;
+}
+
+.console-shell .console-header {
+	padding-inline: 24px !important;
+}
+
+.console-shell .console-header__page,
+.console-shell .project-switcher__name {
+	color: var(--ant-color-text);
+}
+
+.console-shell .console-header__conn,
+.console-shell .console-account__name {
+	color: var(--ant-color-text-secondary);
+}
+
+.console-shell .console-account__avatar {
+	background: var(--ant-color-primary-bg);
+	color: var(--ant-color-primary);
+	border-radius: 6px;
+}
+
+.console-shell .project-switcher {
+	max-width: 100%;
+	background: var(--ant-color-fill-quaternary);
+	border: 1px solid var(--ant-color-border-secondary);
+}
+
+.console-shell .project-switcher__inner {
+	min-width: 0;
+}
+
+.console-shell .console-brand,
+.console-drawer .console-drawer__brand {
+	gap: 12px;
+	height: 72px;
+	padding-inline: 20px;
+}
+
+.console-shell .console-brand__mark,
+.console-drawer .console-brand__mark {
+	width: 30px;
+	height: 34px;
+	background: transparent;
+	border-radius: 0;
+	box-shadow: none;
+	color: var(--ant-color-text);
+}
+
+.console-shell .console-brand__mark > svg,
+.console-drawer .console-brand__mark > svg {
+	width: 28px;
+	height: 28px;
+}
+
+.console-shell .ant-layout-sider-collapsed .console-brand {
+	justify-content: center;
+	padding-inline: 0;
+}
+
+.console-shell .console-brand__title,
+.console-drawer .console-brand__title {
+	min-width: 0;
+	font-size: 16px;
+	line-height: 1.35;
+	letter-spacing: 0.02em;
+	white-space: normal;
+}
+
+.console-shell .console-page > .ui-page:not(.dashboard) {
+	padding: 20px;
+	border: 1px solid var(--ant-color-border-secondary);
+	border-radius: 10px;
+}
+
+.console-shell .ui-page__head {
+	padding-bottom: 16px;
+}
+
+.console-shell .ui-page__title {
+	font-size: 21px !important;
+	letter-spacing: -0.025em;
+}
+
+.console-shell .ui-page__desc {
+	max-width: 72ch;
+	margin-top: 6px;
+	font-size: 13px;
+	line-height: 1.7;
+}
+
+.console-shell .ui-page__body {
+	padding-top: 16px;
+}
+
+.console-shell .chat-main > .page-card {
+	padding: 18px 20px 14px;
+	border: 1px solid var(--ant-color-border-secondary);
+	border-radius: 10px;
+}
+
+.console-shell .chat-head {
+	padding-bottom: 12px;
+}
+
+.console-shell .chat-head__name {
+	color: var(--ant-color-text);
+	font-size: 18px;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+.console-shell .chat-toolbar {
+	gap: 8px 4px;
+	padding-bottom: 12px;
+}
+
+.console-shell .chat-empty {
+	margin-block: clamp(32px, 10vh, 100px);
+	max-width: 56ch;
+	line-height: 1.7;
+}
+
+.console-shell .chat-empty__hint {
+	margin-top: 8px;
+	color: var(--ant-color-text-secondary);
+}
+
+.console-shell .composerbox__box {
+	border-color: var(--ant-color-border);
+	border-radius: 10px;
+}
+
+.console-shell .composerbox__box:focus-within {
+	border-color: var(--ant-color-primary);
+	box-shadow: 0 0 0 3px var(--ant-color-primary-bg);
+}
+
+.console-shell .composerbox__input {
+	padding: 14px 16px 8px;
+	font-size: 14px;
+	line-height: 1.7;
+}
+
+.console-shell .composerbox__actions {
+	flex-wrap: wrap;
+	padding: 8px 12px 12px;
+}
+
+.console-shell .composerbox__actions > .ant-btn-primary {
+	margin-inline-start: auto;
+}
+
+.console-skip-link {
+	position: fixed;
+	top: 8px;
+	left: 8px;
+	z-index: 1100;
+	padding: 10px 16px;
+	transform: translateY(calc(-100% - 16px));
+	border: 2px solid var(--ant-color-primary);
+	border-radius: 6px;
+	background: var(--ant-color-bg-container);
+	color: var(--ant-color-primary);
+}
+
+.console-skip-link:focus {
+	transform: translateY(0);
+}
+
+.console-shell :is(button, a, [role="button"]):focus-visible,
+.console-drawer :is(button, a, [role="button"]):focus-visible {
+	outline: 2px solid var(--ant-color-primary);
+	outline-offset: 3px;
+}
+
+@media (max-width: 1100px) {
+	.console-shell .console-content {
+		padding: 16px;
+	}
+}
+
+@media (max-width: 767px) {
+	.console-shell .console-content {
+		padding: 12px;
+	}
+
+	.console-shell .console-header {
+		padding-inline: 10px !important;
+		gap: 4px;
+	}
+
+	.console-shell .console-header__left {
+		gap: 4px;
+	}
+
+	.console-shell .project-switcher__name {
+		max-width: 28vw;
+	}
+
+	.console-shell .console-page > .ui-page:not(.dashboard),
+	.console-shell .chat-main > .page-card {
+		padding: 14px;
+	}
+
+	.console-shell .chat-toolbar__right {
+		flex-wrap: wrap;
+	}
+
+	.console-shell .chat-toolbar__group {
+		flex-wrap: wrap;
+		max-width: 100%;
+	}
+
+	.console-shell .chat-main > .page-card {
+		overflow-y: auto;
+	}
+}
+
+@media (max-width: 575px) {
+	.console-shell .chat-toolbar .ant-segmented {
+		font-size: 12px;
+	}
+
+	.console-shell .chat-toolbar .ant-segmented-item-label {
+		padding-inline: 6px;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.console-shell *,
+	.console-shell *::before,
+	.console-shell *::after,
+	.console-drawer * {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}

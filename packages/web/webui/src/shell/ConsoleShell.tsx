@@ -34,7 +34,7 @@ import {
 	Typography,
 } from "antd";
 import type { MenuProps } from "antd";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { CONSOLE_VERSION, PROJECT_RELEASES_URL, PROJECT_REPOSITORY } from "../branding.ts";
 import { SessionPanel, type SessionPanelProps } from "../chat/SessionPanel.tsx";
 import { SentinelMark } from "../components/icons.tsx";
@@ -42,7 +42,7 @@ import { useVersionCheck } from "../components/VersionCheck.tsx";
 import { getLanguage, t } from "../i18n.ts";
 import type { SentinelMode, SentinelPageId, SentinelProjectInfo, SentinelProxyConfigView } from "../types.ts";
 import { SENTINEL_MODE_LABELS } from "../types.ts";
-import { consoleSidebarTheme } from "../ui/theme.ts";
+import { CONSOLE_COLORS, consoleSidebarTheme } from "../ui/theme.ts";
 import {
 	NAV_GROUPS,
 	PAGE_TITLES,
@@ -53,9 +53,14 @@ import {
 } from "./navigation.tsx";
 import { ProjectSwitcher } from "./ProjectSwitcher.tsx";
 import "./sidebar.css";
+import "./console-design.css";
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
+const CONSOLE_SURFACE_STYLE = {
+	"--console-sider": CONSOLE_COLORS.sider,
+	"--console-border": CONSOLE_COLORS.border,
+} as CSSProperties;
 
 export interface ConsoleShellProps {
 	page: SentinelPageId;
@@ -213,7 +218,7 @@ export function ConsoleShell({
 		<Menu
 			className="console-menu"
 			mode="inline"
-			theme="dark"
+			theme="light"
 			items={menuItems}
 			selectedKeys={[page]}
 			defaultOpenKeys={page.startsWith("settings.") ? ["settings"] : []}
@@ -251,8 +256,19 @@ export function ConsoleShell({
 				{showText ? <span className="console-sider-footer__text">{connected ? t("已连接") : t("已断开")}</span> : null}
 				{showText ? <span className="console-sider-footer__version">v{CONSOLE_VERSION}</span> : null}
 				{update.result?.updateAvailable ? (
-					<Tooltip title={`${getLanguage() === "en" ? "New version" : "发现新版本"} v${update.result.latestVersion} · ${getLanguage() === "en" ? "Open releases to update manually" : "点击查看发布页，手动更新"}`}>
-						<Button className="console-version-update" type="text" size="small" icon={<CloudDownloadOutlined />} aria-label={getLanguage() === "en" ? "New version available" : "发现新版本"} href={PROJECT_RELEASES_URL} target="_blank" rel="noopener noreferrer" />
+					<Tooltip
+						title={`${getLanguage() === "en" ? "New version" : "发现新版本"} v${update.result.latestVersion} · ${getLanguage() === "en" ? "Open releases to update manually" : "点击查看发布页，手动更新"}`}
+					>
+						<Button
+							className="console-version-update"
+							type="text"
+							size="small"
+							icon={<CloudDownloadOutlined />}
+							aria-label={getLanguage() === "en" ? "New version available" : "发现新版本"}
+							href={PROJECT_RELEASES_URL}
+							target="_blank"
+							rel="noopener noreferrer"
+						/>
 					</Tooltip>
 				) : null}
 			</div>
@@ -372,7 +388,10 @@ export function ConsoleShell({
 	);
 
 	return (
-		<Layout className="console-shell">
+		<Layout className="console-shell" style={CONSOLE_SURFACE_STYLE}>
+			<a className="console-skip-link" href="#console-main-content">
+				{getLanguage() === "en" ? "Skip to content" : "跳到主内容"}
+			</a>
 			{compact ? (
 				<Drawer
 					open={drawerOpen}
@@ -381,6 +400,7 @@ export function ConsoleShell({
 					size={264}
 					closable={false}
 					rootClassName="console-drawer"
+					rootStyle={CONSOLE_SURFACE_STYLE}
 					styles={{ body: { padding: 0, display: "flex", flexDirection: "column" } }}
 				>
 					<div className="console-drawer__inner">
@@ -402,7 +422,7 @@ export function ConsoleShell({
 					collapsed={collapsed}
 					trigger={null}
 					collapsible
-					theme="dark"
+					theme="light"
 				>
 					<div className="console-sider__inner">
 						{brand(!collapsed)}
@@ -414,7 +434,7 @@ export function ConsoleShell({
 
 			<Layout className="console-main">
 				{header}
-				<Content className="console-content" inert={compact && drawerOpen}>
+				<Content id="console-main-content" className="console-content" tabIndex={-1} inert={compact && drawerOpen}>
 					<div className="console-page">{children}</div>
 				</Content>
 			</Layout>
