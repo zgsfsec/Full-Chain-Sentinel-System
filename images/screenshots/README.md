@@ -6,6 +6,7 @@
 
 - 截图日期：2026-11-06（Asia/Shanghai）。
 - 控制台版本：2.3.0；源码基准：`c5a9b37c87eac3576e73c82b78a9cd4fe803536d`，采用当前黑白界面与统一表格样式。
+- `setup.png` 在 `af211ff` 重新截取，展示浅色登录与初始化布局；该图片的源码基准单独记录在清单对应条目的 `sourceCommit` 中。
 - 前端：仓库 `packages/web/webui` 的完整 Vite 应用，入口为 `src/main.tsx`；没有单独拼装组件、替换组件、修改 DOM 或拦截并伪造 API。
 - 后端：`node packages/web/src/index.ts --host 127.0.0.1 --port 17777 --no-gate --no-tls`，配置目录与项目目录通过 `SENTINEL_CODING_AGENT_DIR`、`SENTINEL_PROJECTS_DIR` 指向独立临时目录。主系统原有数据未用于截图。
 - 前端监听本机 `14187`，通过临时 Vite 配置将 `/api`、`/ws` 代理到 `17777`。这是源码开发服务，没有修改仓库运行配置或重新生成内嵌资源；原有 `7777` 服务未用于截图。

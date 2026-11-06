@@ -213,7 +213,8 @@
       "navigation": "首次访问 → 创建管理员账号",
       "width": 1600,
       "height": 1000,
-      "sha256": "d64f6581d9ad4c006a0be834a4b8c06d06bb0404eed56dced6a2e1d309db7c2f"
+      "sha256": "c95a9cfc8adce8d9ed7d75b8575c86e11b5233999d8ae2efc453b0b277ff0c4d",
+      "sourceCommit": "af211ff97496973c66aa0032105b2fe62edf17ec"
     },
     {
       "file": "supervision.png",
