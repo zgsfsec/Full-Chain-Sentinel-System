@@ -3,7 +3,7 @@
  *
  * Shown instead of the console until the operator authenticates: on a fresh
  * install it is the account-creation form (setup), afterwards the login form.
- * Places the form over the animated skyline using the console's dark palette.
+ * A white entry surface with a contained brand illustration and a focused form.
  */
 import { GithubOutlined } from "@ant-design/icons";
 import { Alert, Button, Checkbox, ConfigProvider, Form, Input, Typography } from "antd";
@@ -74,9 +74,6 @@ export function AuthGate({ mode, onDone }: { mode: "setup" | "login"; onDone: ()
 
 	return (
 		<div className="auth-screen">
-			<div className="auth-screen__visual" aria-hidden="true">
-				<LoginBackdrop />
-			</div>
 			<header className="auth-screen__header">
 				<div className="auth-screen__brand">
 					<span className="auth-screen__mark">
@@ -89,9 +86,12 @@ export function AuthGate({ mode, onDone }: { mode: "setup" | "login"; onDone: ()
 			<ConfigProvider theme={consoleAuthTheme}>
 				<main className="auth-screen__main">
 					<section className="auth-screen__intro" aria-label={PROJECT_NAME}>
-						<span className="auth-screen__eyebrow">FULL CHAIN SENTINEL</span>
+						<span className="auth-screen__eyebrow">Full Chain Sentinel</span>
 						<h2>{PROJECT_NAME}</h2>
 						<p>{t("授权渗透测试工作台")}</p>
+						<div className="auth-screen__visual" aria-hidden="true">
+							<LoginBackdrop />
+						</div>
 						<footer className="auth-screen__footer">
 							<Text type="secondary">v{CONSOLE_VERSION}</Text>
 							<span className="auth-screen__links">
