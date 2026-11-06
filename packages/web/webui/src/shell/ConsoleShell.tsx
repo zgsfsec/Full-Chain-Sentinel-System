@@ -151,7 +151,7 @@ export function ConsoleShell({
 			);
 		}
 		const count = entry.page === "chat" ? pendingApprovals : entry.page === "vulns" ? pendingVulns : 0;
-		return count > 0 ? <Badge count={count > 9 ? "9+" : count} size="small" /> : null;
+		return count > 0 ? <Badge count={count} overflowCount={count} size="small" /> : null;
 	};
 
 	const menuItems: MenuProps["items"] = NAV_GROUPS.map((group) => ({
