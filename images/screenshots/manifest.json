@@ -1,7 +1,7 @@
 {
-  "version": "2.2.13",
-  "sourceCommit": "31f87a37e1cf336271a557969b45ad7da6c5785b",
-  "capturedOn": "2026-11-05",
+  "version": "2.3.0",
+  "sourceCommit": "c5a9b37c87eac3576e73c82b78a9cd4fe803536d",
+  "capturedOn": "2026-11-06",
   "timezone": "Asia/Shanghai",
   "locale": "zh-CN",
   "images": [
@@ -10,238 +10,238 @@
       "navigation": "资产与工具 → 安卓设备",
       "width": 1600,
       "height": 1000,
-      "sha256": "a79642e4bf3c22178a096c18a7af5778bf7010529dae70264045e4b809794ef1"
+      "sha256": "75e9cc932356915a599a2cebc68cf9847c8417f770236ce24b1e55339df8b9bf"
     },
     {
       "file": "api-modeling.png",
       "navigation": "资产与工具 → 业务建模",
       "width": 1600,
       "height": 1000,
-      "sha256": "19970afe1abbc147981ea6415920a6433e6f969ced54e9dd7e6ec1a0533681a5"
+      "sha256": "80eb55d89f0367869805f639e45cc4533876d4ac46bca5284ec5a6f2413c2b70"
     },
     {
       "file": "approvals.png",
       "navigation": "执行与审计 → 审批",
       "width": 1600,
       "height": 1000,
-      "sha256": "3e44ddef7ae224a9a94c9bc78ce2337d4fa8b5b4274a15580036f4a26260d68d"
+      "sha256": "bb57dc9aaa56c5b4440d63008115f6585ad041ed28378e577163ebc3d8dff82a"
     },
     {
       "file": "asset-discovery.png",
       "navigation": "设置 → 资产测绘",
       "width": 1600,
       "height": 1000,
-      "sha256": "6c80f666d317419e303771544952d3a0ae9fc564881c30d337e7cfeb0d961991"
+      "sha256": "638d58dc8414c50195d6ca05d7049bce6ecaa4095669549d95d90680fbb87d36"
     },
     {
       "file": "assets.png",
       "navigation": "资产与工具 → 资产库",
       "width": 1600,
       "height": 1000,
-      "sha256": "edb4110e0c401b942cdd5f4937859c8beccb96240c34d5d5b2e3f7e1c2eea840"
+      "sha256": "5bc2ac10ba71c875d4910ff6c5238f55da83bf7be1d2189b23a118111d95768d"
     },
     {
       "file": "chat.png",
       "navigation": "工作台 → 对话",
       "width": 1600,
       "height": 1000,
-      "sha256": "9b904f7180c486921cb6bbdbce261bb1cd30c89bea9013ce9c4c8c49ae9bdcff"
+      "sha256": "265f3c9a465f6d95aca8d35f19fcb95dac0a80153f1b7e83d3a8e5f985f7b71c"
     },
     {
       "file": "code-intel-create.png",
       "navigation": "情报 → 开源情报 → 新增监控",
       "width": 1600,
-      "height": 1200,
-      "sha256": "7647d9c0be4141ffa676fe37e9439158189eb2b5423b816ca66a30c0c17ab0f9"
+      "height": 1400,
+      "sha256": "2274383713f2844eb12ee505c4651c7729248686d409e584b5358410e21b1935"
     },
     {
       "file": "code-intel.png",
       "navigation": "情报 → 开源情报",
       "width": 1600,
       "height": 1000,
-      "sha256": "2699896b4ee616df65d90a306d25247bfc251ef1aefdea9aa3ad6d594ccd45c2"
+      "sha256": "bbd04d0c1d4cd2c7310a6b4a5d5f5468f1cb756ad46c2e9a41c4382ce04dba83"
     },
     {
       "file": "consent.png",
       "navigation": "首次访问 → 授权与风险承诺",
       "width": 1600,
       "height": 1000,
-      "sha256": "e1dd7312c9acb1e3d328d12454244524a94d4ac098380b62493dd6e3aa7e5e1e"
+      "sha256": "f16db19da321af0803b55156055508fb2a065908336652fb7417cd68cdecf61c"
     },
     {
       "file": "dashboard.png",
       "navigation": "工作台 → 项目概览",
       "width": 1600,
       "height": 1000,
-      "sha256": "48c71240558f729234785cbd3e17551a1dff5ccb7e834b0e89a2b3d9d2a88dd6"
+      "sha256": "5bbb95ccfb9c7aac0457ecbd904abab0dd2a3103111068ba412c3a03e1773a7e"
     },
     {
       "file": "engagement-create.png",
       "navigation": "执行与审计 → 工程 → 新建工程",
       "width": 1600,
       "height": 1000,
-      "sha256": "28b5ddab3a17fb583679012da07571f964f1d10c6948faedf7b44db3b120cf9a"
+      "sha256": "11eeb20d37281131017b1d660090a3b15e7a881dcd7267fb5caa71b584b48981"
     },
     {
       "file": "environment.png",
       "navigation": "设置 → 环境",
       "width": 1600,
       "height": 1000,
-      "sha256": "d4abb1909d00d6474e9b913681eb67a533cdc3ea6ccdc8c2f5aadc064a1f748d"
+      "sha256": "1994c12a291fc63efa214b666cf6a202c63310ba67f12acd2736b31652440c66"
     },
     {
       "file": "files.png",
       "navigation": "对话 → 文件",
       "width": 1600,
       "height": 1000,
-      "sha256": "4409689b770ffdc3909b7382cfcf4095cce2b0a41b05c072640b682ff0dcf560"
+      "sha256": "172dc9a902259de9f32454a4ba3eb2a56d0cbb6cabc78f3bbf4de6d1f81ab805"
     },
     {
       "file": "ios.png",
       "navigation": "资产与工具 → iOS 设备",
       "width": 1600,
       "height": 1000,
-      "sha256": "09686d8f1d69d72232f0d38123a21ba4b3505047de3015cf2937df64c987a598"
+      "sha256": "a5b901291e10173d9ad9f6e1ab55469c5cd99a8046650f7f2c01743890330f06"
     },
     {
       "file": "mcp.png",
       "navigation": "设置 → MCP",
       "width": 1600,
       "height": 1000,
-      "sha256": "c086e5e593cb8ffd5810655b1fce661785ef73f0ebe0a12f83e0b24ec4f8023d"
+      "sha256": "5190817cf921aa8bddb6f0ac58b34808fdbe3585dc015612bbc91c3c9f35a96d"
     },
     {
       "file": "mitm.png",
       "navigation": "资产与工具 → MITM 中心",
       "width": 1600,
       "height": 1000,
-      "sha256": "273e989338643cf5bde06e957404b3a1843157ef3fc77f25c7af1230ebd13b22"
+      "sha256": "316da1713c740abcb490238126fd71e7cb0d01a793753f14707d75293d1f6444"
     },
     {
       "file": "model-roles.png",
       "navigation": "设置 → 模型 → 角色分配",
       "width": 1600,
       "height": 1000,
-      "sha256": "a67178cab9384365264110e33ce2087a0ded3ca39a8fdcff3319a72e5fa3a425"
+      "sha256": "da9db801b439a19e43560cfb4d30afaca96ce65d7b7ae25e881cd00fedafd2f1"
     },
     {
       "file": "models.png",
       "navigation": "设置 → 模型 → 模型库",
       "width": 1600,
       "height": 1000,
-      "sha256": "bf08e2d4cebd233b14b11a0afa07ff5b528276f4871b470776de2da918360d7c"
+      "sha256": "c5dff497e1550d4f2b2530031600d17cdc72e54f70c8aa6454127faf1cdd4ddd"
     },
     {
       "file": "notifications.png",
       "navigation": "设置 → 通知",
       "width": 1600,
       "height": 1000,
-      "sha256": "afa52801c8e3aaee32c846ce5c65e05306c1ec3e07f9fd8c796caf3a0f785795"
+      "sha256": "90f45b98c0d3d2547fc18104d52a596aa2c66290d487a3c092a250c08e851a75"
     },
     {
       "file": "official-plugins.png",
       "navigation": "设置 → 插件 → 官方插件",
       "width": 1600,
       "height": 1000,
-      "sha256": "5d020182b6be1a3d903f386167b0ba4ace25ed0d2e275c914742561a556eb476"
+      "sha256": "fe5818719ba24fad690cf92599750a7d41add614b9ba8b49c7bb7e555efcd5f3"
     },
     {
       "file": "permissions.png",
       "navigation": "设置 → 权限",
       "width": 1600,
       "height": 1000,
-      "sha256": "33fd1b725a3674382974bdce816334887f7aafaefe53e6af03587df40b998a01"
+      "sha256": "6210e3848e237b59cc17f0d9e6032e36dc144cce0979f595f0a3055fb61d6122"
     },
     {
       "file": "plugin-development.png",
       "navigation": "设置 → 插件 → 开发文档",
       "width": 1600,
       "height": 1000,
-      "sha256": "1ac12fb40a8ffa192aab8ef8e6ed480fd840f99417ba2d7fc402f57550f9f3dc"
+      "sha256": "fa3b7462e4a9c4e422c4302241a88e4ebb5bba3a3a5ebb70f5aa212de3860d23"
     },
     {
       "file": "plugins.png",
       "navigation": "设置 → 插件 → 已安装",
       "width": 1600,
       "height": 1000,
-      "sha256": "c72d5169f92106f41154b2690e5bf3e13c17619a2036c86f5afb87d113a2bfb3"
+      "sha256": "7e6f4d7a95a5069dfaf2773fb2eb4becf16be64f2fba943c0a8057bf9d9dd875"
     },
     {
       "file": "poc-feeds.png",
       "navigation": "设置 → POC 订阅",
       "width": 1600,
       "height": 1000,
-      "sha256": "948b4e53a56a06b39dc1a36dddcc1d011420e36cba584c5f5e82ab9f4b6ca912"
+      "sha256": "89fafa42f84314a6694a0f0c49d900473ba47e88799b1be04151798efead5389"
     },
     {
       "file": "pocs.png",
       "navigation": "资产与工具 → POC 库",
       "width": 1600,
       "height": 1000,
-      "sha256": "5212327b0be865ede7a083d3591fd00a96ba045ab0b0975593d1430b493fac36"
+      "sha256": "84bac6065d56bc27ab467872279da2a1f5879eccffd22f3be549205588fbb8e3"
     },
     {
       "file": "presets.png",
       "navigation": "设置 → 预设 Agent",
       "width": 1600,
       "height": 1000,
-      "sha256": "600518452f4160748f682f4ce9106d63fa33a8ff5bca02e6b5942210b5f9ac62"
+      "sha256": "d5e994e1f5459f9ff60222b656b426d82d8d9b4c95458db2dc5677f3dd009910"
     },
     {
       "file": "project-create.png",
       "navigation": "项目 → 新建项目",
       "width": 1600,
       "height": 1000,
-      "sha256": "b1637a2102196dd398401fde47b20b8f418ac955088d1de25b7b4928f9d9b8cb"
+      "sha256": "4ad07d89735f86f58ff8936cc73737d860312cf41b5dcaa39c898ee9f43b945b"
     },
     {
       "file": "projects.png",
       "navigation": "工作台 → 项目",
       "width": 1600,
       "height": 1000,
-      "sha256": "6999a26b8c200eb80c0cc17ae399992aa3214441da13651e149b6a02603a7a5c"
+      "sha256": "0ed65a9801c0513ed6122f47d4ccb56631efb859dab55f6e3481502f5e9d4bb2"
     },
     {
       "file": "proxies.png",
       "navigation": "系统 → 代理",
       "width": 1600,
       "height": 1000,
-      "sha256": "224a8d2c9bfa351013d04e45612cbf261ef72215237366298cfe83094ca81f6b"
+      "sha256": "e86726743390393e1b99d4c9d392a5d9d3e0b61b547755e6e36358cf109dc1e4"
     },
     {
       "file": "setup.png",
       "navigation": "首次访问 → 创建管理员账号",
       "width": 1600,
       "height": 1000,
-      "sha256": "dc8a953c9d75001dda29ef52b9117bae0723e10c1e266fe84c07d3372646f528"
+      "sha256": "d64f6581d9ad4c006a0be834a4b8c06d06bb0404eed56dced6a2e1d309db7c2f"
     },
     {
       "file": "supervision.png",
       "navigation": "执行与审计 → 监督",
       "width": 1600,
       "height": 1000,
-      "sha256": "985506e597f7fa632693b67068f9d59a02df17c139842e3fb02073d4ba5f7329"
+      "sha256": "417972aaee998b738e88ae0c79f622f82b6eda26754c5dcd89cb5abbd6d5f17f"
     },
     {
       "file": "vulnerabilities.png",
       "navigation": "资产与工具 → 漏洞",
       "width": 1600,
       "height": 1000,
-      "sha256": "f6f6fa4c127bf941df83281b56c5e21ff27dead3a5cc8fb3020ecb62e16c16fd"
+      "sha256": "898881a8c4c61f9048e1b14d799da05c61a02d8d33bbee64e90805df5af443ca"
     },
     {
       "file": "web-search.png",
       "navigation": "设置 → Web 搜索",
       "width": 1600,
       "height": 1000,
-      "sha256": "c4e56f5df748e86682e76adf72a4fe410ad68154bc1e416731099e980a1f2e12"
+      "sha256": "8436d56a3dbe608c7975c7315341df0be03accaa30443a5256b6653c7d70c701"
     },
     {
       "file": "webfuzz.png",
       "navigation": "资产与工具 → WebFuzz",
       "width": 1600,
       "height": 1000,
-      "sha256": "027df139820ee2e8c7f820a0764a001a37f4b9b43e6cead5418fb8bd96576938"
+      "sha256": "c82e3f3cd0c89ad55012b5c99dafa8502c0b8b4a07da5cbff796bf71ddc1cd85"
     }
   ]
 }

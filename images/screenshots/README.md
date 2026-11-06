@@ -4,21 +4,21 @@
 
 本目录存放当前控制台的真实浏览器截图，供首页与使用、部署、移动端指南共用。
 
-- 截图日期：2026-11-05（Asia/Shanghai）。
-- 控制台版本：2.2.13；源码基准：`31f87a37e1cf336271a557969b45ad7da6c5785b`。
+- 截图日期：2026-11-06（Asia/Shanghai）。
+- 控制台版本：2.3.0；源码基准：`c5a9b37c87eac3576e73c82b78a9cd4fe803536d`，采用当前黑白界面与统一表格样式。
 - 前端：仓库 `packages/web/webui` 的完整 Vite 应用，入口为 `src/main.tsx`；没有单独拼装组件、替换组件、修改 DOM 或拦截并伪造 API。
 - 后端：`node packages/web/src/index.ts --host 127.0.0.1 --port 17777 --no-gate --no-tls`，配置目录与项目目录通过 `SENTINEL_CODING_AGENT_DIR`、`SENTINEL_PROJECTS_DIR` 指向独立临时目录。主系统原有数据未用于截图。
-- 前端监听本机 `14187`，通过临时 Vite 配置将 `/api`、`/ws` 代理到 `17777`。这是源码开发服务，没有修改仓库运行配置或重新生成内嵌资源。
-- 浏览器：Playwright 驱动本机 Google Chrome；大部分视口为 1600 × 1000、设备缩放 1，监控配置表单使用 1600 × 1200 展示全部字段，授权页使用整页截图。
+- 前端监听本机 `14187`，通过临时 Vite 配置将 `/api`、`/ws` 代理到 `17777`。这是源码开发服务，没有修改仓库运行配置或重新生成内嵌资源；原有 `7777` 服务未用于截图。
+- 浏览器：Playwright 驱动本机 Google Chrome；大部分视口为 1600 × 1000、设备缩放 1，监控配置表单使用 1600 × 1400 展示全部字段，授权页使用整页截图。
 - 项目：通过控制台创建的「README 本地演示」，真实 Kali 工作容器与网关均成功启动，Docker 环境检查通过。
 
 ## 数据与画面
 
 - 没有配置模型 API，也没有生成虚构对话、漏洞、资产、建模结果、审批流水、工程结果或设备连接。空列表和未配置提示就是截图时的真实状态。
-- `mitm.png` 展示真实代理记录，包括 `example.com` 的 HTTPS 200 响应，以及 Docker 代理访问本地地址时实际返回的 404。未修改这些状态码或结果。
-- `webfuzz.png` 是通过项目网络向本机文档服务发送 `GET /security.md` 后的真实 200 响应。响应文本按原样展示，未执行响应脚本。
-- GitHub 匿名 API 在截图时触发限流，所以 `code-intel.png` 展示首次使用引导，`code-intel-create.png` 展示填写公开仓库地址后的真实表单，没有伪造监控记录或安全更新。
-- DroidBridge、Sileo 和 SentinelBridge 的设备安装图及交流群图片属于独立的安装／联系资料，保留内容并改为可读文件名；它们不属于本次新截取的 Web 控制台图片。
+- `mitm.png` 展示通过真实项目代理请求本机文档服务 `http://host.docker.internal:18787/security.md` 得到的 HTTP 200 记录。未修改状态码或结果。
+- `webfuzz.png` 是通过项目网络向同一本机文档服务发送 `GET /security.md` 后的真实 200 响应。响应文本按原样展示，未执行响应脚本。
+- `code-intel.png` 展示独立环境的首次使用引导，`code-intel-create.png` 展示填写本项目公开仓库地址后的真实表单；未创建后台监控、触发模型判定或伪造安全更新。
+- DroidBridge、Sileo 和 SentinelBridge 的设备安装图及交流群图片属于独立的安装／联系资料；它们不属于本次更新的 34 张 Web 控制台截图。
 - 中英文 README 共用这组中文控制台截图，功能说明与图片替代文本分别提供中英文。
 
 ## 图片索引
@@ -31,7 +31,7 @@
 | [asset-discovery.png](asset-discovery.png) | 设置 → 资产测绘 | 1600 × 1000 |
 | [assets.png](assets.png) | 资产与工具 → 资产库 | 1600 × 1000 |
 | [chat.png](chat.png) | 工作台 → 对话 | 1600 × 1000 |
-| [code-intel-create.png](code-intel-create.png) | 情报 → 开源情报 → 新增监控 | 1600 × 1200 |
+| [code-intel-create.png](code-intel-create.png) | 情报 → 开源情报 → 新增监控 | 1600 × 1400 |
 | [code-intel.png](code-intel.png) | 情报 → 开源情报 | 1600 × 1000 |
 | [consent.png](consent.png) | 首次访问 → 授权与风险承诺 | 1600 × 1000 |
 | [dashboard.png](dashboard.png) | 工作台 → 项目概览 | 1600 × 1000 |

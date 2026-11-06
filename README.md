@@ -60,7 +60,7 @@ Windows 解压 `sentinel-web-windows-x64.zip` 后，在 PowerShell 运行 `.\sen
 
 ## 核心能力
 
-以下截图来自当前 **v2.2.13 源码运行的完整控制台**，使用独立本地项目、真实后端与 Docker 容器。尚未配置模型、没有记录或未接入设备的页面按实际状态展示。[截图来源与更新方式](images/screenshots/README.md)。
+以下截图来自当前 **v2.3.0 源码运行的完整控制台**，使用独立本地项目、真实后端与 Docker 容器。尚未配置模型、没有记录或未接入设备的页面按实际状态展示。[截图来源与更新方式](images/screenshots/README.md)。
 
 ### 1. 项目概览
 

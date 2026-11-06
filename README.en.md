@@ -60,7 +60,7 @@ Describe your authorized scope and target in the conversation. Approval mode is 
 
 ## Capabilities
 
-The screenshots below come from the complete console running the current **v2.2.13 source**, using a separate local project and the real backend and Docker containers. Unconfigured models, empty records, and disconnected devices are shown as captured. [Capture details](images/screenshots/README.md).
+The screenshots below come from the complete console running the current **v2.3.0 source**, using a separate local project and the real backend and Docker containers. Unconfigured models, empty records, and disconnected devices are shown as captured. [Capture details](images/screenshots/README.md).
 
 ### 1. Project overview
 
