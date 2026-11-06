@@ -1,18 +1,18 @@
 .pui-table td code {
 	padding: 1px 5px;
 	border-radius: 3px;
-	background: #f5f6f7;
-	color: #476582;
+	background: var(--pui-raised);
+	color: var(--pui-dim);
 	font-family: var(--pui-mono);
-	font-size: 11px;
+	font-size: 12px;
 }
 
 .pui-table tr.is-bad td {
-	background: #fffbfb;
+	background: var(--pui-danger-soft);
 }
 
 .pui-table tr.is-bad:hover td {
-	background: #fff6f6;
+	background: var(--pui-danger-soft);
 }
 
 .pui-table tbody tr {

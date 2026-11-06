@@ -33,6 +33,6 @@
 .jc-detail-meta .is-bad { color: var(--pui-danger); }
 .jc-detail-meta .is-ok { color: var(--pui-ok); }
 .pui-table tr { cursor: pointer; }
-.pui-table tr:hover td { background: #fafcff; }
+.pui-table tbody tr:hover td { background: var(--pui-hover); }
 
-.pui-table tr.is-bad td { background: #fffafa; }
+.pui-table tr.is-bad td { background: var(--pui-danger-soft); }

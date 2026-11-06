@@ -701,7 +701,7 @@ export function PluginPanel({
 				options={false}
 				pagination={false}
 				tableLayout="fixed"
-				scroll={{ x: 900 }}
+				scroll={{ x: 1320 }}
 				rowClassName={(plugin) => (selectedKey === pluginKeyOf(plugin) ? "is-selected" : "")}
 				onRow={(plugin) => ({
 					onClick: () => openPlugin(plugin),
@@ -750,7 +750,7 @@ export function PluginPanel({
 						{
 							title: t("状态"),
 							key: "dot",
-							width: 44,
+							width: 64,
 							render: (_, plugin) => (
 								<span className={`dot ${STATE_TONES[plugin.state] === "off" ? "" : STATE_TONES[plugin.state]}`} />
 							),
@@ -758,6 +758,7 @@ export function PluginPanel({
 						{
 							title: t("插件"),
 							key: "name",
+							width: 300,
 							render: (_, plugin) => (
 								<div className="pluginhub-name">
 									<Typography.Text strong>{plugin.manifest.name}</Typography.Text>

@@ -129,7 +129,7 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #476582;
+	color: var(--pui-dim);
 }
 
 .vsh-file-toolbar {
@@ -157,9 +157,9 @@
 }
 
 .vsh-actions .pui-btn {
-	height: 24px;
+	height: 26px;
 	padding: 0 7px;
-	font-size: 11px;
+	font-size: 12px;
 }
 
 .vsh-form {
@@ -264,7 +264,7 @@
 /* 主机列表 + 命令控制并排，避免看完列表还要滚到下面 */
 .vsh-hosts-layout {
 	display: grid;
-	grid-template-columns: 440px minmax(0, 1fr);
+	grid-template-columns: 380px minmax(0, 1fr);
 	gap: 12px;
 	align-items: stretch;
 }
@@ -299,8 +299,8 @@
 
 .vsh-hosts-card .pui-table th,
 .vsh-hosts-card .pui-table td {
-	padding: 9px 10px;
-	vertical-align: top;
+	padding: 10px 12px;
+	vertical-align: middle;
 }
 
 .vsh-hosts-card .pui-table td b {
@@ -428,11 +428,6 @@
 	margin-top: 10px;
 }
 
-/* 方案 A：左主机卡片 + 右深色终端 */
-.vsh-hosts-layout {
-	grid-template-columns: 380px minmax(0, 1fr);
-}
-
 .vsh-host-list {
 	display: flex;
 	flex-direction: column;
@@ -457,11 +452,11 @@
 }
 
 .vsh-host:hover {
-	background: #fafcff;
+	background: var(--pui-hover);
 }
 
 .vsh-host.is-selected {
-	background: #eef6ff;
+	background: var(--pui-accent-soft);
 	box-shadow: inset 2px 0 0 var(--pui-accent);
 }
 
@@ -472,7 +467,7 @@
 	height: 30px;
 	flex: none;
 	border-radius: 6px;
-	background: #eef4fb;
+	background: var(--pui-accent-soft);
 	color: var(--pui-accent);
 	font-size: 12px;
 	font-weight: 600;
@@ -654,6 +649,7 @@
 
 .vsh-term__input input {
 	flex: 1;
+	min-width: 0;
 	height: 30px;
 	padding: 0 9px;
 	border: 1px solid #2a3644;
@@ -682,6 +678,7 @@
 }
 
 .vsh-term__opts .pui-input {
+	min-width: 0;
 	height: 26px;
 	border-color: #2a3644;
 	background: #0b0f14;
