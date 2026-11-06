@@ -72,6 +72,17 @@
 	min-width: 0;
 }
 
+/* The menu owns row highlighting; the legacy option hover must not paint a second surface. */
+.project-switcher-menu .project-option,
+.project-switcher-menu .project-option:hover {
+	background: transparent;
+	color: var(--ant-color-text);
+}
+
+.project-switcher-menu .project-option__state {
+	color: var(--ant-color-text-secondary);
+}
+
 .console-shell .console-brand,
 .console-drawer .console-drawer__brand {
 	gap: 12px;

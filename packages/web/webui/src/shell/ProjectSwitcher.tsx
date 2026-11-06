@@ -74,8 +74,10 @@ export function ProjectSwitcher({
 		<>
 			<Dropdown
 				trigger={["click"]}
+				classNames={{ root: "project-switcher-menu" }}
 				menu={{
-					selectable: false,
+					selectable: true,
+					selectedKeys: activeProject ? [activeProject.id] : [],
 					items: [
 						...list.map((project) => ({
 							key: project.id,
