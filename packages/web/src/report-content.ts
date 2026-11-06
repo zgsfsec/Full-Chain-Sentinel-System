@@ -184,6 +184,21 @@ export async function submitReport(options: {
 	return options.store.save({ provenance: options.provenance, key: options.key, title, markdown, images });
 }
 
+/** Editing reuses archived evidence and never needs a running container or the original files. */
+export function validateReportEdit(report: ReportDetail, title: string, markdown: string): void {
+	if (!title.trim() || title.trim().length > 120 || /[\r\n]/.test(title))
+		throw new Error("报告标题需要 1–120 个字符，且只能占一行。");
+	if (!markdown.trim()) throw new Error("报告正文不能为空。");
+	if (Buffer.byteLength(markdown) > MAX_MARKDOWN_BYTES) throw new Error("报告正文超过 1 MB 上限。");
+	if (Buffer.byteLength(markdown) + report.images.reduce((sum, image) => sum + image.size, 0) > MAX_TOTAL_BYTES)
+		throw new Error("报告和图片合计超过 32 MB 上限。");
+	const archived = new Set(report.images.map((image) => image.source));
+	for (const image of imageReferences(markdown)) {
+		if (!archived.has(image.source))
+			throw new Error(`图片尚未归档，请保留已有图片路径：${image.source.slice(0, 160)}`);
+	}
+}
+
 /** Replaces actual Markdown image nodes, including reference-style images, without touching code examples. */
 export function portableReportMarkdown(report: ReportDetail): string {
 	const images = new Map(report.images.map((image) => [image.source, image.filename]));

@@ -16,6 +16,7 @@ test("report list, detail, images, downloads and deletion require login and cons
 			{ path: `/${id}/images/${id}`, method: "GET" },
 			{ path: `/${id}/download`, method: "GET" },
 			{ path: `/${id}`, method: "DELETE" },
+			{ path: `/${id}`, method: "PUT" },
 		];
 		for (const route of routes) {
 			expect(

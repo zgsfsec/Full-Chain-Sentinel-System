@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { handleReportApi } from "../src/report-api.ts";
-import { portableReportMarkdown, reportZip, submitReport } from "../src/report-content.ts";
+import { portableReportMarkdown, reportZip, submitReport, validateReportEdit } from "../src/report-content.ts";
 import { createReportTool } from "../src/report-tool.ts";
 import { ReportStore } from "../src/reports.ts";
 
@@ -231,4 +231,102 @@ test("ZIP central directory and local headers describe exact stored contents and
 		cursor += 46 + nameSize;
 	}
 	expect(cursor).toBe(end);
+});
+
+test("editing preserves evidence and provenance without the workspace and refuses stale or foreign updates", async () => {
+	writeFileSync(join(workDir, "proof.png"), png);
+	const original = await submit("# 原稿\n\n![截图](proof.png)");
+	rmSync(workDir, { recursive: true });
+	const markdown = "# 修改后\n\n补充结论。\n\n![证据][proof]\n\n[proof]: proof.png";
+	validateReportEdit(original, "修订报告", markdown);
+	expect(store.updateText("p2", original.id, original.revision, "串项目", markdown)).toBeUndefined();
+	const updated = store.updateText("p1", original.id, original.revision, "修订报告", markdown);
+	expect(updated).toMatchObject({
+		title: "修订报告",
+		markdown,
+		source: "session",
+		sessionId: "s1",
+		createdAt: original.createdAt,
+		images: original.images,
+	});
+	expect(updated?.revision).not.toBe(original.revision);
+	expect(updated?.size).toBe(Buffer.byteLength(markdown) + png.length);
+	expect(store.updateText("p1", original.id, original.revision, "过期覆盖", "stale")).toBeUndefined();
+	store.close();
+	store = new ReportStore(join(root, "reports.db"));
+	expect(store.get("p1", original.id)).toEqual(updated);
+	expect(Buffer.from(store.image("p1", original.id, original.images[0].id)?.data ?? [])).toEqual(png);
+	expect(portableReportMarkdown(updated ?? original)).toContain(`![证据](images/${original.images[0].filename})`);
+	expect(store.list("p1", { search: "修订" }).total).toBe(1);
+});
+
+test("editing validates title, body, size and archived image references", async () => {
+	const original = await submit("original");
+	for (const [title, markdown] of [
+		["", "body"],
+		["a\nb", "body"],
+		["a".repeat(121), "body"],
+		["title", " "],
+		["title", "x".repeat(1024 * 1024 + 1)],
+		["title", "![new](missing.png)"],
+		["title", "![new][x]\n\n[x]: https://tracker.test/proof.png"],
+	])
+		expect(() => validateReportEdit(original, title, markdown)).toThrow();
+	expect(() => validateReportEdit(original, "title", "```md\n![example](missing.png)\n```")).not.toThrow();
+	expect(store.get("p1", original.id)?.markdown).toBe("original");
+});
+
+test("PUT validates edits, retains a failed draft's saved version, and downloads the saved contents", async () => {
+	const original = await submit("# 原稿");
+	let authorized = true;
+	server = createServer((request, response) => {
+		void handleReportApi(
+			request,
+			response,
+			store,
+			(id) => ["p1", "p2"].includes(id),
+			() => authorized,
+		);
+	});
+	await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("No HTTP address");
+	const base = `http://127.0.0.1:${address.port}/api/reports/${original.id}`;
+	const put = (body: unknown, projectId = "p1") =>
+		fetch(`${base}?projectId=${projectId}`, {
+			method: "PUT",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+	const edit = { title: "修订标题", markdown: "# 修订正文", revision: original.revision };
+	expect((await put(edit, "p2")).status).toBe(404);
+	expect((await fetch(`${base}?projectId=p1`, { method: "PUT" })).status).toBe(415);
+	expect(
+		(
+			await fetch(`${base}?projectId=p1`, {
+				method: "PUT",
+				headers: { "content-type": "application/json" },
+				body: "{",
+			})
+		).status,
+	).toBe(400);
+	for (const body of [
+		null,
+		[],
+		{},
+		{ ...edit, markdown: 123 },
+		{ ...edit, title: " " },
+		{ ...edit, markdown: "![bad](new.png)" },
+	]) {
+		expect((await put(body)).status).toBe(400);
+	}
+	authorized = false;
+	expect((await put(edit)).status).toBe(401);
+	expect(store.get("p1", original.id)?.markdown).toBe(original.markdown);
+	authorized = true;
+	const saved = await put(edit);
+	expect(saved.status).toBe(200);
+	expect(await saved.json()).toMatchObject({ title: edit.title, markdown: edit.markdown });
+	expect((await put({ ...edit, markdown: "stale" })).status).toBe(409);
+	expect(await (await fetch(`${base}/download?projectId=p1`)).text()).toBe(edit.markdown);
 });

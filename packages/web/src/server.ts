@@ -1434,10 +1434,17 @@ export async function startSentinelServer(
 				return;
 			}
 			if (path === "/api/reports" || path.startsWith("/api/reports/")) {
-				handleReportApi(request, response, runtime.reports, (id) =>
-					agentDir
-						? listProjects(agentDir).projects.some((project) => project.id === id)
-						: runtime.snapshot().project?.id === id,
+				void handleReportApi(
+					request,
+					response,
+					runtime.reports,
+					(id) =>
+						agentDir
+							? listProjects(agentDir).projects.some((project) => project.id === id)
+							: runtime.snapshot().project?.id === id,
+					() =>
+						(!authEnabled || hasValidSession(currentAuth(), request)) &&
+						!consentFor(currentAuth()?.username ?? null).required,
 				);
 				return;
 			}

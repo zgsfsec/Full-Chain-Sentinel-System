@@ -1,5 +1,5 @@
-/** Immutable report snapshots, including image bytes, outside container-mounted workspaces. */
-import { randomUUID } from "node:crypto";
+/** Project reports and archived image bytes, outside container-mounted workspaces. */
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
@@ -36,6 +36,12 @@ interface ImageRow {
 }
 
 const SUMMARY_COLUMNS = "id, title, provenance, created_at, image_count, size";
+
+function revision(title: string, markdown: string): string {
+	return createHash("sha256")
+		.update(JSON.stringify([title, markdown]))
+		.digest("hex");
+}
 
 function summary(row: ReportRow): ReportSummary {
 	return {
@@ -136,6 +142,7 @@ export class ReportStore {
 			createdAt,
 			imageCount: input.images.length,
 			size,
+			revision: revision(input.title, input.markdown),
 		};
 	}
 
@@ -175,7 +182,27 @@ export class ReportStore {
 		const images = this.db
 			.prepare("SELECT id, source, filename, mime_type, size FROM report_images WHERE report_id = ? ORDER BY rowid")
 			.all(id) as ImageRow[];
-		return { ...summary(row), markdown: row.markdown ?? "", images: images.map(imageInfo) };
+		const markdown = row.markdown ?? "";
+		return { ...summary(row), markdown, images: images.map(imageInfo), revision: revision(row.title, markdown) };
+	}
+
+	/** Compare-and-swap protects edits made in another browser while the editor was open. */
+	updateText(
+		projectId: string,
+		id: string,
+		expectedRevision: string,
+		title: string,
+		markdown: string,
+	): ReportDetail | undefined {
+		const current = this.get(projectId, id);
+		if (!current || current.revision !== expectedRevision) return undefined;
+		const size = Buffer.byteLength(markdown) + current.images.reduce((total, image) => total + image.size, 0);
+		const result = this.db
+			.prepare(
+				"UPDATE reports SET title = ?, markdown = ?, size = ? WHERE project_id = ? AND id = ? AND title = ? AND markdown = ?",
+			)
+			.run(title, markdown, size, projectId, id, current.title, current.markdown);
+		return Number(result.changes) > 0 ? this.get(projectId, id) : undefined;
 	}
 
 	image(projectId: string, reportId: string, id: string): ArchivedReportImage | undefined {

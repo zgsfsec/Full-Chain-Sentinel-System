@@ -33,6 +33,7 @@ export interface ReportSummary extends ReportProvenance {
 export interface ReportDetail extends ReportSummary {
 	markdown: string;
 	images: ReportImage[];
+	revision: string;
 }
 
 export interface ReportPage {

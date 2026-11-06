@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { portableReportMarkdown, reportZip } from "./report-content.ts";
+import { portableReportMarkdown, reportZip, validateReportEdit } from "./report-content.ts";
 import type { ReportSource } from "./report-types.ts";
 import type { ReportStore } from "./reports.ts";
 
@@ -9,12 +9,13 @@ function json(response: ServerResponse, body: unknown, status = 200): void {
 }
 
 /** The server applies its normal gate, session and consent checks before routing here. */
-export function handleReportApi(
+export async function handleReportApi(
 	request: IncomingMessage,
 	response: ServerResponse,
 	store: ReportStore,
 	projectExists: (id: string) => boolean,
-): void {
+	authorized: () => boolean = () => true,
+): Promise<void> {
 	try {
 		const url = new URL(request.url ?? "/", "http://localhost");
 		const projectId = url.searchParams.get("projectId") ?? "";
@@ -52,6 +53,65 @@ export function handleReportApi(
 		const report = store.get(projectId, id);
 		if (!report) {
 			json(response, { error: "报告不存在或已删除。" }, 404);
+			return;
+		}
+		if (parts.length === 1 && request.method === "PUT") {
+			if (!request.headers["content-type"]?.startsWith("application/json")) {
+				json(response, { error: "请发送 JSON 请求。" }, 415);
+				return;
+			}
+			const chunks: Buffer[] = [];
+			let size = 0;
+			for await (const chunk of request.iterator({ destroyOnReturn: false })) {
+				const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+				size += bytes.length;
+				// A 1 MB Markdown body may use six-byte JSON escapes for control characters.
+				if (size > 6 * 1024 * 1024 + 4096) {
+					json(response, { error: "请求内容过大。" }, 413);
+					return;
+				}
+				chunks.push(bytes);
+			}
+			if (!authorized()) {
+				json(response, { error: "登录或授权已失效，请刷新页面。" }, 401);
+				return;
+			}
+			if (!projectExists(projectId)) {
+				json(response, { error: "项目已删除，无法保存报告。" }, 409);
+				return;
+			}
+			let body: unknown;
+			try {
+				body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+			} catch {
+				json(response, { error: "JSON 格式错误。" }, 400);
+				return;
+			}
+			if (
+				!body ||
+				typeof body !== "object" ||
+				!("title" in body) ||
+				typeof body.title !== "string" ||
+				!("markdown" in body) ||
+				typeof body.markdown !== "string" ||
+				!("revision" in body) ||
+				typeof body.revision !== "string"
+			) {
+				json(response, { error: "请提供报告标题、Markdown 正文和原始版本。" }, 400);
+				return;
+			}
+			try {
+				validateReportEdit(report, body.title, body.markdown);
+			} catch (error) {
+				json(response, { error: error instanceof Error ? error.message : String(error) }, 400);
+				return;
+			}
+			const updated = store.updateText(projectId, id, body.revision, body.title.trim(), body.markdown);
+			if (!updated) {
+				json(response, { error: "报告已被修改或删除。请复制当前草稿，取消编辑并刷新后再合并修改。" }, 409);
+				return;
+			}
+			json(response, updated);
 			return;
 		}
 		if (parts.length === 1 && request.method === "DELETE") {
@@ -108,6 +168,7 @@ export function handleReportApi(
 		}
 		json(response, { error: "没有这个报告接口。" }, 404);
 	} catch (error) {
+		if (response.destroyed) return;
 		json(response, { error: error instanceof Error ? error.message : String(error) }, 500);
 	}
 }
