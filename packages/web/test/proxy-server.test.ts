@@ -21,7 +21,14 @@ import type {
 	SentinelProxyInput,
 	SentinelServerMessage,
 } from "../src/protocol.ts";
-import { readProxies, setProxyImage } from "../src/proxy.ts";
+import {
+	AUTO_NODE_TAG,
+	buildSingboxConfig,
+	describeProxy,
+	readProxies,
+	resolveProjectProxy,
+	setProxyImage,
+} from "../src/proxy.ts";
 import { startSentinelServer } from "../src/server.ts";
 import { type FakeDocker, installFakeDocker } from "./fake-docker.ts";
 
@@ -369,6 +376,93 @@ test("a subscription that returns nothing usable is an error, not an empty profi
 	// The profile is kept so the operator can fix the URL, with the reason on it.
 	expect(profile?.nodes).toEqual([]);
 	expect(profile?.subscription?.error).toContain("没有解析出任何节点");
+});
+
+test("a profile can select auto, persist it, and generate an automatic selector", async () => {
+	const id = await addProxy({ name: "automatic-profile", mode: "subscription", subscriptionUrl });
+	drain("proxy_config");
+	send({ type: "set_proxy_node", id, nodeTag: AUTO_NODE_TAG });
+	const selected = await config();
+	expect(selected.error).toBeUndefined();
+	expect(selected.proxies.find((entry) => entry.id === id)?.nodeTag).toBe(AUTO_NODE_TAG);
+	expect(readProxies(agentDir).proxies.find((entry) => entry.id === id)?.nodeTag).toBe(AUTO_NODE_TAG);
+	const settings = resolveProjectProxy(agentDir, id);
+	if (!settings) throw new Error("代理未解析");
+	expect(describeProxy(settings)).toContain("自动（按延迟择优）");
+	const built = buildSingboxConfig(settings);
+	expect(built.error).toBeUndefined();
+	const generated = JSON.parse(built.config ?? "{}") as { outbounds: Array<Record<string, unknown>> };
+	expect(generated.outbounds.find((entry) => entry.type === "selector")).toMatchObject({ default: AUTO_NODE_TAG });
+	expect(generated.outbounds.find((entry) => entry.type === "urltest")).toMatchObject({
+		tag: AUTO_NODE_TAG,
+		outbounds: ["香港", "tokyo"],
+	});
+
+	// Invalid fixed nodes still fail without overwriting the automatic choice.
+	drain("proxy_config");
+	send({ type: "set_proxy_node", id, nodeTag: "missing-node" });
+	const refused = await config();
+	expect(refused.error).toContain("节点不存在");
+	expect(refused.proxies.find((entry) => entry.id === id)?.nodeTag).toBe(AUTO_NODE_TAG);
+
+	drain("proxy_config");
+	send({ type: "set_proxy_node", id, nodeTag: "tokyo" });
+	const fixed = await config();
+	expect(fixed.error).toBeUndefined();
+	expect(fixed.proxies.find((entry) => entry.id === id)?.nodeTag).toBe("tokyo");
+});
+
+test("a profile preserves auto across edits and successful or failed subscription refreshes", async () => {
+	const original = input({ name: "automatic-refresh", mode: "subscription", subscriptionUrl, nodeTag: AUTO_NODE_TAG });
+	const saved = await save(original);
+	expect(saved.error).toBeUndefined();
+	const profile = saved.proxies.find((entry) => entry.name === original.name);
+	if (!profile) throw new Error("订阅未保存");
+	expect(profile.nodeTag).toBe(AUTO_NODE_TAG);
+	const edited = await save({ ...original, id: profile.id, routePrivateDirect: false });
+	expect(edited.error).toBeUndefined();
+	expect(edited.proxies.find((entry) => entry.id === profile.id)?.nodeTag).toBe(AUTO_NODE_TAG);
+
+	drain("proxy_config");
+	send({ type: "refresh_proxy_subscription", id: profile.id });
+	const refreshed = await config();
+	expect(refreshed.error).toBeUndefined();
+	expect(refreshed.proxies.find((entry) => entry.id === profile.id)?.nodeTag).toBe(AUTO_NODE_TAG);
+
+	subscriptionEmpty = true;
+	try {
+		drain("proxy_config");
+		send({ type: "refresh_proxy_subscription", id: profile.id });
+		const failed = await config();
+		expect(failed.error).toContain("没有解析出任何节点");
+		expect(failed.proxies.find((entry) => entry.id === profile.id)?.nodeTag).toBe(AUTO_NODE_TAG);
+	} finally {
+		subscriptionEmpty = false;
+	}
+});
+
+test("a profile without subscription nodes cannot select auto", async () => {
+	const id = await addProxy({ name: "simple-no-auto" });
+	drain("proxy_config");
+	send({ type: "set_proxy_node", id, nodeTag: AUTO_NODE_TAG });
+	const simple = await config();
+	expect(simple.error).toBeTruthy();
+	expect(simple.proxies.find((entry) => entry.id === id)?.nodeTag).not.toBe(AUTO_NODE_TAG);
+
+	const empty = await save(
+		input({
+			name: "empty-no-auto",
+			mode: "subscription",
+			subscriptionUrl: subscriptionUrl.replace("/sub", "/broken"),
+		}),
+	);
+	const profile = empty.proxies.find((entry) => entry.name === "empty-no-auto");
+	if (!profile) throw new Error("订阅未保存");
+	drain("proxy_config");
+	send({ type: "set_proxy_node", id: profile.id, nodeTag: AUTO_NODE_TAG });
+	const refused = await config();
+	expect(refused.error).toBeTruthy();
+	expect(refused.proxies.find((entry) => entry.id === profile.id)?.nodeTag).not.toBe(AUTO_NODE_TAG);
 });
 
 test("a failed refresh keeps the nodes that already worked", async () => {

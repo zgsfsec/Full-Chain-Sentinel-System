@@ -411,9 +411,10 @@ export function saveProxy(
 	// a fresh read; leaving it alone keeps the cached nodes and the chosen one.
 	const sameUrl = existing?.subscription?.url === normalized.subscriptionUrl;
 	const carried = sameUrl ? (existing?.nodes ?? []) : [];
-	const nodeTag = carried.some((node) => node.tag === normalized.nodeTag)
-		? normalized.nodeTag
-		: (carried[0]?.tag ?? "");
+	const nodeTag =
+		normalized.nodeTag === AUTO_NODE_TAG || carried.some((node) => node.tag === normalized.nodeTag)
+			? normalized.nodeTag
+			: (carried[0]?.tag ?? "");
 	const proxy: SentinelProxy = {
 		id: existing?.id ?? randomUUID(),
 		name: normalized.name,
@@ -476,7 +477,10 @@ export async function refreshProxySubscription(
 		...proxy,
 		nodes,
 		skipped: parsed?.skipped ?? proxy.skipped,
-		nodeTag: nodes.some((node) => node.tag === proxy.nodeTag) ? proxy.nodeTag : (nodes[0]?.tag ?? ""),
+		nodeTag:
+			proxy.nodeTag === AUTO_NODE_TAG || nodes.some((node) => node.tag === proxy.nodeTag)
+				? proxy.nodeTag
+				: (nodes[0]?.tag ?? ""),
 		subscription: { ...proxy.subscription, updatedAt: error ? proxy.subscription.updatedAt : Date.now(), error },
 	};
 	const next = { ...file, proxies: file.proxies.map((entry) => (entry.id === id ? updated : entry)) };
@@ -574,7 +578,12 @@ export function setProxyNode(
 	const file = readProxies(agentDir);
 	const proxy = file.proxies.find((entry) => entry.id === id);
 	if (!proxy) return { proxies: file, error: t("代理不存在") };
-	if (!proxy.nodes.some((node) => node.tag === nodeTag)) return { proxies: file, error: t("节点不存在") };
+	if (proxy.mode !== "subscription") return { proxies: file, error: t("这个代理不是订阅") };
+	if (proxy.nodes.length === 0) return { proxies: file, error: t("订阅里没有节点，先拉取一次") };
+	// Auto is a generated selection policy, not one of the cached subscription nodes.
+	if (nodeTag !== AUTO_NODE_TAG && !proxy.nodes.some((node) => node.tag === nodeTag)) {
+		return { proxies: file, error: t("节点不存在") };
+	}
 	const next = { ...file, proxies: file.proxies.map((entry) => (entry.id === id ? { ...entry, nodeTag } : entry)) };
 	writeProxies(agentDir, next);
 	return { proxies: next, proxy: next.proxies.find((entry) => entry.id === id) };
@@ -820,8 +829,11 @@ export function describeProxy(
 	}
 	if (proxy.mode === "subscription") {
 		if (proxy.nodes.length === 0) return t("订阅未拉取");
-		const chosen = proxy.nodes.find((node) => node.tag === proxy.nodeTag) ?? proxy.nodes[0];
-		return t("订阅 {count} 个节点 · 当前：{name}", { count: proxy.nodes.length, name: chosen?.name ?? "" });
+		const name =
+			proxy.nodeTag === AUTO_NODE_TAG
+				? t("自动（按延迟择优）")
+				: ((proxy.nodes.find((node) => node.tag === proxy.nodeTag) ?? proxy.nodes[0])?.name ?? "");
+		return t("订阅 {count} 个节点 · 当前：{name}", { count: proxy.nodes.length, name });
 	}
 	return t("未配置");
 }

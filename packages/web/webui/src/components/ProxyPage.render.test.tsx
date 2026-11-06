@@ -157,6 +157,22 @@ test("a subscription that was never read says so", () => {
 	expect(html).toContain("订阅未拉取");
 });
 
+test("an automatic subscription displays the policy instead of the first node", () => {
+	const html = render(
+		config({
+			proxies: [
+				profile({
+					mode: "subscription",
+					nodes: [{ tag: "first", name: "first-fixed-node", protocol: "trojan", outbound: {} }],
+					nodeTag: "auto",
+				}),
+			],
+		}),
+	);
+	expect(html).toContain("自动（按延迟择优）");
+	expect(html).not.toContain("first-fixed-node");
+});
+
 test("the node dialog shows measured latency, a timeout, and the test controls", () => {
 	const proxy = profile({
 		mode: "subscription",

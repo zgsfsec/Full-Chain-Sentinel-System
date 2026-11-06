@@ -67,11 +67,14 @@ export function describeProfile(proxy: SentinelProxy): string {
 	}
 	if (proxy.mode === "subscription") {
 		if (proxy.nodes.length === 0) return proxy.subscription?.url ? t("订阅未拉取") : t("未配置订阅");
-		const chosen = proxy.nodes.find((node) => node.tag === proxy.nodeTag) ?? proxy.nodes[0];
+		const name =
+			proxy.nodeTag === AUTO_NODE_TAG
+				? t("自动（按延迟择优）")
+				: ((proxy.nodes.find((node) => node.tag === proxy.nodeTag) ?? proxy.nodes[0])?.name ?? "");
 		const every = proxy.subscription?.intervalHours
 			? t(" · 每 {hours} 小时更新", { hours: proxy.subscription.intervalHours })
 			: "";
-		return t("{count} 个节点 · {name}", { count: proxy.nodes.length, name: chosen?.name ?? "" }) + every;
+		return t("{count} 个节点 · {name}", { count: proxy.nodes.length, name }) + every;
 	}
 	return t("未配置");
 }
