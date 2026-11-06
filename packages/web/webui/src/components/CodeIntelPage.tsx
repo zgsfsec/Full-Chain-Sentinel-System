@@ -1509,6 +1509,17 @@ export function CodeIntelPage({
 	};
 
 	const showReproductionColumns = activityFilter !== "attention" && activityFilter !== "review";
+	const activityTableColumns: TableColumnsType<SentinelCodeCommit> = showReproductionColumns
+		? activityColumns
+		: ["repo", "branch", "vulnerability", "vulnTags", "commit", "verdict", "authoredAt", "status", "actions"].flatMap((key) => {
+			const column = activityColumns.find((column) => column.key === key);
+			if (!column) return [];
+			if (key === "commit") return [{ ...column, width: 260 }];
+			if (key === "actions") return [{ ...column, width: 200, align: "right" as const }];
+			return [column];
+		});
+	// Include the expand and selection columns in the horizontal scroll width.
+	const activityTableWidth = activityTableColumns.reduce((width, column) => width + Number(column.width ?? 0), 80);
 	const renderActivity = () => (
 		<Space direction="vertical" size={12} style={{ width: "100%" }}>
 			{activityError ? <Alert type="error" showIcon title={activityError}
@@ -1646,7 +1657,7 @@ export function CodeIntelPage({
 				className="code-intel-table"
 				rowKey="id"
 				size="middle"
-				columns={showReproductionColumns ? activityColumns : activityColumns.filter((column) => column.key !== "reproduction" && column.key !== "reproductionResult")}
+				columns={activityTableColumns}
 				dataSource={activityRows}
 				loading={activityLoading}
 				locale={{
@@ -1704,7 +1715,7 @@ export function CodeIntelPage({
 					),
 				}}
 				tableLayout="fixed"
-				scroll={{ x: showReproductionColumns ? 2295 : 1930 }}
+				scroll={{ x: activityTableWidth }}
 			/>
 		</Space>
 	);
