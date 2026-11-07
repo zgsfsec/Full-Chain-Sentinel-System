@@ -276,6 +276,14 @@ Open the conversation’s Files panel to upload or preview artifacts and downloa
 
 </details>
 
+### 20. Report center
+
+Archive reports from conversations, persistent goals, engagement tasks, and engagement summaries under the globally selected project. Agents are instructed to submit Markdown reports and evidence images after substantive testing; ordinary questions do not generate reports. An engagement finishes after its final report is successfully archived.
+
+Search reports, filter by source, view rendered Markdown or source, zoom images, download, and delete. Edit the title and Markdown on the left with a live preview on the right; save or cancel changes, recover drafts, and detect conflicting edits. Archived images remain available after containers stop, are recreated, or are deleted. Reports with images download as ZIP archives containing Markdown and images; reports without images download as Markdown.
+
+The editor preserves existing archived images and does not currently upload new images. See the [report center guide](docs/report-center.md) (Chinese) for submission, image limits, and data deletion rules.
+
 See the [feature reference](docs/features.en.md), [usage guide](docs/usage.en.md), and [security boundaries](docs/security.en.md) for requirements, workflows, and limitations.
 
 ---
@@ -294,6 +302,7 @@ See the [feature reference](docs/features.en.md), [usage guide](docs/usage.en.md
 | Android and iOS devices | [Mobile setup](docs/mobile.en.md) |
 | Proxy switching, gateways, project migration | [Project gateway](packages/web/docs/project-gateway.md) (Chinese) |
 | Asset reporting, linked findings, exports | [Asset library](docs/asset-library.md) (Chinese) |
+| Report submission, archived images, live editing, downloads | [Report center](docs/report-center.md) (Chinese) |
 | Local and remote plugins | [Plugin center](docs/plugin-center.md) (Chinese) |
 | Plugin development and frontend | [Authoring](docs/plugin-authoring.md) · [Plugin UI](docs/plugin-ui.md) (Chinese) |
 | Repository structure, builds, tests | [Development](docs/development.en.md) |

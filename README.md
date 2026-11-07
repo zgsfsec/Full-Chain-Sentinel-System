@@ -276,6 +276,14 @@ Windows 解压 `sentinel-web-windows-x64.zip` 后，在 PowerShell 运行 `.\sen
 
 </details>
 
+### 20. 报告中心
+
+跟随全局项目，统一归档普通会话、自主目标、工程任务和工程总报告。Agent 完成实质测试任务时主动提交 Markdown 报告与证据图片，普通问答不生成报告；工程总报告归档成功后再结束工程。
+
+支持搜索、来源筛选、Markdown 渲染与源文查看、图片放大、下载和删除。点击「编辑」后，左侧修改标题与 Markdown，右侧实时预览，支持保存、取消、草稿恢复和修改冲突提示。已有图片独立保存，容器停止、重建或删除后仍可查看；含图片的报告下载为包含正文与图片的 ZIP，无图片时下载 Markdown。
+
+编辑器保留已有归档图片，暂不上传新图片。完整提交方式、图片限制与数据清理规则见[报告中心使用说明](docs/report-center.md)。
+
 配置条件、操作步骤与限制见[功能详解](docs/features.md)、[使用指南](docs/usage.md)与[安全边界](docs/security.md)。
 
 ---
@@ -300,6 +308,7 @@ Windows 解压 `sentinel-web-windows-x64.zip` 后，在 PowerShell 运行 `.\sen
 | 安卓与 iOS 设备接入 | [移动端指南](docs/mobile.md) |
 | 代理切换、网关与旧项目迁移 | [项目网关](packages/web/docs/project-gateway.md) |
 | 资产上报、关联漏洞与导出 | [资产库](docs/asset-library.md) |
+| 报告提交、图片归档、实时编辑与下载 | [报告中心](docs/report-center.md) |
 | 安装本地 / 远端插件 | [插件中心](docs/plugin-center.md) |
 | 开发插件与插件前端 | [插件开发](docs/plugin-authoring.md) · [插件前端](docs/plugin-ui.md) |
 | 仓库结构、构建与测试 | [开发指南](docs/development.md) |
