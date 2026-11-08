@@ -1428,7 +1428,7 @@ export async function startSentinelServer(
 			}
 			if (path === "/api/mitm" || path.startsWith("/api/mitm/")) {
 				void handleMitmApi(request, response, mitm, {
-					project: () => runtime.snapshot().project,
+					project: () => runtime.currentProject,
 					authorized: () => !authEnabled || hasValidSession(currentAuth(), request),
 				});
 				return;

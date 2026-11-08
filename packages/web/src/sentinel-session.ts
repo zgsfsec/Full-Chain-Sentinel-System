@@ -678,6 +678,18 @@ export class SentinelRuntime {
 		return this.active?.manager.getSessionId() ?? null;
 	}
 
+	/** Project checks must not construct or clone the conversation transcript. */
+	get currentProject(): SentinelStateSnapshot["project"] {
+		return this.activeProjectId
+			? {
+					id: this.activeProjectId,
+					name: this.activeProjectName ?? "",
+					cwd: this.cwd,
+					container: this.activeContainer ?? null,
+				}
+			: null;
+	}
+
 	/** The active session's file path, for messages that mean "the current session". */
 	get currentSessionPath(): string | null {
 		const file = this.active?.manager.getSessionFile();
@@ -4549,14 +4561,7 @@ export class SentinelRuntime {
 			mode: sessionMode,
 			streaming: this.isStreaming,
 			cwd: this.cwd,
-			project: this.activeProjectId
-				? {
-						id: this.activeProjectId,
-						name: this.activeProjectName ?? "",
-						cwd: this.cwd,
-						container: this.activeContainer ?? null,
-					}
-				: null,
+			project: this.currentProject,
 			model: model ? { provider: model.provider, id: model.id } : null,
 			modelConfigured: resolvedMain !== null && model !== undefined,
 			thinkingLevel: active?.session.thinkingLevel ?? "off",

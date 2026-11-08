@@ -56,6 +56,18 @@ afterEach(() => {
 	rmSync(root, { recursive: true, force: true });
 });
 
+test("lightweight project metadata follows switches and detachment without a snapshot", async () => {
+	const snapshot = vi.spyOn(runtime, "snapshot").mockImplementation(() => {
+		throw new Error("Project metadata must not clone the chat");
+	});
+	expect(runtime.currentProject).toEqual(projectA);
+	await runtime.switchProject(projectB);
+	expect(runtime.currentProject).toEqual(projectB);
+	await runtime.detachProject(projectB.cwd);
+	expect(runtime.currentProject).toBeNull();
+	expect(snapshot).not.toHaveBeenCalled();
+});
+
 test("main, worker and their sub-agents receive MITM reads bound to their own project", async () => {
 	// Construct real sessions without prompting a model or starting Docker.
 	writeTestModel(root, { baseUrl: "http://127.0.0.1:9/v1", apiKey: "fixture", modelId: "fixture" });
