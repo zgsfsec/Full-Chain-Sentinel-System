@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { runDocker } from "../src/docker.ts";
 import { MitmCenter } from "../src/mitm.ts";
 import { handleMitmApi } from "../src/mitm-api.ts";
@@ -15,9 +15,12 @@ import {
 	getMitmFlow,
 	listMitmFlows,
 	MITM_DELETE_SCRIPT,
+	MitmCountCache,
 	MitmError,
+	type MitmReader,
 	mitmBlobPath,
 	mitmRawPath,
+	readMitmStore,
 } from "../src/mitm-store.ts";
 import { openSqliteDatabase, type SqliteDatabase } from "../src/sqlite.ts";
 
@@ -41,6 +44,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	if (server) {
 		server.closeAllConnections();
 		await new Promise<void>((resolve) => server?.close(() => resolve()));
@@ -48,6 +52,85 @@ afterEach(async () => {
 	}
 	db.close();
 	rmSync(root, { recursive: true, force: true });
+});
+
+test("cursor pages remain stable when new traffic arrives, including tied timestamps", async () => {
+	for (let i = 0; i < 125; i++) insert(`flw_${String(i).padStart(3, "0")}`);
+	const first = await listMitmFlows(directory, new URLSearchParams());
+	insert("new_capture");
+	const second = await listMitmFlows(directory, new URLSearchParams({ page: "2", cursor: first.nextCursor! }));
+	const third = await listMitmFlows(directory, new URLSearchParams({ page: "3", cursor: second.nextCursor! }));
+	const ids = [...first.items, ...second.items, ...third.items].map((item) => item.id);
+	expect(new Set(ids).size).toBe(125);
+	expect(ids).not.toContain("new_capture");
+	expect(third.nextCursor).toBeNull();
+	for (const cursor of ["bad cursor", "a".repeat(257), Buffer.from('[1,"../private"]').toString("base64url")])
+		await expect(listMitmFlows(directory, new URLSearchParams({ cursor }))).rejects.toThrow(MitmError);
+});
+
+test("count caching bounds repeated scans, expires, isolates filters, and cannot restore invalidated counts", async () => {
+	const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+	const cache = new MitmCountCache();
+	let counts = 0;
+	const reader: MitmReader = async (queries) =>
+		queries.map((query) => {
+			if (query.sql.includes("COUNT(*)")) counts++;
+			return db.prepare(query.sql).all(...query.params);
+		});
+	insert("first");
+	const query = new URLSearchParams();
+	expect(await listMitmFlows(directory, query, reader, cache)).toMatchObject({ total: 1, totalCached: false });
+	insert("second");
+	expect(await listMitmFlows(directory, query, reader, cache)).toMatchObject({
+		total: 2,
+		totalCached: true,
+		items: expect.any(Array),
+	});
+	expect(counts).toBe(1);
+	await listMitmFlows(directory, new URLSearchParams("q=missing"), reader, cache);
+	expect(counts).toBe(2);
+	clock.mockReturnValue(16000);
+	await listMitmFlows(directory, query, reader, cache);
+	expect(counts).toBe(3);
+	await listMitmFlows(directory, new URLSearchParams("refreshCount=1"), reader, cache);
+	expect(counts).toBe(4);
+	cache.clear();
+	await listMitmFlows(directory, query, reader, cache);
+	expect(counts).toBe(5);
+	const revision = cache.revision;
+	cache.clear();
+	cache.set("late", 99, 16000, revision);
+	expect(cache.get("late")).toBeUndefined();
+});
+
+test("stopped history queries run off the console event loop", async () => {
+	insert("one");
+	let ticked = false;
+	const timer = setTimeout(() => {
+		ticked = true;
+	}, 0);
+	try {
+		const rows = await readMitmStore(directory)([{ sql: "SELECT COUNT(*) AS n FROM flows", params: [] }]);
+		expect(rows[0][0]).toMatchObject({ n: 1 });
+		expect(ticked).toBe(true);
+	} finally {
+		clearTimeout(timer);
+	}
+});
+
+test("storage accounts for deduplicated blobs and refreshes after deleting captures", async () => {
+	const center = new MitmCenter(root, () => [{ id: "a", name: "A" }], missingDocker);
+	const sha = blob(Buffer.from("shared"));
+	insert("one", 200, "proxy", "a.example", sha);
+	insert("two", 200, "proxy", "a.example", sha);
+	const before = await center.storage("a");
+	expect(before.usedBytes).toBeGreaterThan(6);
+	expect(before.freeBytes).toBeGreaterThan(0);
+	expect(before.capacityBytes).toBeGreaterThanOrEqual(before.freeBytes);
+	expect(await center.storage("a")).toBe(before);
+	await center.deleteFlows("a", ["one"]);
+	expect(await center.storage("a")).not.toBe(before);
+	expect(existsSync(mitmBlobPath(directory, sha)!)).toBe(true);
 });
 
 function blob(bytes: Buffer): string {
@@ -320,10 +403,46 @@ test("capture configuration validates limits and persists operator choices", asy
 	for (const maxCaptureMb of [0, -1, 33, 1.5, "2"]) {
 		await expect(center.save("a", { bind: "127.0.0.1", port: 0, maxCaptureMb })).rejects.toThrow();
 	}
+	for (const maxConnections of [0, -1, 1025, 1.5, "128"])
+		await expect(center.save("a", { bind: "127.0.0.1", port: 0, maxConnections })).rejects.toThrow();
+	expect((await center.save("a", { bind: "127.0.0.1", port: 0, maxConnections: 16 })).config.maxConnections).toBe(16);
 	await expect(center.save("a", { bind: "127.0.0.1", port: 0, skipStatic: "yes" })).rejects.toThrow();
 	expect(
 		(await center.save("a", { bind: "127.0.0.1", port: 0, skipStatic: false, maxCaptureMb: 8 })).config,
 	).toMatchObject({ skipStatic: false, maxCaptureMb: 8 });
+});
+
+test("live query capacity is bounded and recovers after Docker errors", async () => {
+	const owner = createHash("sha256")
+		.update(`${join(root, "mitm")}/a`)
+		.digest("hex");
+	let release: (() => void) | undefined;
+	const pending = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const docker: typeof runDocker = async (args) => {
+		if (args[0] === "inspect")
+			return {
+				code: 0,
+				stderr: "",
+				stdout: JSON.stringify([
+					{
+						Config: { Labels: { "sentinel.mitm.owner": owner } },
+						State: { Running: true },
+						NetworkSettings: { Ports: {} },
+					},
+				]),
+			};
+		await pending;
+		return { code: 1, stderr: "fixture failure", stdout: "" };
+	};
+	const center = new MitmCenter(root, () => [{ id: "a", name: "A" }], docker);
+	const reader = (await center.reader("a"))!;
+	const active = Array.from({ length: 4 }, () => reader([]));
+	await expect(reader([])).rejects.toMatchObject({ status: 503, message: expect.stringContaining("繁忙") });
+	release!();
+	for (const result of await Promise.allSettled(active)) expect(result.status).toBe("rejected");
+	await expect(reader([])).rejects.toThrow("读取实时流量失败");
 });
 
 test("HTTP API isolates projects, validates bodies, downloads raw bytes and rechecks context after upload", async () => {

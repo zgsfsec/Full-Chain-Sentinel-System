@@ -1,6 +1,7 @@
 /** Project-owned capture workers. Operator traffic never enters the Agent's replayd instance. */
 import { createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual, X509Certificate } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { rm, stat, statfs } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,12 +10,15 @@ import { installProjectMitmCa, projectMitmDirectory } from "./mitm-certificate.t
 import {
 	deleteMitmFlows,
 	getMitmFlow,
+	listMitmFlows,
 	MITM_DELETE_SCRIPT,
 	MITM_READ_SCRIPT,
+	MitmCountCache,
 	MitmError,
 	type MitmReader,
+	readMitmStore,
 } from "./mitm-store.ts";
-import type { MitmConfig, MitmStatus } from "./mitm-types.ts";
+import type { MitmConfig, MitmStatus, MitmStorage } from "./mitm-types.ts";
 import { readReplaydBinary, replaydArchFromUname, replaydBinaryHint } from "./replayd-binary.ts";
 import {
 	prepareWebFuzzRaw,
@@ -53,6 +57,9 @@ export class MitmCenter {
 	private readonly locks = new Map<string, Promise<unknown>>();
 	private readonly deleting = new Set<string>();
 	private readonly replays = new Map<string, Set<AbortController>>();
+	private readonly flowCounts = new MitmCountCache();
+	private readonly storageCache = new Map<string, { at: number; value: Promise<MitmStorage> }>();
+	private liveReaders = 0;
 	constructor(agentDir: string, projects: () => MitmProject[], docker: typeof runDocker = runDocker) {
 		this.root = resolve(agentDir, "mitm");
 		this.projects = projects;
@@ -194,6 +201,9 @@ export class MitmCenter {
 			throw new MitmError("监听地址无效；端口应为 1–65535，或填 0 自动分配。");
 		const skipStatic = raw.skipStatic ?? true;
 		const maxCaptureMb = raw.maxCaptureMb ?? 2;
+		const maxConnections = raw.maxConnections ?? 128;
+		if (!Number.isInteger(maxConnections) || maxConnections < 1 || maxConnections > 1024)
+			throw new MitmError("同时连接上限应为 1–1024。");
 		if (typeof skipStatic !== "boolean" || !Number.isInteger(maxCaptureMb) || maxCaptureMb < 1 || maxCaptureMb > 32)
 			throw new MitmError("报文保存上限应为 1–32 MB，静态资源过滤应为开关值。");
 		const authEnabled = raw.authEnabled ?? false;
@@ -215,6 +225,7 @@ export class MitmCenter {
 			port: raw.port as number,
 			skipStatic,
 			maxCaptureMb,
+			maxConnections,
 			authEnabled,
 			authUsername,
 			authSalt,
@@ -260,17 +271,72 @@ export class MitmCenter {
 	}
 
 	/** Docker Desktop cannot safely share WAL shared memory between Linux and the host. */
+	async listFlows(id: string, params: URLSearchParams) {
+		return listMitmFlows(this.directory(id), params, await this.reader(id), this.flowCounts);
+	}
+
+	async storage(id: string): Promise<MitmStorage> {
+		const directory = this.directory(id);
+		const cached = this.storageCache.get(id);
+		if (cached && Date.now() - cached.at < 60000) return cached.value;
+		const value = (async () => {
+			const reader = await this.reader(id);
+			const rows =
+				existsSync(join(directory, "replayd.db")) || reader
+					? await (reader ?? readMitmStore(directory))([
+							{ sql: "SELECT COALESCE(SUM(size), 0) AS bytes FROM blobs", params: [] },
+						])
+					: [[]];
+			const sizes = await Promise.all(
+				["replayd.db", "replayd.db-wal"].map(async (name) => {
+					try {
+						return (await stat(join(directory, name))).size;
+					} catch (error) {
+						if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+						throw error;
+					}
+				}),
+			);
+			const disk = await statfs(existsSync(directory) ? directory : dirname(this.root));
+			const freeBytes = disk.bavail * disk.bsize;
+			const capacityBytes = disk.blocks * disk.bsize;
+			return {
+				usedBytes:
+					Number((rows[0][0] as { bytes: number } | undefined)?.bytes ?? 0) + sizes.reduce((a, b) => a + b, 0),
+				freeBytes,
+				capacityBytes,
+				lowSpace: freeBytes < 1024 ** 3 || (capacityBytes > 0 && freeBytes / capacityBytes < 0.05),
+				updatedAt: Date.now(),
+			};
+		})();
+		if (this.storageCache.size >= 64) this.storageCache.delete(this.storageCache.keys().next().value!);
+		const entry = { at: Date.now(), value };
+		this.storageCache.set(id, entry);
+		try {
+			return await value;
+		} catch (error) {
+			if (this.storageCache.get(id) === entry) this.storageCache.delete(id);
+			throw error;
+		}
+	}
+
 	async reader(id: string): Promise<MitmReader | undefined> {
 		this.project(id);
 		if (!(await this.inspect(id))?.State.Running) return undefined;
 		return async (queries) => {
 			this.project(id);
-			const result = await this.docker(
-				["exec", this.container(id), "python3", "-c", MITM_READ_SCRIPT, JSON.stringify(queries)],
-				{ timeoutMs: 10000 },
-			);
-			if (result.code !== 0) throw new MitmError("读取实时流量失败，请刷新重试或检查 MITM 容器日志。", 503);
-			return JSON.parse(result.stdout) as unknown[][];
+			if (this.liveReaders >= 4) throw new MitmError("实时流量查询繁忙，请稍后重试。", 503);
+			this.liveReaders++;
+			try {
+				const result = await this.docker(
+					["exec", this.container(id), "python3", "-c", MITM_READ_SCRIPT, JSON.stringify(queries)],
+					{ timeoutMs: 10000 },
+				);
+				if (result.code !== 0) throw new MitmError("读取实时流量失败，请刷新重试或检查 MITM 容器日志。", 503);
+				return JSON.parse(result.stdout) as unknown[][];
+			} finally {
+				this.liveReaders--;
+			}
 		};
 	}
 
@@ -340,6 +406,7 @@ export class MitmCenter {
 				port: raw.port,
 				skipStatic: raw.skipStatic,
 				maxCaptureMb: raw.maxCaptureMb,
+				maxConnections: raw.maxConnections ?? previous.maxConnections,
 				authEnabled,
 				authUsername: raw.authUsername ?? previous.authUsername,
 				authSalt: authEnabled ? authSalt : "",
@@ -452,6 +519,8 @@ export class MitmCenter {
 				`-proxy-skip-static=${config.skipStatic}`,
 				"-proxy-max-capture-bytes",
 				String(config.maxCaptureMb * 1024 * 1024),
+				"-proxy-max-connections",
+				String(config.maxConnections),
 				"-quiet",
 				"-log-format",
 				"json",
@@ -517,18 +586,24 @@ export class MitmCenter {
 							["exec", this.container(id), "python3", "-c", MITM_DELETE_SCRIPT, JSON.stringify(queries)],
 							{ timeoutMs: 30000 },
 						);
-						if (result.code !== 0) throw new MitmError("删除流量失败，请刷新重试或检查 MITM 容器日志。", 503);
+						if (result.code !== 0)
+							throw new MitmError("流量清理未完成，部分批次可能已删除，请刷新后重试或检查 MITM 容器日志。", 503);
 						const deleted: unknown = JSON.parse(result.stdout);
 						if (typeof deleted !== "number" || !Number.isSafeInteger(deleted) || deleted < 0)
 							throw new MitmError("删除流量返回无效结果。", 502);
 						return deleted;
 					}
 				: undefined,
-		);
+		).finally(() => {
+			this.flowCounts.clear();
+			this.storageCache.delete(id);
+		});
 	}
 
 	clear(id: string): Promise<void> {
 		return this.exclusive(id, async () => {
+			this.flowCounts.clear();
+			this.storageCache.delete(id);
 			this.project(id);
 			const state = await this.inspect(id);
 			if (state?.State.Running) {
@@ -555,10 +630,13 @@ export class MitmCenter {
 				writeFileSync(`${pointer}.tmp`, JSON.stringify(name), { mode: 0o600 });
 				renameSync(`${pointer}.tmp`, pointer);
 				switched = true;
-				rmSync(directory, { recursive: true, force: true });
+				await rm(directory, { recursive: true, force: true });
 			} finally {
-				if (!switched) rmSync(next, { recursive: true, force: true });
+				if (!switched) await rm(next, { recursive: true, force: true });
 			}
+		}).finally(() => {
+			this.flowCounts.clear();
+			this.storageCache.delete(id);
 		});
 	}
 
@@ -575,11 +653,13 @@ export class MitmCenter {
 					const removed = await this.docker(["rm", "-f", this.container(id)], { timeoutMs: 20000 });
 					if (removed.code !== 0) throw new MitmError(`无法清理项目 MITM 容器：${removed.stderr}`, 502);
 				}
-				rmSync(join(this.root, id), { recursive: true, force: true });
+				await rm(join(this.root, id), { recursive: true, force: true });
 				// Keep starts blocked until the registry operation has completed too.
 				return await unregister?.();
 			} finally {
 				this.deleting.delete(id);
+				this.flowCounts.clear();
+				this.storageCache.delete(id);
 			}
 		});
 	}

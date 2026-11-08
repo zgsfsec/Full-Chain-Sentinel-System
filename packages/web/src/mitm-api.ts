@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { pipeline } from "node:stream/promises";
 import type { MitmCenter } from "./mitm.ts";
-import { getMitmFlow, listMitmFlows, MitmError, mitmRawPath } from "./mitm-store.ts";
+import { getMitmFlow, MitmError, mitmRawPath } from "./mitm-store.ts";
 
 /** Mounted behind the console's gate, login and consent checks. */
 export async function handleMitmApi(
@@ -51,6 +51,10 @@ export async function handleMitmApi(
 			throw new MitmError("当前项目已变更，请刷新页面。", 409);
 		const directory = center.directory(id);
 		if (request.method === "GET") {
+			if (path === "/storage") {
+				json(await center.storage(id));
+				return;
+			}
 			if (path === "/webfuzz") {
 				json(center.webFuzzState(id));
 				return;
@@ -60,7 +64,7 @@ export async function handleMitmApi(
 				return;
 			}
 			if (path === "/flows") {
-				json(await listMitmFlows(directory, url.searchParams, await center.reader(id)));
+				json(await center.listFlows(id, url.searchParams));
 				return;
 			}
 			if (path === "/ca.pem" || path === "/ca.crt") {

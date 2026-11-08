@@ -6,6 +6,7 @@ export interface MitmConfig {
 	skipStatic: boolean;
 	/** Maximum stored bytes per request or response, in MiB. */
 	maxCaptureMb: number;
+	maxConnections: number;
 	authEnabled: boolean;
 	authUsername: string;
 	/** Passwords and their hashes are never returned to the browser. */
@@ -20,6 +21,15 @@ export interface MitmStatus {
 	lanIps: string[];
 	ca: { fingerprint: string; subject: string; expires: string } | null;
 	error?: string;
+}
+
+export interface MitmStorage {
+	/** Blob metadata plus database/WAL sizes; not a recursive directory scan. */
+	usedBytes: number;
+	freeBytes: number;
+	capacityBytes: number;
+	lowSpace: boolean;
+	updatedAt: number;
 }
 
 export interface MitmHeader {
@@ -49,6 +59,10 @@ export interface MitmFlowPage {
 	total: number;
 	page: number;
 	pageSize: number;
+	nextCursor?: string | null;
+	/** A recent count may lag new captures; rows are always queried live. */
+	totalCached?: boolean;
+	totalUpdatedAt?: number;
 }
 
 export interface MitmBody {

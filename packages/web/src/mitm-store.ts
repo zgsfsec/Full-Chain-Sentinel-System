@@ -2,6 +2,7 @@
 import { isUtf8 } from "node:buffer";
 import { closeSync, existsSync, fstatSync, openSync, readSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { Worker } from "node:worker_threads";
 import type { MitmBody, MitmBodyChunk, MitmFlow, MitmFlowDetail, MitmFlowPage, MitmHeader } from "./mitm-types.ts";
 import { openSqliteDatabase, type SqliteValue } from "./sqlite.ts";
 
@@ -91,6 +92,31 @@ export type MitmReader = (queries: MitmQuery[]) => Promise<unknown[][]>;
 
 export type MitmWriter = (queries: MitmQuery[]) => Promise<number>;
 
+/** Shared only by console lists; Agent queries retain exact counts. */
+export class MitmCountCache {
+	private readonly entries = new Map<string, { total: number; at: number }>();
+	revision = 0;
+
+	get(key: string): { total: number; at: number } | undefined {
+		const entry = this.entries.get(key);
+		if (entry && Date.now() - entry.at >= 0 && Date.now() - entry.at < 15000) return entry;
+		this.entries.delete(key);
+		return undefined;
+	}
+
+	set(key: string, total: number, at: number, revision: number): void {
+		if (revision !== this.revision) return;
+		this.entries.delete(key);
+		if (this.entries.size >= 64) this.entries.delete(this.entries.keys().next().value!);
+		this.entries.set(key, { total, at });
+	}
+
+	clear(): void {
+		this.revision++;
+		this.entries.clear();
+	}
+}
+
 /** The live writer must run in the container, alongside replayd's WAL. */
 export const MITM_DELETE_SCRIPT = `import json, sys, urllib.request
 queries = json.loads(sys.argv[1])
@@ -169,25 +195,57 @@ finally:
     connection.close()
 `;
 
-function readStore(directory: string, queries: MitmQuery[]): unknown[][] {
-	const path = join(directory, "replayd.db");
-	if (!existsSync(path)) return queries.map(() => []);
-	const db = openSqliteDatabase(path);
-	try {
-		db.exec("PRAGMA busy_timeout = 1000; PRAGMA query_only = ON;");
-		if (!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'flows'").get())
-			return queries.map(() => []);
-		db.exec("BEGIN");
-		return queries.map((query) => db.prepare(query.sql).all(...query.params));
-	} finally {
-		db.close();
-	}
+// SQLite's synchronous driver must not block the console when browsing stopped
+// captures. Inline worker code also works in the bundled executable, with no
+// extra worker entrypoint or third-party runtime dependency.
+const HOST_READ_WORKER = `
+const { parentPort, workerData } = require('node:worker_threads');
+const sqlite = require(process.versions.bun ? 'bun:sqlite' : 'node:sqlite');
+const Database = sqlite.DatabaseSync || sqlite.Database;
+const db = new Database(workerData.path, process.versions.bun ? { readonly: true } : { readOnly: true });
+try {
+  db.exec('PRAGMA busy_timeout = 1000; PRAGMA query_only = ON;');
+  if (!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'flows'").get()) {
+    parentPort.postMessage(workerData.queries.map(() => []));
+  } else {
+    db.exec('BEGIN');
+    parentPort.postMessage(workerData.queries.map(q => db.prepare(q.sql).all(...q.params)));
+  }
+} finally { db.close(); }
+`;
+let hostReaders = 0;
+
+export function readMitmStore(directory: string): MitmReader {
+	return async (queries) => {
+		const path = join(directory, "replayd.db");
+		if (!existsSync(path)) return queries.map(() => []);
+		if (hostReaders >= 4) throw new MitmError("历史流量查询繁忙，请稍后重试。", 503);
+		hostReaders++;
+		try {
+			return await new Promise<unknown[][]>((resolve, reject) => {
+				const worker = new Worker(HOST_READ_WORKER, { eval: true, workerData: { path, queries } });
+				const timer = setTimeout(() => {
+					void worker.terminate();
+					reject(new MitmError("历史流量查询超时，请缩小时间范围或筛选条件。", 503));
+				}, 10000);
+				worker.once("message", (rows: unknown[][]) => resolve(rows));
+				worker.once("error", reject);
+				worker.once("exit", (code) => {
+					clearTimeout(timer);
+					if (code !== 0) reject(new MitmError("历史流量查询失败。", 503));
+				});
+			});
+		} finally {
+			hostReaders--;
+		}
+	};
 }
 
 export async function listMitmFlows(
 	directory: string,
 	params: URLSearchParams,
-	reader: MitmReader = async (queries) => readStore(directory, queries),
+	reader: MitmReader = readMitmStore(directory),
+	counts?: MitmCountCache,
 ): Promise<MitmFlowPage> {
 	const requestedPage = Number(params.get("page") ?? 1);
 	const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? Math.min(requestedPage, 1_000_000) : 1;
@@ -236,25 +294,61 @@ export async function listMitmFlows(
 		values.push(Number(status));
 	}
 	const clause = where.join(" AND ");
-	const [count, rows] = await reader([
-		{ sql: `SELECT COUNT(*) AS n FROM flows WHERE ${clause}`, params: values },
-		{
-			sql: `SELECT id, ts, method, scheme, host, port, path, query, status, duration_ms, req_size, resp_size, error, note FROM flows WHERE ${clause} ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?`,
-			params: [...values, pageSize, (page - 1) * pageSize],
-		},
-	]);
+	const countKey = JSON.stringify([directory, clause, values]);
+	const cached = params.get("refreshCount") === "1" ? undefined : counts?.get(countKey);
+	const revision = counts?.revision ?? 0;
+	const at = cached?.at ?? Date.now();
+	const rowValues = [...values];
+	let rowClause = clause;
+	const cursor = params.get("cursor");
+	if (cursor) {
+		let decoded: unknown;
+		try {
+			if (cursor.length > 256 || !/^[A-Za-z0-9_-]+$/.test(cursor)) throw new Error("invalid cursor");
+			decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+		} catch {
+			throw new MitmError("翻页游标无效，请刷新列表。");
+		}
+		if (
+			!Array.isArray(decoded) ||
+			decoded.length !== 2 ||
+			!Number.isSafeInteger(decoded[0]) ||
+			decoded[0] < 0 ||
+			typeof decoded[1] !== "string" ||
+			!/^[a-zA-Z0-9_-]{1,100}$/.test(decoded[1])
+		)
+			throw new MitmError("翻页游标无效，请刷新列表。");
+		rowClause += " AND (ts, id) < (?, ?)";
+		rowValues.push(decoded[0], decoded[1]);
+	}
+	const rowQuery = {
+		sql: `SELECT id, ts, method, scheme, host, port, path, query, status, duration_ms, req_size, resp_size, error, note FROM flows WHERE ${rowClause} ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?`,
+		params: [...rowValues, pageSize + 1, cursor ? 0 : (page - 1) * pageSize],
+	};
+	const results = await reader(
+		cached ? [rowQuery] : [{ sql: `SELECT COUNT(*) AS n FROM flows WHERE ${clause}`, params: values }, rowQuery],
+	);
+	const total = cached?.total ?? (results[0][0] as { n: number } | undefined)?.n ?? 0;
+	if (!cached) counts?.set(countKey, total, at, revision);
+	const rows = results[cached ? 0 : 1] as FlowRow[];
+	const items = rows.slice(0, pageSize).map(flow);
+	const last = items.at(-1);
 	return {
-		items: (rows as FlowRow[]).map(flow),
-		total: (count[0] as { n: number } | undefined)?.n ?? 0,
+		items,
+		total: cached && items.length > 0 ? Math.max(total, (page - 1) * pageSize + rows.length) : total,
 		page,
 		pageSize,
+		nextCursor:
+			rows.length > pageSize && last ? Buffer.from(JSON.stringify([last.ts, last.id])).toString("base64url") : null,
+		totalCached: Boolean(cached),
+		totalUpdatedAt: at,
 	};
 }
 
 export async function getMitmFlow(
 	directory: string,
 	id: string,
-	reader: MitmReader = async (queries) => readStore(directory, queries),
+	reader: MitmReader = readMitmStore(directory),
 	previewBytes = 1024 * 1024,
 ): Promise<MitmFlowDetail> {
 	if (!Number.isSafeInteger(previewBytes) || previewBytes < 0 || previewBytes > 1024 * 1024)
@@ -278,7 +372,7 @@ export async function readMitmFlowChunk(
 	side: "request" | "response",
 	offset: number,
 	limit: number,
-	reader: MitmReader = async (queries) => readStore(directory, queries),
+	reader: MitmReader = readMitmStore(directory),
 ): Promise<MitmBodyChunk> {
 	if (side !== "request" && side !== "response") throw new MitmError("请选择请求或响应。");
 	if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 16384)
@@ -334,7 +428,7 @@ export async function mitmRawPath(
 	directory: string,
 	id: string,
 	side: string,
-	reader: MitmReader = async (queries) => readStore(directory, queries),
+	reader: MitmReader = readMitmStore(directory),
 ): Promise<string> {
 	if (side !== "request" && side !== "response") throw new MitmError("请选择请求或响应。");
 	const column = side === "request" ? "req_raw_sha" : "resp_raw_sha";
