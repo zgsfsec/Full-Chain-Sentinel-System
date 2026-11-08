@@ -199,45 +199,106 @@ finally:
 // captures. Inline worker code also works in the bundled executable, with no
 // extra worker entrypoint or third-party runtime dependency.
 const HOST_READ_WORKER = `
-const { parentPort, workerData } = require('node:worker_threads');
+const { parentPort } = require('node:worker_threads');
 const sqlite = require(process.versions.bun ? 'bun:sqlite' : 'node:sqlite');
 const Database = sqlite.DatabaseSync || sqlite.Database;
-const db = new Database(workerData.path, process.versions.bun ? { readonly: true } : { readOnly: true });
-try {
-  db.exec('PRAGMA busy_timeout = 1000; PRAGMA query_only = ON;');
-  if (!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'flows'").get()) {
-    parentPort.postMessage(workerData.queries.map(() => []));
-  } else {
-    db.exec('BEGIN');
-    parentPort.postMessage(workerData.queries.map(q => db.prepare(q.sql).all(...q.params)));
+parentPort.on('message', ({ path, queries }) => {
+  try {
+    const db = new Database(path, process.versions.bun ? { readonly: true } : { readOnly: true });
+    let rows;
+    try {
+      db.exec('PRAGMA busy_timeout = 1000; PRAGMA query_only = ON;');
+      if (!db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'flows'").get()) {
+        rows = queries.map(() => []);
+      } else {
+        db.exec('BEGIN');
+        rows = queries.map(q => db.prepare(q.sql).all(...q.params));
+      }
+    } finally { db.close(); }
+    parentPort.postMessage({ rows });
+  } catch (error) {
+    parentPort.postMessage({ error: error instanceof Error ? error.message : String(error) });
   }
-} finally { db.close(); }
+});
 `;
-let hostReaders = 0;
+
+interface HostReadSlot {
+	worker: Worker;
+	retiring: boolean;
+	pending?: {
+		resolve: (rows: unknown[][]) => void;
+		reject: (error: Error) => void;
+		timer: ReturnType<typeof setTimeout>;
+	};
+}
+
+// Lazily reuse at most four threads across projects. SQLite initializes once per
+// thread, so polling does not repeatedly pay startup costs or emit its warning.
+const hostReaders = new Set<HostReadSlot>();
+
+function retireHostReader(slot: HostReadSlot, error: Error): void {
+	if (slot.retiring) return;
+	slot.retiring = true;
+	const pending = slot.pending;
+	slot.pending = undefined;
+	if (pending) {
+		clearTimeout(pending.timer);
+		pending.reject(error);
+	}
+	// Keep the slot occupied until exit, even after a timeout, to bound threads.
+	void slot.worker.terminate().catch(() => {});
+}
+
+function createHostReader(): HostReadSlot {
+	const worker = new Worker(HOST_READ_WORKER, { eval: true });
+	const slot: HostReadSlot = { worker, retiring: false };
+	worker.on("message", (result: { rows: unknown[][] } | { error: string }) => {
+		const pending = slot.pending;
+		if (!pending || slot.retiring) return;
+		slot.pending = undefined;
+		clearTimeout(pending.timer);
+		worker.unref();
+		if ("error" in result) pending.reject(new Error(result.error));
+		else pending.resolve(result.rows);
+	});
+	worker.on("error", (error) => retireHostReader(slot, error));
+	worker.on("messageerror", (error) => retireHostReader(slot, error));
+	worker.on("exit", () => {
+		slot.retiring = true;
+		hostReaders.delete(slot);
+		if (slot.pending) {
+			clearTimeout(slot.pending.timer);
+			slot.pending.reject(new MitmError("历史流量查询失败。", 503));
+			slot.pending = undefined;
+		}
+	});
+	worker.unref(); // Idle threads must not keep the console process alive.
+	hostReaders.add(slot);
+	return slot;
+}
 
 export function readMitmStore(directory: string): MitmReader {
 	return async (queries) => {
 		const path = join(directory, "replayd.db");
 		if (!existsSync(path)) return queries.map(() => []);
-		if (hostReaders >= 4) throw new MitmError("历史流量查询繁忙，请稍后重试。", 503);
-		hostReaders++;
-		try {
-			return await new Promise<unknown[][]>((resolve, reject) => {
-				const worker = new Worker(HOST_READ_WORKER, { eval: true, workerData: { path, queries } });
-				const timer = setTimeout(() => {
-					void worker.terminate();
-					reject(new MitmError("历史流量查询超时，请缩小时间范围或筛选条件。", 503));
-				}, 10000);
-				worker.once("message", (rows: unknown[][]) => resolve(rows));
-				worker.once("error", reject);
-				worker.once("exit", (code) => {
-					clearTimeout(timer);
-					if (code !== 0) reject(new MitmError("历史流量查询失败。", 503));
-				});
-			});
-		} finally {
-			hostReaders--;
+		let slot = [...hostReaders].find((entry) => !entry.pending && !entry.retiring);
+		if (!slot) {
+			if (hostReaders.size >= 4) throw new MitmError("历史流量查询繁忙，请稍后重试。", 503);
+			slot = createHostReader();
 		}
+		const reader = slot;
+		return new Promise<unknown[][]>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				retireHostReader(reader, new MitmError("历史流量查询超时，请缩小时间范围或筛选条件。", 503));
+			}, 10000);
+			reader.pending = { resolve, reject, timer };
+			reader.worker.ref();
+			try {
+				reader.worker.postMessage({ path, queries });
+			} catch (error) {
+				retireHostReader(reader, error instanceof Error ? error : new Error(String(error)));
+			}
+		});
 	};
 }
 

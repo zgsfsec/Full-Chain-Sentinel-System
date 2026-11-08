@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
 import { createHash, pbkdf2Sync } from "node:crypto";
+import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { Worker } from "node:worker_threads";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { runDocker } from "../src/docker.ts";
 import { MitmCenter } from "../src/mitm.ts";
@@ -116,6 +118,94 @@ test("stopped history queries run off the console event loop", async () => {
 	} finally {
 		clearTimeout(timer);
 	}
+});
+
+test("history polling reuses its thread, closes snapshots, and recovers from SQL errors", async () => {
+	const threads = new Set<number>();
+	const postMessage = Worker.prototype.postMessage;
+	vi.spyOn(Worker.prototype, "postMessage").mockImplementation(function (
+		this: Worker,
+		...args: Parameters<Worker["postMessage"]>
+	) {
+		threads.add(this.threadId);
+		return postMessage.apply(this, args);
+	});
+	insert("first");
+	const query = [{ sql: "SELECT COUNT(*) AS n FROM flows", params: [] }];
+	for (let i = 0; i < 10; i++) expect(await readMitmStore(directory)(query)).toEqual([[{ n: 1 }]]);
+	insert("second");
+	expect(await readMitmStore(directory)(query)).toEqual([[{ n: 2 }]]);
+	await expect(readMitmStore(directory)([{ sql: "DELETE FROM flows", params: [] }])).rejects.toThrow(/readonly/i);
+	expect(await readMitmStore(directory)(query)).toEqual([[{ n: 2 }]]);
+	const other = join(root, "other-project");
+	mkdirSync(other);
+	const otherDb = openSqliteDatabase(join(other, "replayd.db"));
+	try {
+		otherDb.exec("CREATE TABLE flows(id TEXT)");
+	} finally {
+		otherDb.close();
+	}
+	expect(await readMitmStore(other)(query)).toEqual([[{ n: 0 }]]);
+	rmSync(other, { recursive: true });
+	expect(await readMitmStore(directory)(query)).toEqual([[{ n: 2 }]]);
+	expect(threads.size).toBe(1);
+});
+
+test("history queries keep a four-thread ceiling and release capacity after completion", async () => {
+	const reader = readMitmStore(directory);
+	const queries = [{ sql: "SELECT COUNT(*) AS n FROM flows", params: [] }];
+	const active = Array.from({ length: 4 }, () => reader(queries));
+	await expect(reader(queries)).rejects.toMatchObject({ status: 503, message: expect.stringContaining("繁忙") });
+	expect(await Promise.all(active)).toEqual(Array.from({ length: 4 }, () => [[{ n: 0 }]]));
+	expect(await reader(queries)).toEqual([[{ n: 0 }]]);
+});
+
+test("timed-out history queries terminate their thread and capacity recovers", async () => {
+	let current: Worker | undefined;
+	const postMessage = Worker.prototype.postMessage;
+	vi.spyOn(Worker.prototype, "postMessage").mockImplementation(function (
+		this: Worker,
+		...args: Parameters<Worker["postMessage"]>
+	) {
+		current = this;
+		return postMessage.apply(this, args);
+	});
+	const reader = readMitmStore(directory);
+	await reader([{ sql: "SELECT COUNT(*) AS n FROM flows", params: [] }]);
+	const expired = current!;
+	const exited = once(expired, "exit");
+	vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+	try {
+		const slow = reader([
+			{
+				sql: "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<1000000) SELECT SUM(i) FROM n",
+				params: [],
+			},
+		]);
+		const rejected = expect(slow).rejects.toMatchObject({ status: 503, message: expect.stringContaining("超时") });
+		await vi.advanceTimersByTimeAsync(10000);
+		await rejected;
+	} finally {
+		vi.useRealTimers();
+	}
+	await exited;
+	expect(await reader([{ sql: "SELECT COUNT(*) AS n FROM flows", params: [] }])).toEqual([[{ n: 0 }]]);
+	expect(current).not.toBe(expired);
+});
+
+test("idle history threads allow process exit and do not repeat SQLite warnings while polling", async () => {
+	const script = join(root, "history-poll.mjs");
+	writeFileSync(
+		script,
+		`import { readMitmStore } from ${JSON.stringify(new URL("../src/mitm-store.ts", import.meta.url).href)};
+const reader = readMitmStore(${JSON.stringify(directory)});
+for (let i = 0; i < 20; i++) await reader([{ sql: 'SELECT COUNT(*) AS n FROM flows', params: [] }]);
+console.log('history polling finished');
+`,
+	);
+	const result = await promisify(execFile)(process.execPath, [script], { timeout: 4000, encoding: "utf8" });
+	expect(result.stdout).toContain("history polling finished");
+	expect(result.stderr.match(/ExperimentalWarning: SQLite/g)?.length ?? 0).toBeLessThanOrEqual(1);
 });
 
 test("storage accounts for deduplicated blobs and refreshes after deleting captures", async () => {
