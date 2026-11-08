@@ -33,6 +33,7 @@ import { webFuzzTarget } from "../../../src/webfuzz-target.ts";
 import type { WebFuzzRequest, WebFuzzResult, WebFuzzState, WebFuzzTab } from "../../../src/webfuzz-types.ts";
 import { getLanguage } from "../i18n.ts";
 import { Page } from "../ui/Page.tsx";
+import { webFuzzApi as api } from "./webfuzz-api.ts";
 import { editWebFuzzRaw } from "./webfuzz-editor.ts";
 import "./WebFuzzPage.css";
 
@@ -42,23 +43,6 @@ const saves = new Map<string, Promise<unknown>>();
 // A project switch may revoke a queued save. Keep that draft until this project
 // is opened again so the rejected save does not discard the last edit.
 const unsaved = new Map<string, Workspace>();
-
-async function api<T>(path: string, projectId: string, body?: object, signal?: AbortSignal): Promise<T> {
-	const response = await fetch(
-		`/api/mitm${path}${body ? "" : `?projectId=${encodeURIComponent(projectId)}`}`,
-		body
-			? {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ ...body, projectId }),
-					signal,
-				}
-			: { signal },
-	);
-	const value = (await response.json()) as T & { error?: string };
-	if (!response.ok) throw new Error(value.error ?? tx("请求失败", "Request failed"));
-	return value;
-}
 
 function persist(projectId: string, workspace: Workspace): Promise<unknown> {
 	unsaved.set(projectId, workspace);
@@ -91,6 +75,11 @@ function newTab(input?: WebFuzzRequest): WebFuzzTab {
 		id: Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join(""),
 		name: tx("未命名请求", "Untitled request"),
 	};
+}
+
+function restoreWorkspace(workspace: Workspace): Workspace {
+	const tabs = workspace.tabs.length ? workspace.tabs : [newTab()];
+	return { tabs, activeId: tabs.some((tab) => tab.id === workspace.activeId) ? workspace.activeId : tabs[0].id };
 }
 
 function size(bytes: number): string {
@@ -319,6 +308,7 @@ export function WebFuzzPage({
 	const [error, setError] = useState("");
 	const [saveError, setSaveError] = useState("");
 	const [loadFailed, setLoadFailed] = useState(false);
+	const [importing, setImporting] = useState(false);
 	const [historyOpen, setHistoryOpen] = useState(false);
 	const [busyTab, setBusyTab] = useState<string | null>(null);
 	const [password, setPassword] = useState("");
@@ -339,18 +329,27 @@ export function WebFuzzPage({
 		if (!projectId) return;
 		const controller = new AbortController();
 		setLoadFailed(false);
+		setImporting(false);
+		// Render the last local edit even if its save is still waiting on the server.
+		const cached = unsaved.get(projectId);
+		latest.current = cached ? restoreWorkspace(cached) : null;
+		dirty.current = cached !== undefined;
+		setWorkspace(latest.current);
 		void (async () => {
 			try {
-				await saves.get(projectId)?.catch(() => {});
 				const data = await api<WebFuzzState>("/webfuzz", projectId, undefined, controller.signal);
 				if (controller.signal.aborted) return;
-				const cached = unsaved.get(projectId);
-				let tabs = cached?.tabs ?? data.tabs;
-				let activeId = cached ? cached.activeId : data.activeId;
-				if (cached) dirty.current = true;
+				// A late read must not replace edits made while it was in flight.
+				const source = latest.current ?? data;
+				const next = restoreWorkspace(source);
+				if (next.activeId !== source.activeId || next.tabs !== source.tabs) dirty.current = true;
+				latest.current = next;
+				setWorkspace(next);
+				setHistory(data.history);
 				if (flowId) {
+					setImporting(true);
 					try {
-						if (tabs.length >= 20)
+						if (next.tabs.length >= 20)
 							throw new Error(
 								tx(
 									"标签已满，请先关闭一个标签再从 MITM 导入。",
@@ -358,27 +357,23 @@ export function WebFuzzPage({
 								),
 							);
 						const request = await api<WebFuzzRequest>("/webfuzz/import", projectId, { flowId }, controller.signal);
+						if (controller.signal.aborted) return;
+						const current = latest.current!;
+						if (current.tabs.length >= 20) throw new Error(tx("最多保留 20 个标签，请先关闭一个。", "Up to 20 tabs. Close one first."));
 						const tab = newTab(request);
 						tab.name = tx("MITM 导入", "MITM import");
-						tabs = [...tabs, tab];
-						activeId = tab.id;
+						const imported = { tabs: [...current.tabs, tab], activeId: tab.id };
 						dirty.current = true;
+						latest.current = imported;
+						setWorkspace(imported);
 					} catch (cause) {
 						if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
 					}
-					if (!controller.signal.aborted) consumed.current?.();
+					if (!controller.signal.aborted) {
+						setImporting(false);
+						consumed.current?.();
+					}
 				}
-				if (controller.signal.aborted) return;
-				if (!tabs.length) {
-					const tab = newTab();
-					tabs = [tab];
-					activeId = tab.id;
-					dirty.current = true;
-				}
-				const next = { tabs, activeId: activeId ?? tabs[0].id };
-				latest.current = next;
-				setWorkspace(next);
-				setHistory(data.history);
 			} catch (cause) {
 				if (!controller.signal.aborted) {
 					setError(cause instanceof Error ? cause.message : String(cause));
@@ -484,6 +479,10 @@ export function WebFuzzPage({
 			/* Incomplete draft. */
 		}
 	}
+	const retry = <Button onClick={() => {
+		setError("");
+		setLoadVersion((value) => value + 1);
+	}}>{tx("重新加载", "Retry")}</Button>;
 	return (
 		<Page
 			className="webfuzz-page"
@@ -499,11 +498,13 @@ export function WebFuzzPage({
 				</>
 			}
 		>
+			{importing ? <Alert type="info" showIcon title={tx("正在从 MITM 导入请求…", "Importing request from MITM…")} /> : null}
 			{error || saveError ? (
 				<Alert
 					type="error"
 					showIcon
 					title={error || tx(`草稿保存失败：${saveError}`, `Draft save failed: ${saveError}`)}
+					action={loadFailed && workspace ? retry : undefined}
 					closable
 					onClose={() => {
 						setError("");
@@ -513,18 +514,7 @@ export function WebFuzzPage({
 			) : null}
 			{!workspace || !tab ? (
 				<div className="webfuzz-loading">
-					{loadFailed ? (
-						<Button
-							onClick={() => {
-								setError("");
-								setLoadVersion((value) => value + 1);
-							}}
-						>
-							{tx("重新加载", "Retry")}
-						</Button>
-					) : (
-						<Spin />
-					)}
+					{loadFailed ? retry : <Spin />}
 				</div>
 			) : (
 				<div className="webfuzz-workspace">
