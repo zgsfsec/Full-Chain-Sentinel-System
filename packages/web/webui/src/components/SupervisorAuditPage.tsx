@@ -34,6 +34,8 @@ import {
 } from "antd";
 import { useEffect, useState } from "react";
 import { getLanguage, t } from "../i18n.ts";
+import type { DetailLoadState } from "../detail-request.ts";
+import { DetailLoading } from "../ui/DetailLoading.tsx";
 import { SUPERVISOR_STRATEGY_OPTIONS, supervisorStrategyLabel } from "../supervisor-strategy.ts";
 import type {
 	SentinelProjectInfo,
@@ -237,6 +239,8 @@ const EMPTY_FILTER: FilterState = {
 export function SupervisorAuditPage({
 	page,
 	detail,
+	detailState,
+	onRetryDetail,
 	projects,
 	customStrategies,
 	onQuery,
@@ -246,6 +250,8 @@ export function SupervisorAuditPage({
 }: {
 	page: SentinelSupervisorAuditPage | null;
 	detail: SentinelSupervisorDetail | null;
+	detailState?: DetailLoadState | null;
+	onRetryDetail?: () => void;
 	projects: SentinelProjectInfo[];
 	customStrategies: SentinelSupervisorCustomStrategy[];
 	onQuery: (query: {
@@ -268,13 +274,13 @@ export function SupervisorAuditPage({
 
 	// The detail is a real drawer: Escape closes it.
 	useEffect(() => {
-		if (!detail) return;
+		if (!detail && !detailState) return;
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key === "Escape") onBack();
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [detail, onBack]);
+	}, [detail, detailState, onBack]);
 
 	const stats = page?.stats ?? {
 		total: 0,
@@ -560,22 +566,23 @@ export function SupervisorAuditPage({
 				}}
 			/>
 
-			{detail ? (
+			{detail || detailState ? (
 				<Drawer
 					open
-					width={1040}
+					size={1040}
 					onClose={onBack}
 					destroyOnHidden
 					className="sva-drawer"
-					title={detail.session.sessionName}
+					title={detail?.session.sessionName ?? t("监督详情")}
 					extra={
-						detail.session.sessionPath ? (
+						detail?.session.sessionPath ? (
 							<Button type="primary" onClick={() => onOpenSession(detail.session.sessionPath as string)}>
 								{t("打开会话")}
 							</Button>
 						) : null
 					}
 				>
+					{!detail ? <DetailLoading error={detailState?.error} onRetry={onRetryDetail} /> : <>
 					<Text type="secondary">
 						{`${detail.session.projectName ?? t("未选择项目")} · ${
 							detail.session.mode === "observe"
@@ -684,6 +691,7 @@ export function SupervisorAuditPage({
 							</div>
 						</Col>
 					</Row>
+					</>}
 				</Drawer>
 			) : null}
 		</Page>

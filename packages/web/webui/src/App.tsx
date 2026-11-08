@@ -162,6 +162,7 @@ import {
 import { ProjectAction } from "./project-actions.ts";
 import { SentinelConnection } from "./ws.ts";
 import { VulnDetailRequest, type VulnDetailView } from "./vuln-detail-request.ts";
+import { useDetailRequest } from "./detail-request.ts";
 import { getLanguage, storeLanguage, t } from "./i18n.ts";
 
 /**
@@ -466,8 +467,8 @@ export function App() {
 	const assetFiltersRef = useRef<SentinelAssetFilters>({});
 	const assetPageRef = useRef(1);
 	const assetPageSizeRef = useRef(50);
-	const [assetDetail, setAssetDetail] = useState<SentinelAssetDetail | null>(null);
-	const assetDetailRef = useRef<SentinelAssetDetail | null>(null);
+	const [assetView, assetRequest] = useDetailRequest<SentinelAssetDetail>();
+	const assetDetail = assetView?.data ?? null;
 	const pageRef = useRef<SentinelPageId>("dashboard");
 	const [assetDeletePending, setAssetDeletePending] = useState<string[] | null>(null);
 	const [assetDeletePreview, setAssetDeletePreview] = useState<SentinelAssetDeletePreview | null>(null);
@@ -481,7 +482,8 @@ export function App() {
 	const [pocPage, setPocPage] = useState(1);
 	const [pocTotal, setPocTotal] = useState(0);
 	const [pocPageSize, setPocPageSize] = useState(100);
-	const [pocDetail, setPocDetail] = useState<SentinelPoc | null>(null);
+	const [pocView, pocRequest] = useDetailRequest<SentinelPoc>();
+	const pocDetail = pocView?.data ?? null;
 	const [pocImporting, setPocImporting] = useState(false);
 	const [pocImportProgress, setPocImportProgress] = useState<SentinelPocImportProgress | null>(null);
 	const [lastPocImport, setLastPocImport] = useState<SentinelPocImportOutcome | null>(null);
@@ -491,7 +493,8 @@ export function App() {
 	 * because the source list is broadcast as soon as the source is created. */
 	const [pocOfficialSyncing, setPocOfficialSyncing] = useState(false);
 	const [codeMonitors, setCodeMonitors] = useState<SentinelCodeMonitor[]>([]);
-	const [codeMonitorDetail, setCodeMonitorDetail] = useState<SentinelCodeMonitorDetail | null>(null);
+	const [codeMonitorView, codeMonitorRequest] = useDetailRequest<SentinelCodeMonitorDetail>();
+	const codeMonitorDetail = codeMonitorView?.data ?? null;
 	const [codeBranchProbes, setCodeBranchProbes] = useState<BranchProbe[]>([]);
 	const [codeMonitorBusy, setCodeMonitorBusy] = useState<string | null>(null);
 	const [codeCheckingIds, setCodeCheckingIds] = useState<string[]>([]);
@@ -513,8 +516,6 @@ export function App() {
 		checks: SentinelCodeCheckLog[];
 		jobs: SentinelCodeCheckJob[];
 	} | null>(null);
-	/** Only an explicit detail request may open or replace the monitor drawer. */
-	const codeMonitorOpenIdRef = useRef<string | null>(null);
 	/** Android devices: the device page's gateway state. */
 	const [droidState, setDroidState] = useState<{
 		enabled: boolean;
@@ -553,8 +554,9 @@ export function App() {
 	});
 	/** Business modeling: the runs of the active project, and the open drill-down. */
 	const [apiModels, setApiModels] = useState<SentinelApiModelSummary[]>([]);
-	const [apiModelDetail, setApiModelDetail] = useState<SentinelApiModel | null>(null);
-	const [apiModelEvents, setApiModelEvents] = useState<SentinelApiModelEvent[]>([]);
+	const [apiModelView, apiModelRequest] = useDetailRequest<{ model: SentinelApiModel; events: SentinelApiModelEvent[] }>();
+	const apiModelDetail = apiModelView?.data?.model ?? null;
+	const apiModelEvents = apiModelView?.data?.events ?? [];
 	const [vulnPreview, setVulnPreview] = useState<SentinelFilePreview | null>(null);
 	/** Engineering mode: engines, doctrines, and mirrored event logs. */
 	const [engines, setEngines] = useState<SentinelEngine[]>([]);
@@ -628,7 +630,10 @@ export function App() {
 	const [supervisorEpisodes, setSupervisorEpisodes] = useState<SentinelSupervisorEpisode[]>([]);
 	const [supervisorLogs, setSupervisorLogs] = useState<SentinelSupervisorLog[]>([]);
 	const [supervisorAudit, setSupervisorAudit] = useState<SentinelSupervisorAuditPage | null>(null);
-	const [supervisorDetail, setSupervisorDetail] = useState<SentinelSupervisorDetail | null>(null);
+	const [supervisorView, supervisorRequest] = useDetailRequest<SentinelSupervisorDetail>();
+	const supervisorDetail = supervisorView?.data ?? null;
+	const detailRequests = useMemo(() => [assetRequest, pocRequest, codeMonitorRequest, apiModelRequest, supervisorRequest],
+		[assetRequest, pocRequest, codeMonitorRequest, apiModelRequest, supervisorRequest]);
 	const [supervisorCallOutput, setSupervisorCallOutput] = useState<{
 		callId: string;
 		text: string;
@@ -664,11 +669,11 @@ export function App() {
 			...current,
 			items: current.items.map((commit) => commit.id === id ? { ...commit, ...patch } : commit),
 		} : current);
-		setCodeMonitorDetail((current) => current ? {
+		codeMonitorRequest.update((current) => ({
 			...current,
 			commits: current.commits.map((commit) => commit.id === id ? { ...commit, ...patch } : commit),
-		} : current);
-	}, []);
+		}));
+	}, [codeMonitorRequest]);
 
 	/** Show a directory in the file panel (also used to refresh the current one). */
 	const loadFiles = useCallback((path: string) => {
@@ -1008,7 +1013,7 @@ export function App() {
 					setSupervisorAudit(message.page);
 					break;
 				case "supervisor_detail":
-					setSupervisorDetail(message.detail);
+					supervisorRequest.accept(null, message.detail.session.sessionId, message.detail);
 					if (supervisorSessionRef.current === message.detail.session.sessionId) {
 						setSupervisorEpisodes(message.detail.episodes);
 					}
@@ -1396,13 +1401,15 @@ export function App() {
 							pageSize: assetPageSizeRef.current,
 						});
 					}
-					if (assetDetailRef.current) {
-						send({ type: "get_asset", id: assetDetailRef.current.asset.id });
+					if (assetRequest.current) {
+						send({ type: "get_asset", id: assetRequest.current.id });
 					}
 					break;
 				}
 				case "asset":
-					setAssetDetail(message.detail);
+					if (message.detail.asset.projectId === snapshotRef.current?.project?.id) {
+						assetRequest.accept(message.detail.asset.projectId, message.detail.asset.id, message.detail);
+					}
 					break;
 				case "asset_result":
 					if (!message.ok && message.error) pushError(message.error);
@@ -1413,7 +1420,7 @@ export function App() {
 				case "assets_deleted": {
 					setAssetDeletePending(null);
 					setAssetDeletePreview(null);
-					setAssetDetail(null);
+					assetRequest.close();
 					send({
 						type: "list_assets",
 						filters: assetFiltersRef.current,
@@ -1440,11 +1447,11 @@ export function App() {
 					setPocPageSize(message.pageSize);
 					break;
 				case "poc":
-					setPocDetail(message.poc);
+					pocRequest.accept(null, message.poc.id, message.poc);
 					break;
 				case "poc_result":
 					if (!message.ok && message.error) pushError(message.error);
-					if (message.ok && message.action === "删除") setPocDetail(null);
+					if (message.ok && message.action === "删除" && message.id === pocRequest.current?.id) pocRequest.close();
 					break;
 				case "poc_sources":
 					setPocSources(message.sources);
@@ -1459,12 +1466,11 @@ export function App() {
 					setCodeMonitors(message.monitors);
 					// A check or a dispatch landed; an open detail should show it without
 					// the operator closing and reopening the drawer.
-					const openId = codeMonitorOpenIdRef.current;
+					const openId = codeMonitorRequest.current?.id;
 					if (openId && message.monitors.some((monitor) => monitor.id === openId)) {
 						send({ type: "get_code_monitor", id: openId });
 					} else if (openId) {
-						codeMonitorOpenIdRef.current = null;
-						setCodeMonitorDetail(null);
+						codeMonitorRequest.close();
 					}
 					break;
 				}
@@ -1478,8 +1484,8 @@ export function App() {
 				case "code_monitor_detail":
 					// Mutations also return details; they must not open a drawer or
 					// replace a different monitor the operator is currently inspecting.
-					if (codeMonitorOpenIdRef.current === message.detail.monitor.id) {
-						setCodeMonitorDetail(message.detail);
+					if (message.detail.monitor.projectId === snapshotRef.current?.project?.id) {
+						codeMonitorRequest.accept(message.detail.monitor.projectId, message.detail.monitor.id, message.detail);
 					}
 					setCodeMonitorBusy((id) => message.detail.commits.some((commit) => commit.id === id && commit.verdict !== "pending") ? null : id);
 					break;
@@ -1513,13 +1519,12 @@ export function App() {
 						message.ok &&
 						message.action === "检查监控" &&
 						message.id &&
-						codeMonitorOpenIdRef.current === message.id
+						codeMonitorRequest.current?.id === message.id
 					) {
 						send({ type: "get_code_monitor", id: message.id });
 					}
 					if (message.ok && message.action === "删除监控" && message.id) {
-						if (codeMonitorOpenIdRef.current === message.id) codeMonitorOpenIdRef.current = null;
-						setCodeMonitorDetail((current) => (current?.monitor.id === message.id ? null : current));
+						if (codeMonitorRequest.current?.id === message.id) codeMonitorRequest.close();
 					}
 					break;
 				case "api_models":
@@ -1548,12 +1553,13 @@ export function App() {
 					});
 					break;
 				case "api_model":
-					setApiModelDetail(message.model);
-					setApiModelEvents(message.events);
+					if (message.model.projectId === snapshotRef.current?.project?.id) {
+						apiModelRequest.accept(message.model.projectId, message.model.id, { model: message.model, events: message.events });
+					}
 					break;
 				case "api_model_result":
 					if (!message.ok && message.error) pushError(message.error);
-					if (message.ok && message.action === "删除") setApiModelDetail(null);
+					if (message.ok && message.action === "删除" && message.id === apiModelRequest.current?.id) apiModelRequest.close();
 					break;
 				case "api_model_export": {
 					// The document is text, so the download is built directly instead of
@@ -1585,7 +1591,7 @@ export function App() {
 					break;
 			}
 		},
-		[pushError, updateCodeCommit, vulnDetailRequest],
+		[pushError, updateCodeCommit, vulnDetailRequest, assetRequest, pocRequest, codeMonitorRequest, apiModelRequest, supervisorRequest],
 	);
 
 	const handleSessionEvent = useCallback((event: SessionEventView) => {
@@ -1769,6 +1775,7 @@ export function App() {
 				setConnected(open);
 				if (!open) {
 					vulnDetailRequest.disconnect();
+					for (const request of detailRequests) request.disconnect();
 					// A check in flight dies with the socket; do not leave spinners stuck.
 					setCodeCheckingIds([]);
 					codeDispatchingIdsRef.current.clear();
@@ -1804,9 +1811,10 @@ export function App() {
 			window.clearInterval(poll);
 			codeActivityRequest.dispose();
 			vulnDetailRequest.dispose();
+			for (const request of detailRequests) request.dispose();
 			connection.close();
 		};
-	}, [handleServerMessage, authReady, vulnDetailRequest]);
+	}, [handleServerMessage, authReady, vulnDetailRequest, detailRequests]);
 
 	const switchLanguage = useCallback((language: "zh" | "en") => {
 		if (!connectionRef.current?.connected) {
@@ -2081,11 +2089,11 @@ export function App() {
 				setPluginPage(null);
 			}
 			if (next === "supervisor") {
-				setSupervisorDetail(null);
+				supervisorRequest.close();
 				connectionRef.current?.send({ type: "supervisor_audit", page: 1 });
 			}
 		},
-		[openPluginPage],
+		[openPluginPage, supervisorRequest],
 	);
 
 	const showSupervisorWindow = useCallback(() => {
@@ -2319,8 +2327,6 @@ export function App() {
 	 * populated database.
 	 */
 	useEffect(() => {
-		codeMonitorOpenIdRef.current = null;
-		setCodeMonitorDetail(null);
 		if (page !== "codeintel" || !connected) return;
 		send({ type: "list_code_monitors" });
 		send({ type: "get_code_monitor_import" });
@@ -2376,15 +2382,23 @@ export function App() {
 		if (page !== "vulns") vulnDetailRequest.close();
 	}, [page, vulnDetailRequest]);
 
-	// Refs are how message handlers read the page and the open asset without
-	// depending on a render; a socket handler registered once would otherwise
-	// close over the first values forever.
+	// Message handlers read the current page without closing over an old render.
 	useEffect(() => {
 		pageRef.current = page;
 	}, [page]);
 	useEffect(() => {
-		assetDetailRef.current = assetDetail;
-	}, [assetDetail]);
+		if (page !== "assets") assetRequest.close();
+		if (page !== "pocs") pocRequest.close();
+		if (page !== "codeintel") codeMonitorRequest.close();
+		if (page !== "apimodels") apiModelRequest.close();
+		if (page !== "supervisor") supervisorRequest.close();
+	}, [page, assetRequest, pocRequest, codeMonitorRequest, apiModelRequest, supervisorRequest]);
+
+	useEffect(() => {
+		assetRequest.close();
+		codeMonitorRequest.close();
+		apiModelRequest.close();
+	}, [snapshot?.project?.id, assetRequest, codeMonitorRequest, apiModelRequest]);
 
 	/** A folder archive belongs to one project's container; drop it on a switch. */
 	useEffect(() => {
@@ -2417,7 +2431,6 @@ export function App() {
 		});
 		setAssetTotal(0);
 		setAssetHasMore(false);
-		setAssetDetail(null);
 		setAssetDeletePending(null);
 		setAssetDeletePreview(null);
 	}, [snapshot?.project?.id]);
@@ -2481,11 +2494,19 @@ export function App() {
 		[send],
 	);
 
+	/** Detail reads fail visibly while offline instead of replaying an obsolete click. */
+	const sendDetail = useCallback((request: SentinelClientMessage) => {
+		if (!connectionRef.current?.connected) throw new Error(getLanguage() === "en"
+			? "Connection lost. Retry after reconnecting." : "连接已断开，请等待重连后重试。");
+		connectionRef.current.send(request);
+	}, []);
+
 	const openAsset = useCallback(
 		(id: string) => {
-			send({ type: "get_asset", id });
+			const projectId = snapshotRef.current?.project?.id;
+			if (projectId) assetRequest.open(projectId, id, () => sendDetail({ type: "get_asset", id }));
 		},
-		[send],
+		[assetRequest, sendDetail],
 	);
 
 	const updateAsset = useCallback(
@@ -2524,8 +2545,6 @@ export function App() {
 	 * project is dropped rather than shown over the new one.
 	 */
 	useEffect(() => {
-		setApiModelDetail(null);
-		setApiModelEvents([]);
 		if (connected) send({ type: "list_api_models" });
 	}, [snapshot?.project?.id, connected, send]);
 
@@ -2544,9 +2563,9 @@ export function App() {
 	/** One template in full, in the detail overlay. */
 	const openPoc = useCallback(
 		(id: string) => {
-			send({ type: "get_poc", id });
+			pocRequest.open(null, id, () => sendDetail({ type: "get_poc", id }));
 		},
-		[send],
+		[pocRequest, sendDetail],
 	);
 
 	/**
@@ -2631,11 +2650,11 @@ export function App() {
 	/** Cross-navigation: an asset's linked finding opens the hub's detail. */
 	const openVulnFromAsset = useCallback(
 		(id: string) => {
-			setAssetDetail(null);
+			assetRequest.close();
 			setPage("vulns");
 			openVuln(id);
 		},
-		[openVuln],
+		[openVuln, assetRequest],
 	);
 
 	/** Cross-navigation: a finding's linked asset opens the inventory detail. */
@@ -2645,9 +2664,9 @@ export function App() {
 			setVulnPreview(null);
 			vulnPreviewPathRef.current = null;
 			setPage("assets");
-			send({ type: "get_asset", id });
+			openAsset(id);
 		},
-		[send, vulnDetailRequest],
+		[openAsset, vulnDetailRequest],
 	);
 
 	/** Preview an evidence file. It lives in the project's container, not the host. */
@@ -3335,13 +3354,15 @@ export function App() {
 							hasMore={assetHasMore}
 							filters={assetFilters}
 							detail={assetDetail}
+							detailState={assetView}
+							onRetryDetail={() => assetRequest.retry()}
 							deletePending={assetDeletePending}
 							deletePreview={assetDeletePreview}
 							projectName={snapshot?.project?.name ?? null}
 							hasProject={snapshot?.project !== null && snapshot?.project !== undefined}
 							onQuery={loadAssets}
 							onOpen={openAsset}
-							onCloseDetail={() => setAssetDetail(null)}
+							onCloseDetail={() => assetRequest.close()}
 							onUpdate={updateAsset}
 							onRequestDelete={requestAssetDelete}
 							onConfirmDelete={confirmAssetDelete}
@@ -3369,6 +3390,8 @@ export function App() {
 							project={snapshot?.project ?? null}
 							monitors={codeMonitors}
 							detail={codeMonitorDetail}
+							detailState={codeMonitorView}
+							onRetryDetail={() => codeMonitorRequest.retry()}
 							branchProbes={codeBranchProbes}
 							busyId={codeMonitorBusy}
 							checkingIds={codeCheckingIds}
@@ -3392,13 +3415,10 @@ export function App() {
 							});
 						}}
 							onOpen={(id) => {
-								codeMonitorOpenIdRef.current = id;
-								send({ type: "get_code_monitor", id });
+								const projectId = snapshotRef.current?.project?.id;
+								if (projectId) codeMonitorRequest.open(projectId, id, () => sendDetail({ type: "get_code_monitor", id }));
 							}}
-							onCloseDetail={() => {
-								codeMonitorOpenIdRef.current = null;
-								setCodeMonitorDetail(null);
-							}}
+							onCloseDetail={() => codeMonitorRequest.close()}
 							importState={codeImport}
 							activity={codeActivity}
 							activityLoading={codeActivityLoading}
@@ -3444,6 +3464,9 @@ export function App() {
 							total={pocTotal}
 							filters={pocFilters}
 							detail={pocDetail}
+							detailState={pocView}
+							onRetryDetail={() => pocRequest.retry()}
+							onCloseDetail={() => pocRequest.close()}
 							importing={pocImporting}
 							importProgress={pocImportProgress}
 							outcome={lastPocImport}
@@ -3464,12 +3487,17 @@ export function App() {
 									: apiModels
 							}
 							detail={apiModelDetail}
+							detailState={apiModelView}
+							onRetryDetail={() => apiModelRequest.retry()}
 							events={apiModelEvents}
 							projectName={snapshot?.project?.name ?? null}
 							hasProject={snapshot?.project !== null && snapshot?.project !== undefined}
 							onRefresh={() => send({ type: "list_api_models" })}
-							onOpen={(id) => send({ type: "get_api_model", id })}
-							onClose={() => setApiModelDetail(null)}
+							onOpen={(id) => {
+								const projectId = snapshotRef.current?.project?.id;
+								if (projectId) apiModelRequest.open(projectId, id, () => sendDetail({ type: "get_api_model", id }));
+							}}
+							onClose={() => apiModelRequest.close()}
 							onDelete={(id) => send({ type: "delete_api_model", id })}
 							onEnd={(id) => send({ type: "end_api_model", id })}
 							onExport={(id, format) => send({ type: "export_api_model", id, format })}
@@ -3535,17 +3563,18 @@ export function App() {
 					<SupervisorAuditPage
 						page={supervisorAudit}
 						detail={supervisorDetail}
+						detailState={supervisorView}
+						onRetryDetail={() => supervisorRequest.retry()}
 						projects={projects}
 						customStrategies={supervisorConfig.customStrategies}
 						onQuery={(query) => {
-							setSupervisorDetail(null);
 							send({ type: "supervisor_audit", ...query });
 						}}
-						onSelect={(sessionId) => send({ type: "supervisor_detail", sessionId })}
-						onBack={() => setSupervisorDetail(null)}
+						onSelect={(sessionId) => supervisorRequest.open(null, sessionId, () => sendDetail({ type: "supervisor_detail", sessionId }))}
+						onBack={() => supervisorRequest.close()}
 						onOpenSession={(path) => {
 							setPage("chat");
-							setSupervisorDetail(null);
+							supervisorRequest.close();
 							send({ type: "switch_session", path });
 						}}
 					/>

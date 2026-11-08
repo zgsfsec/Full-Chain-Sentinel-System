@@ -55,6 +55,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CODE_VULN_TAGS, type CodeVulnTag } from "../../../src/code-vuln-tags.ts";
 import { DEFAULT_CRON_EXPRESSION, nextCronOccurrences, validateCronExpression } from "../../../src/cron.ts";
 import { getLanguage, t } from "../i18n.ts";
+import type { DetailLoadState } from "../detail-request.ts";
+import { DetailLoading } from "../ui/DetailLoading.tsx";
 import type {
 	SentinelCodeActivityFilter,
 	SentinelCodeActivityView,
@@ -283,6 +285,8 @@ export interface CodeIntelPageProps {
 	project: SentinelProjectInfo | null;
 	monitors: SentinelCodeMonitor[];
 	detail: SentinelCodeMonitorDetail | null;
+	detailState?: DetailLoadState | null;
+	onRetryDetail?: () => void;
 	branchProbes: BranchProbe[];
 	busyId: string | null;
 	checkingIds: string[];
@@ -543,6 +547,8 @@ export function CodeIntelPage({
 	project,
 	monitors,
 	detail,
+	detailState,
+	onRetryDetail,
 	branchProbes,
 	busyId,
 	checkingIds,
@@ -2535,12 +2541,13 @@ export function CodeIntelPage({
 			</Modal>
 
 			<Drawer
-				open={detail !== null}
-				width={980}
+				open={detailState != null || detail !== null}
+				size={980}
 				onClose={onCloseDetail}
 				title={detail ? detail.monitor.name : t("监控详情")}
 				destroyOnHidden
 			>
+				{!detail ? <DetailLoading error={detailState?.error} onRetry={onRetryDetail} /> : null}
 				{detail ? (
 					<Space direction="vertical" size={16} style={{ width: "100%" }}>
 						<Descriptions column={{ xs: 1, sm: 2 }} size="small" bordered>

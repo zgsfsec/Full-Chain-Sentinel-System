@@ -15,7 +15,7 @@
  * Swagger UI has no notion of.
  */
 
-import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { ProTable } from "@ant-design/pro-components";
 import type { ProColumns } from "@ant-design/pro-components";
 import { Alert, Button, Card, Empty, Input, Select, Space, Tabs, Tag, Timeline, Typography } from "antd";
@@ -23,6 +23,8 @@ import { useEffect, useMemo, useState } from "react";
 import swaggerUiCss from "swagger-ui-dist/swagger-ui.css?url";
 import swaggerUiBundle from "swagger-ui-dist/swagger-ui-bundle.js?url";
 import { t } from "../i18n.ts";
+import type { DetailLoadState } from "../detail-request.ts";
+import { DetailLoading } from "../ui/DetailLoading.tsx";
 import type {
 	SentinelApiModel,
 	SentinelApiModelEntity,
@@ -159,6 +161,8 @@ function EntityCard({ entity }: { entity: SentinelApiModelEntity }) {
 export function ApiModelPage({
 	items,
 	detail,
+	detailState,
+	onRetryDetail,
 	events,
 	projectName,
 	hasProject,
@@ -171,8 +175,10 @@ export function ApiModelPage({
 	onOpenSession,
 }: {
 	items: SentinelApiModelSummary[];
-	/** The run whose drill-down is open; null shows the list. */
+	/** Loaded record; detailState keeps the drill-down visible while waiting. */
 	detail: SentinelApiModel | null;
+	detailState?: DetailLoadState | null;
+	onRetryDetail?: () => void;
 	events: SentinelApiModelEvent[];
 	projectName: string | null;
 	hasProject: boolean;
@@ -211,6 +217,12 @@ export function ApiModelPage({
 				/>
 			</Page>
 		);
+	}
+
+	if (!detail && detailState) {
+		return <Page title={t("业务建模")} extra={<Button icon={<ArrowLeftOutlined />} onClick={onClose}>{t("返回列表")}</Button>}>
+			<DetailLoading error={detailState.error} onRetry={onRetryDetail} />
+		</Page>;
 	}
 
 	if (detail) {

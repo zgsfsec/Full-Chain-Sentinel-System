@@ -14,10 +14,12 @@
 
 import { CopyOutlined, DeleteOutlined, DownloadOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
 import { ProTable } from "@ant-design/pro-components";
-import { Alert, Button, Drawer, Input, Popconfirm, Popover, Select, Space, Spin, Tag, Tooltip, Typography } from "antd";
+import { Alert, Button, Drawer, Input, Popconfirm, Popover, Select, Space, Tag, Tooltip, Typography } from "antd";
 import type { ProColumns } from "@ant-design/pro-components";
 import { useRef, useState } from "react";
 import { t } from "../i18n.ts";
+import type { DetailLoadState } from "../detail-request.ts";
+import { DetailLoading } from "../ui/DetailLoading.tsx";
 import type {
 	SentinelPoc,
 	SentinelPocFilters,
@@ -71,6 +73,9 @@ export function PocPage({
 	total,
 	filters,
 	detail,
+	detailState,
+	onRetryDetail,
+	onCloseDetail,
 	importing,
 	importProgress,
 	outcome,
@@ -92,6 +97,9 @@ export function PocPage({
 	total: number;
 	filters: SentinelPocFilters;
 	detail: SentinelPoc | null;
+	detailState?: DetailLoadState | null;
+	onRetryDetail?: () => void;
+	onCloseDetail(): void;
 	importing: boolean;
 	/** Live counters while the HTTP import job runs. */
 	importProgress: SentinelPocImportProgress | null;
@@ -112,9 +120,7 @@ export function PocPage({
 }) {
 	const [search, setSearch] = useState(filters.search ?? "");
 	const [tag, setTag] = useState(filters.tag ?? "");
-	const [openId, setOpenId] = useState<string | null>(null);
-	const openItem = items.find((item) => item.id === openId) ?? null;
-	const loadedDetail = detail && detail.id === openId ? detail : null;
+	const openItem = detail;
 	const fileInput = useRef<HTMLInputElement | null>(null);
 
 	const apply = (patch: SentinelPocFilters): void => {
@@ -223,7 +229,7 @@ export function PocPage({
 			width: 120,
 			render: (_, item) => (
 				<Space size={0}>
-					<Button type="link" size="small" onClick={() => { setOpenId(item.id); onOpen(item.id); }}>
+					<Button type="link" size="small" onClick={() => onOpen(item.id)}>
 						{t("查看")}
 					</Button>
 				<Popconfirm
@@ -233,7 +239,6 @@ export function PocPage({
 					okButtonProps={{ danger: true }}
 					cancelText={t("取消")}
 					onConfirm={() => {
-						if (openId === item.id) setOpenId(null);
 						onDelete(item.id);
 					}}
 				>
@@ -416,7 +421,6 @@ export function PocPage({
 				onRow={(record) => ({
 					onClick: (event) => {
 						if (event.target instanceof Element && event.target.closest("button, a, .ant-popover")) return;
-						setOpenId(record.id);
 						onOpen(record.id);
 					},
 					style: { cursor: "pointer" },
@@ -434,9 +438,9 @@ export function PocPage({
 			</div>
 
 			<Drawer
-				open={openItem !== null}
+				open={detailState != null || openItem !== null}
 				size="min(820px, 100vw)"
-				onClose={() => setOpenId(null)}
+				onClose={onCloseDetail}
 				destroyOnHidden
 				className="poc-drawer"
 				title={t("模板详情")}
@@ -457,7 +461,6 @@ export function PocPage({
 								okButtonProps={{ danger: true }}
 								cancelText={t("取消")}
 								onConfirm={() => {
-									setOpenId(null);
 									onDelete(openItem.id);
 								}}
 							>
@@ -465,11 +468,12 @@ export function PocPage({
 									{t("删除模板")}
 								</Button>
 							</Popconfirm>
-							<Button onClick={() => setOpenId(null)}>{t("关闭")}</Button>
+							<Button onClick={onCloseDetail}>{t("关闭")}</Button>
 						</div>
 					) : null
 				}
 			>
+				{!openItem ? <DetailLoading error={detailState?.error} onRetry={onRetryDetail} /> : null}
 				{openItem ? (
 					<div className="poc-detail">
 						<div className="poc-detail__intro">
@@ -514,24 +518,14 @@ export function PocPage({
 								<Button
 									size="small"
 									icon={<CopyOutlined />}
-									disabled={!loadedDetail}
 									onClick={() => {
-										if (loadedDetail) void navigator.clipboard.writeText(loadedDetail.content).catch(() => {});
+										void navigator.clipboard.writeText(openItem.content).catch(() => {});
 									}}
 								>
 									{t("复制全文")}
 								</Button>
 							</div>
-							{loadedDetail ? (
-								<pre className="poc-source__code">
-									<code>{loadedDetail.content}</code>
-								</pre>
-							) : (
-								<div className="poc-source__loading">
-									<Spin size="small" />
-									<Text type="secondary">{t("加载模板全文…")}</Text>
-								</div>
-							)}
+							<pre className="poc-source__code"><code>{openItem.content}</code></pre>
 						</section>
 					</div>
 				) : null}

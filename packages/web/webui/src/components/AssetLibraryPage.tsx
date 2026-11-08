@@ -14,6 +14,8 @@ import type { ProColumns } from "@ant-design/pro-components";
 import { Alert, Button, Drawer, Empty, Input, Modal, Select, Space, Tag, Typography } from "antd";
 import { useEffect, useState } from "react";
 import { getLanguage, t } from "../i18n.ts";
+import type { DetailLoadState } from "../detail-request.ts";
+import { DetailLoading } from "../ui/DetailLoading.tsx";
 import type {
 	SentinelAssetDeletePreview,
 	SentinelAssetDetail,
@@ -82,7 +84,11 @@ function testSummary(item: SentinelAssetSummary): string {
 
 export { AssetDetailBody } from "./AssetDetailBody.tsx";
 
-export function AssetDetail(props: Parameters<typeof AssetDetailBody>[0]) {
+export function AssetDetail({ detail, detailState, onRetryDetail, ...props }: Omit<Parameters<typeof AssetDetailBody>[0], "detail"> & {
+	detail: SentinelAssetDetail | null;
+	detailState?: DetailLoadState | null;
+	onRetryDetail?: () => void;
+}) {
 	return (
 		<Drawer
 			open
@@ -92,7 +98,8 @@ export function AssetDetail(props: Parameters<typeof AssetDetailBody>[0]) {
 			className="asset-inspector-drawer"
 			title={t("资产详情")}
 		>
-			<AssetDetailBody {...props} />
+			{detail ? <AssetDetailBody key={detail.asset.id} {...props} detail={detail} />
+				: <DetailLoading error={detailState?.error} onRetry={onRetryDetail} />}
 		</Drawer>
 	);
 }
@@ -129,6 +136,8 @@ export function AssetLibraryPage({
 	pageSize,
 	filters,
 	detail,
+	detailState,
+	onRetryDetail,
 	deletePending,
 	deletePreview,
 	projectName,
@@ -151,6 +160,8 @@ export function AssetLibraryPage({
 	hasMore: boolean;
 	filters: SentinelAssetFilters;
 	detail: SentinelAssetDetail | null;
+	detailState?: DetailLoadState | null;
+	onRetryDetail?: () => void;
 	deletePending: string[] | null;
 	deletePreview: SentinelAssetDeletePreview | null;
 	projectName: string | null;
@@ -456,9 +467,11 @@ export function AssetLibraryPage({
 
 			{importOpen ? <AssetImportDialog onClose={() => setImportOpen(false)} onImported={() => onQuery(filters, 1, pageSize)} /> : null}
 
-			{detail ? (
+			{detail || detailState ? (
 				<AssetDetail
 					detail={detail}
+					detailState={detailState}
+					onRetryDetail={onRetryDetail}
 					onClose={onCloseDetail}
 					onUpdate={onUpdate}
 					onRequestDelete={onRequestDelete}
