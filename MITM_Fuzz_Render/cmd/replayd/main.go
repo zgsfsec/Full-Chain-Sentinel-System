@@ -78,6 +78,7 @@ func run() int {
 	bus := eventbus.New()
 	px := proxy.New(st, bus, caMan, logger)
 	px.SetCapturePolicy(cfg.ProxySkipStatic, cfg.ProxyMaxCaptureBytes)
+	px.SetMaxConnections(cfg.ProxyMaxConnections)
 	if cfg.ProxyAuthFile != "" {
 		if err := px.LoadAuthentication(cfg.ProxyAuthFile); err != nil {
 			logger.Error("加载代理认证失败", "err", err)

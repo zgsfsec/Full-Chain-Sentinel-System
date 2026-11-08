@@ -121,6 +121,8 @@ func TestValidation(t *testing.T) {
 		{"显式 token 过短", []string{"-token", "short"}},
 		{"负数报文上限", []string{"-proxy-max-capture-bytes", "-1"}},
 		{"过大报文上限", []string{"-proxy-max-capture-bytes", "33554433"}},
+		{"零连接上限", []string{"-proxy-max-connections", "0"}},
+		{"过大连接上限", []string{"-proxy-max-connections", "1025"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,7 +137,7 @@ func TestValidation(t *testing.T) {
 func TestCapturePolicyFlags(t *testing.T) {
 	clearEnv(t)
 	cfg, err := Load([]string{"-data-dir", t.TempDir(), "-proxy-skip-static", "-proxy-max-capture-bytes", "2097152"})
-	if err != nil || !cfg.ProxySkipStatic || cfg.ProxyMaxCaptureBytes != 2097152 {
+	if err != nil || !cfg.ProxySkipStatic || cfg.ProxyMaxCaptureBytes != 2097152 || cfg.ProxyMaxConnections != 128 {
 		t.Fatalf("capture policy flags: cfg=%+v err=%v", cfg, err)
 	}
 }

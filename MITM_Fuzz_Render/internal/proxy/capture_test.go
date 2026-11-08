@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chinaran404/replayd/internal/store"
 )
@@ -60,6 +62,50 @@ func TestCapturePolicyFiltersBeforeStorageAndKeepsForwarding(t *testing.T) {
 	count, err := e.st.CountFlows(t.Context(), store.Filter{Source: "proxy"})
 	if err != nil || count != 4 {
 		t.Fatalf("filter off: count=%d err=%v", count, err)
+	}
+}
+
+func TestConnectionLimitRejectsExcessAndReleasesCapacity(t *testing.T) {
+	e := newProxyEnv(t)
+	e.srv.SetMaxConnections(1)
+	first, err := net.Dial("tcp", e.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	deadline := time.Now().Add(time.Second)
+	for e.srv.activeConnections.Load() != 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if e.srv.activeConnections.Load() != 1 {
+		t.Fatal("first connection not accepted")
+	}
+	second, err := net.Dial("tcp", e.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	_ = second.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := second.Read(make([]byte, 1)); err != io.EOF {
+		t.Fatalf("excess connection not closed: %v", err)
+	}
+	_ = first.Close()
+	deadline = time.Now().Add(time.Second)
+	for e.srv.activeConnections.Load() != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }))
+	defer up.Close()
+	client := e.proxiedClient(t)
+	defer client.CloseIdleConnections()
+	response, err := client.Get(up.URL)
+	if err != nil {
+		t.Fatalf("capacity was not released: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || string(body) != "ok" {
+		t.Fatalf("body=%q err=%v", body, err)
 	}
 }
 

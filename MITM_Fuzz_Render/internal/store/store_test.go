@@ -27,8 +27,8 @@ func TestMigrate(t *testing.T) {
 	if err := s.db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 		t.Fatalf("读取迁移版本: %v", err)
 	}
-	if version != 3 {
-		t.Errorf("迁移版本 = %d, want 3（0001_init + 0002_artifacts + 0003_tab_highlights）", version)
+	if version != 4 {
+		t.Errorf("迁移版本 = %d, want 4（含 proxy_paging）", version)
 	}
 	// 两张表都应可用
 	for _, table := range []string{"flows", "artifacts"} {

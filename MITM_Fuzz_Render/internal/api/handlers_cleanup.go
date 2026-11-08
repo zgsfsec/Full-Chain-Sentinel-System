@@ -24,7 +24,7 @@ func (s *Server) handleProxyDeleteFlows(w http.ResponseWriter, r *http.Request) 
 	}
 	deleted, err := s.store.DeleteProxyFlows(r.Context(), input.IDs)
 	if err != nil {
-		s.writeError(w, 500, "internal", "流量清理失败", nil)
+		s.writeError(w, 500, "internal", "流量清理未完成，部分批次可能已删除，请刷新后重试", map[string]int64{"deleted": deleted})
 		return
 	}
 	s.writeJSON(w, 200, map[string]int64{"deleted": deleted})

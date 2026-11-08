@@ -54,10 +54,12 @@ type Server struct {
 	addr    string
 	running bool
 
-	captured        atomic.Int64
-	insecure        atomic.Bool // 上游 TLS 校验开关（测试/自签靶场用）
-	skipStatic      atomic.Bool
-	maxCaptureBytes atomic.Int64
+	captured          atomic.Int64
+	insecure          atomic.Bool // 上游 TLS 校验开关（测试/自签靶场用）
+	skipStatic        atomic.Bool
+	maxCaptureBytes   atomic.Int64
+	maxConnections    atomic.Int64
+	activeConnections atomic.Int64
 
 	bypassMu sync.RWMutex
 	bypass   map[string]bool
@@ -68,13 +70,23 @@ func New(st *store.Store, bus *eventbus.Broker, ca *cert.Manager, log *slog.Logg
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{
+	s := &Server{
 		store:  st,
 		bus:    bus,
 		ca:     ca,
 		client: &httpreplay.Client{},
 		log:    log,
 		bypass: make(map[string]bool),
+	}
+	s.maxConnections.Store(128)
+	return s
+}
+
+// SetMaxConnections bounds retained request/response buffers, including clients
+// waiting on persistence. Excess connections are closed before allocating buffers.
+func (s *Server) SetMaxConnections(limit int) {
+	if limit > 0 {
+		s.maxConnections.Store(int64(limit))
 	}
 }
 
@@ -181,7 +193,15 @@ func (s *Server) acceptLoop(ln net.Listener) {
 			}
 			return
 		}
-		go s.handleConn(conn)
+		if s.activeConnections.Add(1) > s.maxConnections.Load() {
+			s.activeConnections.Add(-1)
+			_ = conn.Close()
+			continue
+		}
+		go func() {
+			defer s.activeConnections.Add(-1)
+			s.handleConn(conn)
+		}()
 	}
 }
 

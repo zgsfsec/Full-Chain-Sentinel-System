@@ -35,8 +35,9 @@ type Store struct {
 	blobs   *blobStore
 	dataDir string
 
-	writeMu sync.Mutex
-	now     func() time.Time
+	writeMu   sync.Mutex
+	cleanupMu sync.Mutex
+	now       func() time.Time
 }
 
 // Open 打开（必要时创建）数据目录下的数据库并应用迁移。

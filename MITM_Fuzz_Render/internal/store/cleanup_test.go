@@ -117,3 +117,80 @@ func TestCaptureCleanupCoordinatesConcurrentInserts(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupBatchesPreserveNewCapturesAndSharedEvidence(t *testing.T) {
+	s := newTestStore(t)
+	ctx := t.Context()
+	for i := 0; i < 600; i++ {
+		f := &Flow{Source: "proxy", Method: "GET", Host: "test", Path: "/", RespRaw: []byte("shared")}
+		if err := s.InsertFlow(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var through int64
+	if err := s.db.QueryRow("SELECT MAX(rowid) FROM flows").Scan(&through); err != nil {
+		t.Fatal(err)
+	}
+	deleted, after, err := s.deleteProxyBatch(ctx, nil, 0, through)
+	if err != nil || deleted != 256 {
+		t.Fatalf("first batch=%d err=%v", deleted, err)
+	}
+	// An old timestamp must not cause a newly inserted capture to be removed.
+	newFlow := &Flow{Source: "proxy", Method: "GET", Host: "test", Path: "/new", TS: 1, RespRaw: []byte("shared")}
+	if err := s.InsertFlow(ctx, newFlow); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		n, last, err := s.deleteProxyBatch(ctx, nil, after, through)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deleted += n
+		if n == 0 {
+			break
+		}
+		after = last
+	}
+	if deleted != 600 {
+		t.Fatalf("deleted=%d want 600", deleted)
+	}
+	if _, err := s.collectUnusedBlobBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetFlow(ctx, newFlow.ID, true)
+	if err != nil || string(got.RespRaw) != "shared" {
+		t.Fatalf("new capture damaged: %v", err)
+	}
+	var refs int
+	if err := s.db.QueryRow("SELECT refcount FROM blobs WHERE sha256 = ?", sha256Hex([]byte("shared"))).Scan(&refs); err != nil || refs != 1 {
+		t.Fatalf("refs=%d err=%v", refs, err)
+	}
+	// Completing the last old batch must not remove a new row reusing its rowid.
+	if _, err := s.DeleteProxyFlows(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	reused := &Flow{Source: "proxy", Method: "GET", Host: "test", Path: "/reused"}
+	if err := s.InsertFlow(ctx, reused); err != nil {
+		t.Fatal(err)
+	}
+	if n, _, err := s.deleteProxyBatch(ctx, nil, after, through); err != nil || n != 0 {
+		t.Fatalf("reused row deleted: n=%d err=%v", n, err)
+	}
+}
+
+func TestCleanupCancellationRetainsUnprocessedBatches(t *testing.T) {
+	s := newTestStore(t)
+	f := &Flow{Source: "proxy", Method: "GET", Host: "test", Path: "/", RespRaw: []byte("keep")}
+	if err := s.InsertFlow(t.Context(), f); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := s.DeleteProxyFlows(ctx, nil); err == nil {
+		t.Fatal("expected cancellation")
+	}
+	got, err := s.GetFlow(t.Context(), f.ID, true)
+	if err != nil || string(got.RespRaw) != "keep" {
+		t.Fatalf("capture lost on cancellation: %v", err)
+	}
+}
