@@ -32,6 +32,7 @@ import {
 	Modal,
 	Popover,
 	Select,
+	Skeleton,
 	Space,
 	Tag,
 	Timeline,
@@ -1201,10 +1202,21 @@ export function VulnDetailBody({
 }
 
 /** The detail surface: the same content inside the drawer the page opens. */
-export function VulnDetail(props: Parameters<typeof VulnDetailBody>[0]) {
+export function VulnDetail(props: Omit<Parameters<typeof VulnDetailBody>[0], "vuln"> & {
+	vuln: SentinelVulnerability | null;
+	loading: boolean;
+	error: string | null;
+	onRetry: () => void;
+}) {
 	return (
-		<Drawer open width={780} onClose={props.onClose} destroyOnHidden className="vulnhub-drawer">
-			<VulnDetailBody {...props} />
+		<Drawer open size={780} title={t("漏洞详情")} onClose={props.onClose} destroyOnHidden className="vulnhub-drawer">
+			{props.loading ? (
+				<div role="status" aria-label={getLanguage() === "en" ? "Loading finding details" : "正在加载漏洞详情"}>
+					<Skeleton active paragraph={{ rows: 8 }} />
+				</div>
+			) : props.error ? (
+				<Alert type="error" showIcon title={props.error} action={<Button onClick={props.onRetry}>{t("重试")}</Button>} />
+			) : props.vuln ? <VulnDetailBody {...props} vuln={props.vuln} key={props.vuln.id} /> : null}
 		</Drawer>
 	);
 }

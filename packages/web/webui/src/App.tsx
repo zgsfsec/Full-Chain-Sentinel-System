@@ -147,7 +147,6 @@ import type {
 	SentinelSupervisorView,
 	SentinelTestResult,
 	SentinelToolInfo,
-	SentinelVulnerability,
 	SentinelVulnFilters,
 	SentinelVulnStats,
 	SentinelVulnSummary,
@@ -162,6 +161,7 @@ import {
 } from "./poc-import.ts";
 import { ProjectAction } from "./project-actions.ts";
 import { SentinelConnection } from "./ws.ts";
+import { VulnDetailRequest, type VulnDetailView } from "./vuln-detail-request.ts";
 import { getLanguage, storeLanguage, t } from "./i18n.ts";
 
 /**
@@ -439,7 +439,9 @@ export function App() {
 	});
 	const [vulnFilters, setVulnFilters] = useState<SentinelVulnFilters>({});
 	/** The record the detail overlay shows, and the evidence file it is previewing. */
-	const [vulnDetail, setVulnDetail] = useState<SentinelVulnerability | null>(null);
+	const [vulnView, setVulnView] = useState<VulnDetailView | null>(null);
+	const vulnDetailRequest = useMemo(() => new VulnDetailRequest(setVulnView), []);
+	const vulnDetail = vulnView?.vuln ?? null;
 	/** Ids awaiting the batch-delete confirmation, and the impact the server reported. */
 	const [vulnDeletePending, setVulnDeletePending] = useState<string[] | null>(null);
 	const [vulnDeletePreview, setVulnDeletePreview] = useState<{
@@ -1326,16 +1328,12 @@ export function App() {
 				case "vulns":
 					setVulnItems(message.items);
 					setVulnStats(message.stats);
-					// The list is the hub's source of truth, so a refreshed record is
-					// dropped into the open detail rather than closing it.
-					setVulnDetail((prev) => {
-						if (!prev) return prev;
-						return message.items.some((item) => item.id === prev.id) ? prev : null;
-					});
+					// A filtered or late list is not evidence that the selected record was deleted.
 					break;
 				case "vuln":
-					setVulnDetail(message.vuln);
-					setVulnPreview(null);
+					if (message.vuln.projectId === snapshotRef.current?.project?.id && vulnDetailRequest.accept(message.vuln)) {
+						setVulnPreview(null);
+					}
 					break;
 				case "vuln_result":
 					if (!message.ok && message.error) pushError(message.error);
@@ -1348,7 +1346,7 @@ export function App() {
 					// asks again with the filters it is actually showing.
 					setVulnDeletePending(null);
 					setVulnDeletePreview(null);
-					setVulnDetail(null);
+					vulnDetailRequest.close();
 					send({ type: "list_vulns", filters: vulnFiltersRef.current });
 					break;
 				}
@@ -1587,7 +1585,7 @@ export function App() {
 					break;
 			}
 		},
-		[pushError, updateCodeCommit],
+		[pushError, updateCodeCommit, vulnDetailRequest],
 	);
 
 	const handleSessionEvent = useCallback((event: SessionEventView) => {
@@ -1770,6 +1768,7 @@ export function App() {
 			(open) => {
 				setConnected(open);
 				if (!open) {
+					vulnDetailRequest.disconnect();
 					// A check in flight dies with the socket; do not leave spinners stuck.
 					setCodeCheckingIds([]);
 					codeDispatchingIdsRef.current.clear();
@@ -1804,9 +1803,10 @@ export function App() {
 		return () => {
 			window.clearInterval(poll);
 			codeActivityRequest.dispose();
+			vulnDetailRequest.dispose();
 			connection.close();
 		};
-	}, [handleServerMessage, authReady]);
+	}, [handleServerMessage, authReady, vulnDetailRequest]);
 
 	const switchLanguage = useCallback((language: "zh" | "en") => {
 		if (!connectionRef.current?.connected) {
@@ -2361,10 +2361,20 @@ export function App() {
 	 */
 	useEffect(() => {
 		setVulnFilters({});
-		setVulnDetail(null);
+		vulnFiltersRef.current = {};
+		setVulnItems([]);
+		vulnDetailRequest.close();
 		setVulnPreview(null);
+		vulnPreviewPathRef.current = null;
+	}, [snapshot?.project?.id, vulnDetailRequest]);
+
+	useEffect(() => {
 		if (connected) send({ type: "list_vulns" });
 	}, [snapshot?.project?.id, connected, send]);
+
+	useEffect(() => {
+		if (page !== "vulns") vulnDetailRequest.close();
+	}, [page, vulnDetailRequest]);
 
 	// Refs are how message handlers read the page and the open asset without
 	// depending on a render; a socket handler registered once would otherwise
@@ -2583,14 +2593,21 @@ export function App() {
 		send({ type: "sync_official_pocs" });
 	}, [send]);
 
-	/** Open one finding in full; the reply replaces whatever the overlay showed. */
+	/** Open immediately; a slow or disconnected request stays visible and retryable. */
 	const openVuln = useCallback(
 		(id: string) => {
+			const projectId = snapshotRef.current?.project?.id;
+			if (!projectId) return;
 			setVulnPreview(null);
 			vulnPreviewPathRef.current = null;
-			send({ type: "get_vuln", id });
+			vulnDetailRequest.open(projectId, id, (request) => {
+				if (!connectionRef.current?.connected) throw new Error(getLanguage() === "en"
+					? "Connection lost. Retry after reconnecting."
+					: "连接已断开，请等待重连后重试。");
+				connectionRef.current.send(request);
+			});
 		},
-		[send],
+		[vulnDetailRequest],
 	);
 
 	/**
@@ -2624,13 +2641,13 @@ export function App() {
 	/** Cross-navigation: a finding's linked asset opens the inventory detail. */
 	const openAssetFromVuln = useCallback(
 		(id: string) => {
-			setVulnDetail(null);
+			vulnDetailRequest.close();
 			setVulnPreview(null);
 			vulnPreviewPathRef.current = null;
 			setPage("assets");
 			send({ type: "get_asset", id });
 		},
-		[send],
+		[send, vulnDetailRequest],
 	);
 
 	/** Preview an evidence file. It lives in the project's container, not the host. */
@@ -4108,22 +4125,26 @@ export function App() {
 					/>
 				</Overlay>
 			) : null}
-			{vulnDetail ? (
+			{vulnView ? (
 				<VulnDetail
 					vuln={vulnDetail}
+					loading={vulnView.loading}
+					error={vulnView.error}
+					onRetry={() => openVuln(vulnView.id)}
 					preview={vulnPreview}
 					provenance={{
 						// Names are resolved live; the record keeps the ids as the source of
 						// truth, and the session snapshot covers a session that is gone.
-						engine: engines.find((engine) => engine.id === vulnDetail.engineId)?.name,
+						engine: engines.find((engine) => engine.id === vulnDetail?.engineId)?.name,
 						task: engines
 							.flatMap((engine) => engine.tasks)
-							.find((task) => task.id === vulnDetail.taskId)?.title,
-						session: sessions.find((session) => session.id === vulnDetail.sessionId)?.name,
+							.find((task) => task.id === vulnDetail?.taskId)?.title,
+						session: sessions.find((session) => session.id === vulnDetail?.sessionId)?.name,
 					}}
 					onClose={() => {
-						setVulnDetail(null);
+						vulnDetailRequest.close();
 						setVulnPreview(null);
+						vulnPreviewPathRef.current = null;
 					}}
 					onUpdate={(id, patch: SentinelVulnUpdate) => send({ type: "update_vuln", id, patch })}
 					onRetryReview={(id, force) => send({ type: "retry_vuln_review", id, ...(force ? { force: true } : {}) })}
