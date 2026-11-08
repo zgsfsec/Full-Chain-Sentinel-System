@@ -258,6 +258,20 @@ describe("CodeMonitorManager.setSchedule", () => {
 		expect(store.getMonitor(monitor.id)?.cronExpression).toBe("0 9 * * 1-5");
 	});
 
+	it("reads project activity without loading all repository counts", () => {
+		const { store, manager, monitor } = setup();
+		try {
+			store.markChecked(monitor.id, 1, "network failure");
+			const list = vi.spyOn(store, "listMonitors");
+			expect(manager.activity("p1", "all", 1, 20).counts.anomalies).toBe(1);
+			expect(list).not.toHaveBeenCalled();
+			store.markChecked(monitor.id, 2, null);
+			expect(manager.activity("p1", "all", 1, 20).counts.anomalies).toBe(0);
+		} finally {
+			store.close();
+		}
+	});
+
 	it("switches back to an interval and clears the expression", async () => {
 		const { store, manager, monitor } = setup();
 		await manager.setSchedule([monitor.id], { scheduleKind: "cron", cronExpression: "*/30 * * * *" });

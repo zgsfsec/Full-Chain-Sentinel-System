@@ -394,9 +394,7 @@ export class CodeMonitorManager {
 		const project = this.hooks.project(projectId);
 		if (!project) throw new Error("项目不存在");
 		const { items, total } = this.store.listActivity(projectId, filter, page, pageSize, category, tag, search);
-		const anomalies = this.store
-			.listMonitors()
-			.filter((monitor) => monitor.projectId === projectId && Boolean(monitor.lastError)).length;
+		const anomalies = this.store.countMonitorErrors(projectId);
 		return {
 			items,
 			total,
