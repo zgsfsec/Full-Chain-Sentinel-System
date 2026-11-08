@@ -31,17 +31,17 @@ import type {
 	MitmStorage,
 } from "../../../src/mitm-types.ts";
 import { getLanguage } from "../i18n.ts";
+import { readJson } from "../read-json.ts";
 import { Page, Section } from "../ui/Page.tsx";
 import "./MitmPage.css";
 
 const tx = (zh: string, en: string) => (getLanguage() === "en" ? en : zh);
 
 async function api<T>(url: string, signal?: AbortSignal, body?: Record<string, unknown>): Promise<T> {
+	if (!body) return readJson<T>(url, signal);
 	const response = await fetch(
 		url,
-		body
-			? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal }
-			: { signal },
+		{ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal },
 	);
 	const data = (await response.json()) as T & { error?: string };
 	if (!response.ok) throw new Error(data.error ?? tx("请求失败", "Request failed"));
@@ -135,6 +135,7 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 	const [checked, setChecked] = useState<string[]>([]);
 	const [detail, setDetail] = useState<MitmFlowDetail | null>(null);
 	const [detailError, setDetailError] = useState("");
+	const [detailRetry, setDetailRetry] = useState(0);
 	const alive = useRef(true);
 	useEffect(() => {
 		alive.current = true;
@@ -242,7 +243,7 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 				if (!controller.signal.aborted) setDetailError(cause instanceof Error ? cause.message : String(cause));
 			});
 		return () => controller.abort();
-	}, [selected, projectId]);
+	}, [selected, projectId, detailRetry]);
 
 	async function action(name: string, extra: Record<string, unknown> = {}) {
 		if (busy || !projectId) return;
@@ -704,7 +705,7 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 				size="large"
 			>
 				{detailError ? (
-					<Alert type="error" title={detailError} />
+					<Alert type="error" showIcon title={detailError} action={<Button onClick={() => setDetailRetry((value) => value + 1)}>{tx("重试", "Retry")}</Button>} />
 				) : !detail ? (
 					<Spin />
 				) : (

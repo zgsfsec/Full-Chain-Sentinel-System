@@ -6,6 +6,7 @@ import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ReportDetail, ReportPage, ReportSource, ReportSummary } from "../../../src/report-types.ts";
 import { getLanguage } from "../i18n.ts";
+import { readJson } from "../read-json.ts";
 import { Page } from "../ui/Page.tsx";
 import "./ReportCenterPage.css";
 
@@ -72,8 +73,7 @@ function ProjectReports({ projectId, refreshToken }: { projectId: string; refres
 			if (!background) setLoading(true);
 			try {
 				const url = `${reportUrl(projectId)}&page=${page}&search=${encodeURIComponent(search)}${source ? `&source=${source}` : ""}`;
-				const response = await reportResponse(url, { signal: controller.signal });
-				const next = await response.json() as ReportPage;
+				const next = await readJson<ReportPage>(url, controller.signal);
 				if (controller.signal.aborted) return;
 				setData(next);
 				setError(null);
@@ -181,6 +181,7 @@ function ReportReader({ projectId, id, refreshToken, onBack, onSaved, onDownload
 	const [report, setReport] = useState<ReportDetail | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [mode, setMode] = useState("preview");
+	const [retry, setRetry] = useState(0);
 	const [draft, setDraft] = useState<ReportDetail | null>(null);
 	const [saving, setSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
@@ -191,9 +192,9 @@ function ReportReader({ projectId, id, refreshToken, onBack, onSaved, onDownload
 	useEffect(() => {
 		if (editing) return;
 		const controller = new AbortController();
-		void reportResponse(reportUrl(projectId, id), { signal: controller.signal })
-			.then(async (response) => {
-				const next = await response.json() as ReportDetail;
+		setError(null);
+		void readJson<ReportDetail>(reportUrl(projectId, id), controller.signal)
+			.then((next) => {
 				if (controller.signal.aborted) return;
 				setReport(next);
 				setError(null);
@@ -210,7 +211,7 @@ function ReportReader({ projectId, id, refreshToken, onBack, onSaved, onDownload
 			})
 			.catch((failure: unknown) => { if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : String(failure)); });
 		return () => controller.abort();
-	}, [projectId, id, refreshToken, editing, draftKey, message]);
+	}, [projectId, id, refreshToken, editing, draftKey, message, retry]);
 	useEffect(() => {
 		if (!draft) return;
 		if (!dirty) {
@@ -264,7 +265,7 @@ function ReportReader({ projectId, id, refreshToken, onBack, onSaved, onDownload
 			</Space> : null}
 		</Flex>
 		{saveError ? <Alert className="report-editor__error" type="error" showIcon title={saveError} /> : null}
-		{draft ? <ReportEditor report={draft} disabled={saving} onTitleChange={(title) => setDraft((current) => current ? { ...current, title } : null)} onMarkdownChange={(markdown) => setDraft((current) => current ? { ...current, markdown } : null)} /> : error ? <Alert type="error" showIcon title={error} /> : report ? <article className="report-document">
+		{draft ? <ReportEditor report={draft} disabled={saving} onTitleChange={(title) => setDraft((current) => current ? { ...current, title } : null)} onMarkdownChange={(markdown) => setDraft((current) => current ? { ...current, markdown } : null)} /> : error ? <Alert type="error" showIcon title={error} action={<Button onClick={() => setRetry((value) => value + 1)}>{tx("重试", "Retry")}</Button>} /> : report ? <article className="report-document">
 			<header className="report-document__head">
 				<h1>{report.title}</h1>
 				<Space wrap size={[12, 8]}><Tag>{sourceLabels[report.source]}</Tag><Typography.Text type="secondary">{report.engineName ?? report.taskName ?? report.sessionName ?? report.sessionId ?? "—"}</Typography.Text><Typography.Text type="secondary">{new Date(report.createdAt).toLocaleString()}</Typography.Text><Typography.Text type="secondary">{tx(`${report.imageCount} 张图片`, `${report.imageCount} images`)}</Typography.Text></Space>
