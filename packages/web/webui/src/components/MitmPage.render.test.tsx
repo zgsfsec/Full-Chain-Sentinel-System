@@ -8,7 +8,7 @@ test("proxy address uses the console IP or host LAN IP and respects loopback bin
 	const status: MitmStatus = {
 		project: { id: "p", name: "P" },
 		config: {
-			bind: "0.0.0.0", port: 32774, skipStatic: true, maxCaptureMb: 2,
+			bind: "0.0.0.0", port: 32774, skipStatic: true, maxCaptureMb: 2, maxConnections: 128,
 			authEnabled: false, authUsername: "", hasPassword: false,
 		},
 		state: "running",

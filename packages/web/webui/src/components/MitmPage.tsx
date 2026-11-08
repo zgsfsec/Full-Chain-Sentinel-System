@@ -28,6 +28,7 @@ import type {
 	MitmFlowDetail,
 	MitmFlowPage,
 	MitmStatus,
+	MitmStorage,
 } from "../../../src/mitm-types.ts";
 import { getLanguage } from "../i18n.ts";
 import { Page, Section } from "../ui/Page.tsx";
@@ -52,7 +53,7 @@ function bytes(size: number): string {
 		? `${size} B`
 		: size < 1024 * 1024
 			? `${(size / 1024).toFixed(1)} KB`
-			: `${(size / 1024 / 1024).toFixed(1)} MB`;
+			: size < 1024 ** 3 ? `${(size / 1024 / 1024).toFixed(1)} MB` : `${(size / 1024 ** 3).toFixed(1)} GB`;
 }
 
 export function mitmProxyEndpoint(status: MitmStatus | null, consoleHostname: string): string | null {
@@ -103,20 +104,28 @@ export function MitmFlowLink({ flow, onOpen }: { flow: MitmFlow; onOpen: () => v
 export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; name: string } | null; onSendToWebFuzz?: (flowId: string) => void }) {
 	const [status, setStatus] = useState<MitmStatus | null>(null);
 	const [flows, setFlows] = useState<MitmFlowPage>({ items: [], total: 0, page: 1, pageSize: 50 });
-	const [query, setQuery] = useState({ q: "", method: "", status: "", page: 1 });
+	const [query, setQuery] = useState({ q: "", method: "", status: "", page: 1, cursor: "" });
+	const [visible, setVisible] = useState(() => typeof document === "undefined" || !document.hidden);
+	const cursors = useRef(new Map<number, string>());
+	const cursorScope = useRef("");
 	const [draftSearch, setDraftSearch] = useState("");
 	const [live, setLive] = useState(true);
 	const [revision, setRevision] = useState(0);
+	const countRevision = useRef(0);
 	const [busy, setBusy] = useState(false);
+	const [actionName, setActionName] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState("");
 	const [pollError, setPollError] = useState("");
+	const [storage, setStorage] = useState<MitmStorage | null>(null);
+	const [storageError, setStorageError] = useState("");
 	const [drawer, setDrawer] = useState<"settings" | "help" | null>(null);
 	const [config, setConfig] = useState<MitmConfig>({
 		bind: "127.0.0.1",
 		port: 0,
 		skipStatic: true,
 		maxCaptureMb: 2,
+		maxConnections: 128,
 		authEnabled: false,
 		authUsername: "",
 		hasPassword: false,
@@ -134,43 +143,79 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 		};
 	}, []);
 	const projectId = project?.id;
+	const nextCursorScope = JSON.stringify([projectId, query.q, query.method, query.status]);
+	if (cursorScope.current !== nextCursorScope) {
+		cursorScope.current = nextCursorScope;
+		cursors.current.clear();
+	}
+	useEffect(() => {
+		const onVisibility = () => setVisible(!document.hidden);
+		document.addEventListener("visibilitychange", onVisibility);
+		return () => document.removeEventListener("visibilitychange", onVisibility);
+	}, []);
 	const params = new URLSearchParams({
 		projectId: projectId ?? "",
 		q: query.q,
 		method: query.method,
 		status: query.status,
 		page: String(query.page),
+		cursor: query.cursor,
 	});
 	const filter = params.toString();
 	const scope = `projectId=${encodeURIComponent(projectId ?? "")}`;
 	const running = status?.state === "running";
 	const unavailable = status?.state === "unavailable";
 	useEffect(() => {
+		if (!projectId || !visible || busy) return;
+		const controller = new AbortController();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const refresh = async () => {
+			try {
+				const next = await api<MitmStorage>(`/api/mitm/storage?projectId=${encodeURIComponent(projectId)}`, controller.signal);
+				if (!controller.signal.aborted) { setStorage(next); setStorageError(""); }
+			} catch (cause) {
+				if (!controller.signal.aborted) setStorageError(cause instanceof Error ? cause.message : String(cause));
+			} finally {
+				if (!controller.signal.aborted) timer = setTimeout(refresh, 60000);
+			}
+		};
+		void refresh();
+		return () => { controller.abort(); clearTimeout(timer); };
+	}, [projectId, visible, revision, busy]);
+	useEffect(() => {
 		setChecked([]);
 	}, [projectId, query.q, query.method, query.status, query.page]);
 
 	useEffect(() => {
-		if (!projectId || busy) return;
+		if (!projectId || busy || !visible) return;
 		const controller = new AbortController();
 		let timer: ReturnType<typeof setTimeout> | undefined;
+		let refreshCount = countRevision.current !== revision;
+		let interval = 15000;
 		const refresh = async () => {
 			setLoading(true);
 			try {
 				const [nextStatus, nextFlows] = await Promise.all([
 					api<MitmStatus>(`/api/mitm?projectId=${encodeURIComponent(projectId)}`, controller.signal),
-					api<MitmFlowPage>(`/api/mitm/flows?${filter}`, controller.signal),
+					api<MitmFlowPage>(`/api/mitm/flows?${filter}${refreshCount ? "&refreshCount=1" : ""}`, controller.signal),
 				]);
 				if (!controller.signal.aborted) {
 					setStatus(nextStatus);
 					setFlows(nextFlows);
 					setPollError("");
+					refreshCount = false;
+					countRevision.current = revision;
+					interval = nextStatus.state === "running" ? 3000 : 15000;
+					if (query.page === 1) cursors.current.clear();
+					if (nextFlows.nextCursor) cursors.current.set(query.page + 1, nextFlows.nextCursor);
+					if (cursors.current.size > 128) cursors.current.delete(cursors.current.keys().next().value!);
 				}
 			} catch (cause) {
 				if (!controller.signal.aborted) setPollError(cause instanceof Error ? cause.message : String(cause));
 			} finally {
 				if (!controller.signal.aborted) {
 					setLoading(false);
-					if (live) timer = setTimeout(refresh, 3000);
+					if (live && query.page === 1) timer = setTimeout(refresh, interval);
 				}
 			}
 		};
@@ -179,7 +224,7 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 			controller.abort();
 			clearTimeout(timer);
 		};
-	}, [projectId, filter, live, revision, busy]);
+	}, [projectId, filter, live, revision, busy, visible, query.page]);
 
 	useEffect(() => {
 		setDetail(null);
@@ -202,6 +247,7 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 	async function action(name: string, extra: Record<string, unknown> = {}) {
 		if (busy || !projectId) return;
 		setBusy(true);
+		setActionName(name);
 		setError("");
 		try {
 			const result = await api<MitmStatus | { ok: true }>(`/api/mitm/${name}`, undefined, { ...extra, projectId });
@@ -215,18 +261,21 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 				setSelected(null);
 				setChecked([]);
 				setFlows((prev) => ({ ...prev, items: [], total: 0, page: 1 }));
-				setQuery((prev) => ({ ...prev, page: 1 }));
+				cursors.current.clear();
+				setQuery((prev) => ({ ...prev, page: 1, cursor: "" }));
 			}
 			if (name === "flows/delete") {
 				if (selected && checked.includes(selected)) setSelected(null);
 				setChecked([]);
-				setQuery((prev) => ({ ...prev, page: 1 }));
+				cursors.current.clear();
+				setQuery((prev) => ({ ...prev, page: 1, cursor: "" }));
 			}
 		} catch (cause) {
 			if (alive.current) setError(cause instanceof Error ? cause.message : String(cause));
 		} finally {
 			if (alive.current) {
 				setBusy(false);
+				setActionName("");
 				setRevision((prev) => prev + 1);
 			}
 		}
@@ -289,6 +338,11 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 			{error || pollError || status?.error ? (
 				<Alert type="error" showIcon title={error || pollError || status?.error} />
 			) : null}
+			{busy && actionName === "clear" ? <Alert type="info" showIcon icon={<Spin size="small" />}
+				title={tx("正在清理流量记录和报文文件…", "Cleaning traffic records and saved messages…")}
+				description={tx("运行中按批次清理，抓包继续；发生错误时，已完成的批次不会恢复，可刷新后重试。", "Cleanup runs in batches while capture continues. Completed batches remain deleted if an error occurs; refresh and retry.")} /> : null}
+			{storage?.lowSpace ? <Alert type="warning" showIcon title={tx("抓包数据所在磁盘空间不足", "Capture disk is running low")}
+				description={tx(`仅剩 ${bytes(storage.freeBytes)}。请清理不再需要的流量，或停止代理后扩容；系统不会自动删除证据。`, `Only ${bytes(storage.freeBytes)} available. Remove unneeded traffic or stop the proxy and expand storage. Evidence is never deleted automatically.`)} /> : null}
 			<Section className="mitm-connection">
 				<Flex align="center" justify="space-between" gap={16} wrap>
 					<Space size={16} wrap>
@@ -314,6 +368,7 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 					</Typography.Text>
 				</Flex>
 			</Section>
+			<Typography.Text type="secondary">{storage ? tx(`存储占用约 ${bytes(storage.usedBytes)} · 磁盘可用 ${bytes(storage.freeBytes)} · 每分钟更新`, `Storage about ${bytes(storage.usedBytes)} · Disk free ${bytes(storage.freeBytes)} · Updated every minute`) : storageError || tx("正在读取存储用量…", "Loading storage usage…")}</Typography.Text>
 			<Section
 				title={tx("流量记录", "Traffic")}
 				extra={
@@ -333,7 +388,7 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 								</Button>
 							</Popconfirm>
 						) : null}
-						<Typography.Text type="secondary">{tx("实时刷新", "Live")}</Typography.Text>
+						<Typography.Text type="secondary">{query.page === 1 ? tx("实时刷新", "Live") : tx("浏览历史时暂停刷新", "Paused while browsing history")}</Typography.Text>
 						<Switch size="small" checked={live} onChange={setLive} />
 						<Button
 							size="small"
@@ -354,14 +409,14 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 						value={draftSearch}
 						onChange={(event) => {
 							setDraftSearch(event.target.value);
-							if (!event.target.value) setQuery((prev) => ({ ...prev, q: "", page: 1 }));
+							if (!event.target.value) setQuery((prev) => ({ ...prev, q: "", page: 1, cursor: "" }));
 						}}
-						onSearch={(q) => setQuery((prev) => ({ ...prev, q, page: 1 }))}
+						onSearch={(q) => setQuery((prev) => ({ ...prev, q, page: 1, cursor: "" }))}
 					/>
 					<Select
 						aria-label={tx("请求方法", "Method")}
 						value={query.method}
-						onChange={(method) => setQuery((prev) => ({ ...prev, method, page: 1 }))}
+						onChange={(method) => setQuery((prev) => ({ ...prev, method, page: 1, cursor: "" }))}
 						options={[
 							{ value: "", label: tx("全部方法", "All methods") },
 							...["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT"].map((value) => ({
@@ -373,7 +428,7 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 					<Select
 						aria-label={tx("响应状态", "Status")}
 						value={query.status}
-						onChange={(value) => setQuery((prev) => ({ ...prev, status: value, page: 1 }))}
+						onChange={(value) => setQuery((prev) => ({ ...prev, status: value, page: 1, cursor: "" }))}
 						options={[
 							{ value: "", label: tx("全部状态", "All statuses") },
 							...["1xx", "2xx", "3xx", "4xx", "5xx"].map((value) => ({ value, label: value })),
@@ -398,8 +453,8 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 						total: flows.total,
 						pageSize: 50,
 						showSizeChanger: false,
-						showTotal: (total) => tx(`共 ${total} 条`, `${total} requests`),
-						onChange: (page) => setQuery((prev) => ({ ...prev, page })),
+						showTotal: (total) => flows.totalCached ? tx(`约 ${total} 条（总数定期更新）`, `About ${total} requests (count refreshed periodically)`) : tx(`共 ${total} 条`, `${total} requests`),
+						onChange: (page) => setQuery((prev) => ({ ...prev, page, cursor: page === 1 ? "" : cursors.current.get(page) ?? "" })),
 					}}
 					locale={{
 						emptyText: (
@@ -468,6 +523,11 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 					</Typography.Paragraph>
 				) : null}
 				<Form layout="vertical" disabled={busy}>
+					<Form.Item label={tx("同时连接上限", "Concurrent connection limit")}
+						extra={tx("默认 128，含空闲长连接。达到上限会关闭新连接，限制高并发内存占用。", "Defaults to 128, including idle connections. New connections are closed at the limit to bound memory use.")}>
+						<InputNumber min={1} max={1024} precision={0} value={config.maxConnections}
+							onChange={(maxConnections) => setConfig((prev) => ({ ...prev, maxConnections: maxConnections ?? 128 }))} />
+					</Form.Item>
 					<Form.Item label={tx("监听范围", "Listen on")}>
 						<Select
 							value={config.bind}
