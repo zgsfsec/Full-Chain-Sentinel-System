@@ -162,6 +162,7 @@ describe("open-source reproduction progress", () => {
 		store.close();
 		stores.pop();
 		const legacy = openSqliteDatabase(codeMonitorDbPath(dir));
+		legacy.exec("DROP INDEX idx_code_commits_attention");
 		legacy.exec("ALTER TABLE code_commits DROP COLUMN reproduction_stage");
 		legacy.close();
 		const migrated = new CodeMonitorStore(codeMonitorDbPath(dir));

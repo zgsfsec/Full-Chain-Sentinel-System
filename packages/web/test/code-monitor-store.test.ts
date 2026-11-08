@@ -450,6 +450,98 @@ describe("CodeMonitorStore", () => {
 		expect(store.deleteByProject("p1")).toEqual([monitor.id]);
 		expect(store.listMonitors()).toHaveLength(0);
 	});
+
+	it("refreshes cached activity totals after commit transitions, external writes and deletion", () => {
+		const { dir, store } = open();
+		const db = openSqliteDatabase(codeMonitorDbPath(dir));
+		try {
+			const monitor = addMonitor(store);
+			expect(store.activityCounts("p1").pending).toBe(0);
+			const commit = addCommit(store, monitor.id);
+			expect(store.activityCounts("p1").pending).toBe(1);
+			expect(store.listActivity("p1", "all", 1, 20).total).toBe(1);
+			const security = {
+				verdict: "security" as const,
+				confidence: 0.9,
+				cve: null,
+				severity: null,
+				vulnType: null,
+				vulnCategory: "web" as const,
+				vulnTags: ["ssrf" as const],
+				reason: "fix",
+				judgedAt: 1,
+			};
+			store.setVerdict(commit.id, security);
+			expect(store.activityCounts("p1")).toMatchObject({ pending: 0, review: 1 });
+			store.setStatus(commit.id, "new", null, "failure");
+			expect(store.listActivity("p1", "dispatch_failed", 1, 20).total).toBe(1);
+			store.setStatus(commit.id, "dispatched", "engine-1", null);
+			expect(store.activityCounts("p1")).toMatchObject({ dispatchFailed: 0, review: 0, reproducing: 1 });
+			store.syncEngineStage("engine-1", "completed");
+			expect(store.activityCounts("p1")).toMatchObject({ reproducing: 0, finished: 1 });
+			store.setStatus(commit.id, "new", null, null);
+			expect(store.activityCounts("p1").review).toBe(1);
+			store.setDuplicateOf(commit.id, "original");
+			expect(store.listActivity("p1", "review", 1, 20).total).toBe(0);
+			store.setVerdict(commit.id, { ...security, verdict: "failed" });
+			expect(store.activityCounts("p1").failed).toBe(1);
+			store.setStatus(commit.id, "ignored", null, null);
+			expect(store.activityCounts("p1").failed).toBe(0);
+
+			// Another connection must invalidate both the old and the new project.
+			db.prepare("UPDATE code_commits SET project_id = 'p2', verdict = 'pending', status = 'new' WHERE id = ?").run(
+				commit.id,
+			);
+			expect(store.listActivity("p1", "all", 1, 20).total).toBe(0);
+			expect(store.activityCounts("p2").pending).toBe(1);
+			expect(store.listActivity("p2", "all", 1, 20).total).toBe(1);
+			store.deleteMonitor(monitor.id);
+			expect(store.activityCounts("p2").pending).toBe(0);
+			const remaining = addMonitor(store);
+			addCommit(store, remaining.id, "remaining");
+			expect(store.activityCounts("p1").pending).toBe(1);
+			store.deleteByProject("p1");
+			expect(store.listActivity("p1", "all", 1, 20).total).toBe(0);
+		} finally {
+			db.close();
+			store.close();
+		}
+	});
+
+	it("reuses activity aggregates across pagination and keeps returned counts isolated", () => {
+		const { store } = open();
+		try {
+			const monitor = addMonitor(store);
+			addCommit(store, monitor.id);
+			const counts = store.activityCounts("p1");
+			counts.pending = 999;
+			expect(store.activityCounts("p1").pending).toBe(1);
+			expect(store.listActivity("p1", "pending", 1, 1).total).toBe(1);
+			expect(store.listActivity("p1", "pending", 2, 1)).toMatchObject({ items: [], total: 1 });
+			expect(store.activityCounts("p2").pending).toBe(0);
+		} finally {
+			store.close();
+		}
+	});
+
+	it("counts repository errors only in the requested project and refreshes after recovery", () => {
+		const { store } = open();
+		try {
+			const first = addMonitor(store);
+			const second = addMonitor(store);
+			const other = addMonitor(store, "p2");
+			store.markChecked(first.id, 1, "failed");
+			store.markChecked(second.id, 1, "");
+			store.markChecked(other.id, 1, "failed");
+			expect(store.countMonitorErrors("p1")).toBe(1);
+			expect(store.countMonitorErrors("p2")).toBe(1);
+			expect(store.countMonitorErrors("missing")).toBe(0);
+			store.markChecked(first.id, 2, null);
+			expect(store.countMonitorErrors("p1")).toBe(0);
+		} finally {
+			store.close();
+		}
+	});
 });
 
 describe("monitor secrets", () => {

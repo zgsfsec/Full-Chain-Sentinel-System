@@ -126,8 +126,6 @@ CREATE TABLE IF NOT EXISTS code_commits (
   judged_at INTEGER,
   UNIQUE(monitor_id, sha)
 );
-CREATE INDEX IF NOT EXISTS idx_code_commits_monitor ON code_commits(monitor_id, authored_at DESC);
-CREATE INDEX IF NOT EXISTS idx_code_commits_project ON code_commits(project_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS code_monitor_checks (
   id TEXT PRIMARY KEY,
   monitor_id TEXT NOT NULL,
@@ -140,7 +138,6 @@ CREATE TABLE IF NOT EXISTS code_monitor_checks (
   findings INTEGER NOT NULL DEFAULT 0,
   error TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_code_checks_monitor ON code_monitor_checks(monitor_id, started_at DESC);
 CREATE TABLE IF NOT EXISTS code_monitor_jobs (
   id TEXT PRIMARY KEY,
   monitor_id TEXT NOT NULL,
@@ -161,6 +158,34 @@ CREATE INDEX IF NOT EXISTS idx_code_jobs_due ON code_monitor_jobs(status, next_r
 CREATE UNIQUE INDEX IF NOT EXISTS idx_code_jobs_active ON code_monitor_jobs(monitor_id)
   WHERE status IN ('queued', 'running');
 `;
+
+// Install after column migrations, since older databases have no reproduction_stage.
+const QUERY_INDEXES = `
+CREATE INDEX IF NOT EXISTS idx_code_commits_activity
+  ON code_commits(project_id, authored_at DESC, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_code_commits_review
+  ON code_commits(project_id, authored_at DESC, created_at DESC, id DESC) WHERE ${REVIEW_SQL};
+CREATE INDEX IF NOT EXISTS idx_code_commits_attention
+  ON code_commits(project_id, authored_at DESC, created_at DESC, id DESC) WHERE ${ATTENTION_SQL};
+CREATE INDEX IF NOT EXISTS idx_code_commits_monitor_order ON code_commits(monitor_id, authored_at DESC, id);
+CREATE INDEX IF NOT EXISTS idx_code_commits_findings ON code_commits(monitor_id, status)
+  WHERE verdict = 'security' AND duplicate_of IS NULL;
+CREATE INDEX IF NOT EXISTS idx_code_commits_engine ON code_commits(engine_id) WHERE engine_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_code_monitors_project ON code_monitors(project_id);
+CREATE INDEX IF NOT EXISTS idx_code_checks_monitor_order
+  ON code_monitor_checks(monitor_id, started_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_code_checks_project ON code_monitor_checks(project_id, started_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_code_jobs_monitor ON code_monitor_jobs(monitor_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_code_jobs_project ON code_monitor_jobs(project_id, created_at DESC, id DESC);
+DROP INDEX IF EXISTS idx_code_commits_monitor;
+DROP INDEX IF EXISTS idx_code_commits_project;
+DROP INDEX IF EXISTS idx_code_checks_monitor;
+`;
+
+interface ActivitySummary {
+	counts: Omit<SentinelCodeActivityCounts, "anomalies">;
+	total: number;
+}
 
 /** A monitor as stored, before the secret flag and the counts are joined in. */
 export type StoredCodeMonitor = Omit<
@@ -431,6 +456,8 @@ function toCommit(row: CommitRow): SentinelCodeCommit {
 
 export class CodeMonitorStore {
 	private readonly db: SqliteDatabase;
+	private readonly activitySummaries = new Map<string, ActivitySummary>();
+	private activitySummaryVersion = "";
 
 	constructor(path: string) {
 		mkdirSync(dirname(path), { recursive: true });
@@ -444,6 +471,7 @@ export class CodeMonitorStore {
 			this.db.exec("ALTER TABLE code_commits ADD COLUMN reproduction_stage TEXT");
 			this.db.exec("UPDATE code_commits SET reproduction_stage = 'engineering' WHERE engine_id IS NOT NULL");
 		}
+		this.db.exec(QUERY_INDEXES);
 		// A crash mid-dispatch leaves "dispatching" behind with no run behind it;
 		// the engine is only created at the end, so back to "new" is the truth.
 		this.db
@@ -520,6 +548,15 @@ export class CodeMonitorStore {
 			findingCount: Number(row.finding_count ?? 0),
 			pendingCount: Number(row.pending_count ?? 0),
 		}));
+	}
+
+	countMonitorErrors(projectId: string): number {
+		const row = this.db
+			.prepare(
+				"SELECT COUNT(*) AS total FROM code_monitors WHERE project_id = ? AND last_error IS NOT NULL AND last_error != ''",
+			)
+			.get(projectId) as { total: number };
+		return Number(row.total);
 	}
 
 	counts(monitorId: string): { findingCount: number; pendingCount: number } {
@@ -793,19 +830,42 @@ export class CodeMonitorStore {
 		}
 		const safePage = Math.max(1, Math.floor(page));
 		const safeSize = Math.min(200, Math.max(1, Math.floor(pageSize)));
-		const totalRow = this.db
-			.prepare(`SELECT COUNT(*) AS total FROM code_commits WHERE ${where}`)
-			.get(...params) as unknown as { total: number } | undefined;
+		let total: number;
+		if (!category && !tag && !query) {
+			const summary = this.activitySummary(projectId);
+			const totals = { ...summary.counts, all: summary.total, dispatch_failed: summary.counts.dispatchFailed };
+			total = totals[filter] ?? summary.counts.attention;
+		} else {
+			const row = this.db.prepare(`SELECT COUNT(*) AS total FROM code_commits WHERE ${where}`).get(...params) as {
+				total: number;
+			};
+			total = Number(row.total);
+		}
 		const rows = this.db
 			.prepare(
 				`SELECT * FROM code_commits WHERE ${where}
 				 ORDER BY authored_at DESC, created_at DESC, id DESC LIMIT ? OFFSET ?`,
 			)
 			.all(...params, safeSize, (safePage - 1) * safeSize) as unknown as CommitRow[];
-		return { items: rows.map(toCommit), total: Number(totalRow?.total ?? 0) };
+		return { items: rows.map(toCommit), total };
 	}
 
 	activityCounts(projectId: string): Omit<SentinelCodeActivityCounts, "anomalies"> {
+		return { ...this.activitySummary(projectId).counts };
+	}
+
+	private activitySummary(projectId: string): ActivitySummary {
+		// total_changes covers this connection; data_version covers other writers.
+		// Read-only pagination reuses counts, while writes invalidate them immediately.
+		const { changes } = this.db.prepare("SELECT total_changes() AS changes").get() as { changes: number };
+		const { data_version: dataVersion } = this.db.prepare("PRAGMA data_version").get() as { data_version: number };
+		const version = `${changes}:${dataVersion}`;
+		if (version !== this.activitySummaryVersion) {
+			this.activitySummaries.clear();
+			this.activitySummaryVersion = version;
+		}
+		const cached = this.activitySummaries.get(projectId);
+		if (cached) return cached;
 		const row = this.db
 			.prepare(
 				`SELECT
@@ -831,15 +891,21 @@ export class CodeMonitorStore {
 					total: number;
 			  }
 			| undefined;
-		return {
-			pending: Number(row?.pending ?? 0),
-			failed: Number(row?.failed ?? 0),
-			dispatchFailed: Number(row?.dispatch_failed ?? 0),
-			review: Number(row?.review ?? 0),
-			attention: Number(row?.attention ?? 0),
-			reproducing: Number(row?.reproducing ?? 0),
-			finished: Number(row?.finished ?? 0),
+		const summary: ActivitySummary = {
+			counts: {
+				pending: Number(row?.pending ?? 0),
+				failed: Number(row?.failed ?? 0),
+				dispatchFailed: Number(row?.dispatch_failed ?? 0),
+				review: Number(row?.review ?? 0),
+				attention: Number(row?.attention ?? 0),
+				reproducing: Number(row?.reproducing ?? 0),
+				finished: Number(row?.finished ?? 0),
+			},
+			total: Number(row?.total ?? 0),
 		};
+		if (this.activitySummaries.size >= 128) this.activitySummaries.clear();
+		this.activitySummaries.set(projectId, summary);
+		return summary;
 	}
 
 	/** Create a queued job, or return the active one already covering this monitor. */
