@@ -33,6 +33,7 @@
 
 ### Fixed
 
+- Fixed `loop-guard` falsely aborting normal reports containing multiple code fences, repeated headers, or shared phrases across table rows. Nonconsecutive line checks now use a bounded recent window and require repetition to dominate it, phrase checks stay within one line, and multiline cycles require exact matches so changing row identifiers count as progress. Single-character content breaks consecutive runs, and notices distinguish consecutive from nonconsecutive repetition.
 - Extended the `loop-guard` stutter detector to catch repetition it previously missed: the same line recurring in alternation with other lines (its consecutive-run count never built), and short phrases cycled with no fixed period on a single line (e.g. `Let me run. Let me be. Let me do. …`), now detected via a per-line total count and a 3-word-gram frequency scan of the tail window
 - Exported `createLoopGuardExtension` and `LOOP_GUARD_CUSTOM_TYPE` from the SDK so embedded hosts can mount the extension (the CLI already loaded it as a built-in)
 - Fixed tools supplied through `baseToolsOverride` losing their `promptSnippet` and `promptGuidelines`: the definition rebuilt from the AgentTool dropped both, so the tool vanished from the system prompt's tool section and its guidelines from the rules section. `wrapToolDefinition` now carries the metadata, and the duplicated `Object.assign` in the bash and PowerShell wrappers is gone.
