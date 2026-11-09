@@ -44,7 +44,7 @@ const CONFIG: SentinelNotifyConfig = {
 	webhook: "",
 	secret: "",
 	keyword: "",
-	kinds: { runs: true, vulns: true, goals: true, engines: true, pocs: true },
+	kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
 	summaryLimit: 2000,
 	feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
 	wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
@@ -399,7 +399,7 @@ test("the notification config round-trips through notifications.json with 0600",
 			webhook: "",
 			secret: "",
 			keyword: "",
-			kinds: { runs: true, vulns: true, goals: true, engines: true, pocs: true },
+			kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
 			summaryLimit: DEFAULT_SUMMARY_LIMIT,
 			feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
 			wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
@@ -409,7 +409,7 @@ test("the notification config round-trips through notifications.json with 0600",
 			webhook: " https://x/y ",
 			secret: " SEC ",
 			keyword: " KW ",
-			kinds: { runs: true, vulns: true, goals: true, engines: true, pocs: true },
+			kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
 			summaryLimit: 5000,
 			feishu: {
 				enabled: true,
@@ -429,7 +429,7 @@ test("the notification config round-trips through notifications.json with 0600",
 			webhook: "https://x/y",
 			secret: "SEC",
 			keyword: "KW",
-			kinds: { runs: true, vulns: true, goals: true, engines: true, pocs: true },
+			kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
 			summaryLimit: 5000,
 			feishu: {
 				enabled: true,
@@ -462,7 +462,7 @@ test("a stored limit is normalized: missing reads as the default, negative as 0"
 			webhook: "https://x/y",
 			secret: "",
 			keyword: "",
-			kinds: { runs: true, vulns: true, goals: true, engines: true, pocs: true },
+			kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
 			summaryLimit: -5,
 			feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
 			wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
@@ -489,19 +489,41 @@ test("kinds default to all on and a cleared kind survives the round trip", () =>
 			notificationsJsonPath(dir),
 			JSON.stringify({ dingtalk: { enabled: true, webhook: "https://x/y" } }),
 		);
-		expect(readNotifyConfig(dir).kinds).toEqual({ runs: true, vulns: true, goals: true, engines: true, pocs: true });
-
-		writeNotifyConfig(dir, {
-			...CONFIG,
-			kinds: { runs: false, vulns: false, goals: true, engines: true, pocs: true },
-		});
 		expect(readNotifyConfig(dir).kinds).toEqual({
-			runs: false,
-			vulns: false,
+			runs: true,
+			vulns: true,
+			codeIntel: true,
 			goals: true,
 			engines: true,
 			pocs: true,
 		});
+
+		writeNotifyConfig(dir, {
+			...CONFIG,
+			kinds: { runs: false, vulns: false, codeIntel: false, goals: true, engines: true, pocs: true },
+		});
+		expect(readNotifyConfig(dir).kinds).toEqual({
+			runs: false,
+			vulns: false,
+			codeIntel: false,
+			goals: true,
+			engines: true,
+			pocs: true,
+		});
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test.each([
+	{ vulns: true, codeIntel: false },
+	{ vulns: false, codeIntel: true },
+])("open-source intel and high-severity findings are saved independently: %j", (choices) => {
+	const dir = mkdtempSync(join(tmpdir(), "sentinel-notify-intel-"));
+	try {
+		const config = { ...CONFIG, kinds: { ...CONFIG.kinds, ...choices } };
+		writeNotifyConfig(dir, config);
+		expect(readNotifyConfig(dir).kinds).toEqual(config.kinds);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

@@ -315,7 +315,7 @@ export interface SentinelNotifyConfig extends SentinelNotifyChannelConfig {
 	 * run forced from the composer still pushes with run reports off, because an
 	 * explicit ask beats a general filter.
 	 */
-	kinds: { runs: boolean; vulns: boolean; goals: boolean; engines: boolean; pocs: boolean };
+	kinds: { runs: boolean; vulns: boolean; codeIntel: boolean; goals: boolean; engines: boolean; pocs: boolean };
 	/**
 	 * How many characters of notification body to keep, counted per section (a run's
 	 * closing summary, a goal's conclusion, a finding's raw packet). 0 keeps all of

@@ -636,7 +636,7 @@ export async function startSentinelServer(
 					},
 					notify: (monitor, commit) => {
 						const config = runtime.getNotifyConfig();
-						if (!config.kinds.vulns || !hasEnabledNotifyChannel(config)) return;
+						if (!config.kinds.codeIntel || !hasEnabledNotifyChannel(config)) return;
 						const { title, markdown } = buildCodeMonitorNotification(monitor, commit, config.summaryLimit);
 						void sendNotifications(config, title, markdown)
 							.then((status) => broadcast({ type: "notify_config", config: runtime.getNotifyConfig(), status }))

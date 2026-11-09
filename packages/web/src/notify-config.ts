@@ -23,7 +23,7 @@ const DEFAULT_CONFIG: SentinelNotifyConfig = {
 	webhook: "",
 	secret: "",
 	keyword: "",
-	kinds: { runs: true, vulns: true, goals: true, engines: true, pocs: true },
+	kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
 	summaryLimit: DEFAULT_SUMMARY_LIMIT,
 	feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
 	wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
@@ -44,6 +44,7 @@ function coerceKinds(value: unknown): SentinelNotifyConfig["kinds"] {
 	return {
 		runs: kinds.runs !== false,
 		vulns: kinds.vulns !== false,
+		codeIntel: kinds.codeIntel !== false,
 		goals: kinds.goals !== false,
 		engines: kinds.engines !== false,
 		pocs: kinds.pocs !== false,

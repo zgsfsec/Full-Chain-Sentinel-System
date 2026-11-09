@@ -27,6 +27,7 @@ import type {
 	SentinelGatePage,
 	SentinelMode,
 	SentinelModelLibraryView,
+	SentinelNotifyConfig,
 	SentinelPresetView,
 	SentinelServerMessage,
 	SentinelStateSnapshot,
@@ -1634,16 +1635,17 @@ test("a finished run notifies the DingTalk group, and the composer flag can forc
 			webhook: dingtalkUrl,
 			secret: "SECe2e",
 			keyword: "Full Chain Sentinel",
-			kinds: { runs: true, vulns: true, goals: true, engines: true, pocs: true },
+			kinds: { runs: true, vulns: true, codeIntel: false, goals: true, engines: true, pocs: true },
 			summaryLimit: 2000,
 			feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
 			wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
 		},
 	});
 	const saved = await waitFor((message) => message.type === "notify_config");
-	expect((saved as { config: { enabled: boolean; keyword: string } }).config).toMatchObject({
+	expect((saved as { config: SentinelNotifyConfig }).config).toMatchObject({
 		enabled: true,
 		keyword: "Full Chain Sentinel",
+		kinds: { vulns: true, codeIntel: false },
 	});
 
 	// One ordinary run. The send is fire-and-forget, so wait on the robot.
@@ -1697,23 +1699,27 @@ test("a finished run notifies the DingTalk group, and the composer flag can forc
 	await settleWebhook();
 	expect(dingtalk).toHaveLength(0);
 
-	// With the switch off, the composer flag still forces a notification.
+	// The composer can override the run-report event filter; the channel stays enabled.
 	dingtalk.length = 0;
 	drainIncoming();
 	send({
 		type: "save_notify_config",
 		config: {
-			enabled: false,
+			enabled: true,
 			webhook: dingtalkUrl,
 			secret: "",
 			keyword: "",
-			kinds: { runs: true, vulns: true, goals: true, engines: true, pocs: true },
+			kinds: { runs: false, vulns: false, codeIntel: true, goals: true, engines: true, pocs: true },
 			summaryLimit: 2000,
 			feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
 			wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
 		},
 	});
-	await waitFor((message) => message.type === "notify_config" && !message.config.enabled);
+	const filtered = await waitFor((message) => message.type === "notify_config" && !message.config.kinds.runs);
+	expect((filtered as { config: SentinelNotifyConfig }).config.kinds).toMatchObject({
+		vulns: false,
+		codeIntel: true,
+	});
 	send({ type: "prompt", text: "force a notification", notify: true });
 	await waitUntil(() => dingtalk.length > 0);
 	expect(dingtalk[0]?.text).toContain("**状态**：完成");
@@ -1779,7 +1785,7 @@ test("the agent's finding lands in the hub as pending, and the operator reviews 
 });
 
 test("a critical finding is pushed to DingTalk the moment it is submitted", async () => {
-	// The notification test above left the switch off.
+	// Enable high-severity notifications against the local robot.
 	drainIncoming();
 	send({
 		type: "save_notify_config",
@@ -1788,7 +1794,7 @@ test("a critical finding is pushed to DingTalk the moment it is submitted", asyn
 			webhook: dingtalkUrl,
 			secret: "SECe2e",
 			keyword: "Full Chain Sentinel",
-			kinds: { runs: true, vulns: true, goals: true, engines: true, pocs: true },
+			kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
 			summaryLimit: 2000,
 			feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
 			wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
@@ -1819,7 +1825,7 @@ test("a critical finding is pushed to DingTalk the moment it is submitted", asyn
 			webhook: dingtalkUrl,
 			secret: "",
 			keyword: "",
-			kinds: { runs: true, vulns: true, goals: true, engines: true, pocs: true },
+			kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
 			summaryLimit: 2000,
 			feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
 			wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
