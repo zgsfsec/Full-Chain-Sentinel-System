@@ -1,6 +1,7 @@
 import {
 	BellOutlined,
 	CheckCircleOutlined,
+	CodeOutlined,
 	LinkOutlined,
 	LockOutlined,
 	SaveOutlined,
@@ -48,6 +49,7 @@ type NotifyKind = keyof SentinelNotifyConfig["kinds"];
 const KINDS = [
 	["runs", t("运行报告"), t("每次运行结束（含失败/中止）的汇总报告")],
 	["vulns", t("高危漏洞"), t("提交或被审查抬级为 high/critical 的漏洞")],
+	["codeIntel", t("开源情报"), t("监测提交被判定为安全更新时推送")],
 	["goals", t("持续目标结束"), t("目标完成、阻塞、暂停或轮数用完")],
 	["engines", t("工程完成"), t("工程总报告提交时")],
 	["pocs", t("POC 订阅失败"), t("订阅源同步失败时（成功不推送）")],
@@ -55,7 +57,7 @@ const KINDS = [
 
 /** Every kind at the same value, for the 全选 / 全部不选 buttons. */
 function selectAll(value: boolean): SentinelNotifyConfig["kinds"] {
-	return { runs: value, vulns: value, goals: value, engines: value, pocs: value };
+	return { runs: value, vulns: value, codeIntel: value, goals: value, engines: value, pocs: value };
 }
 
 /** The glyph that sits beside one notification kind. */
@@ -65,6 +67,8 @@ function kindIcon(kind: NotifyKind) {
 			return <BellOutlined />;
 		case "vulns":
 			return <WarningOutlined />;
+		case "codeIntel":
+			return <CodeOutlined />;
 		case "goals":
 			return <CheckCircleOutlined />;
 		case "engines":

@@ -272,7 +272,7 @@ export function App() {
 		webhook: "",
 		secret: "",
 		keyword: "",
-		kinds: { runs: true, vulns: true, goals: true, engines: true, pocs: true },
+		kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
 		summaryLimit: 2000,
 		feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
 		wecom: { enabled: false, webhook: "", secret: "", keyword: "" },

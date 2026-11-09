@@ -338,7 +338,7 @@ export interface SentinelNotifyChannelConfig {
 /** Notification configuration (mirrors notifications.json). */
 export interface SentinelNotifyConfig extends SentinelNotifyChannelConfig {
 	/** Which notifications to push while either channel is enabled; all default on. */
-	kinds: { runs: boolean; vulns: boolean; goals: boolean; engines: boolean; pocs: boolean };
+	kinds: { runs: boolean; vulns: boolean; codeIntel: boolean; goals: boolean; engines: boolean; pocs: boolean };
 	/** Characters of notification body to keep per section; 0 keeps all of it. */
 	summaryLimit: number;
 	feishu: SentinelNotifyChannelConfig;

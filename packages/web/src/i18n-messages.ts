@@ -160,6 +160,7 @@ export const EN_MESSAGES: Record<string, string> = {
 		"GitHub Enterprise uses the same path with your instance host instead of github.com; a classic token with repo scope also works.",
 	打开令牌创建页: "Open the token page",
 	开源情报: "Open-source intel",
+	监测提交被判定为安全更新时推送: "Notify when a watched commit is judged to be a security fix",
 	"监控仓库分支上的新提交，由监测模型判断是否为安全修复；确认后交给工程复现漏洞。仓库凭据只存本机，下载源码时再写入项目容器。":
 		"Watch new commits on repository branches. The Monitor model decides whether a commit is a security fix, and confirmed findings are handed to engineering for reproduction. Repository credentials stay on this host and are written into the project container only when source is prepared.",
 	新增监控: "Add monitor",
