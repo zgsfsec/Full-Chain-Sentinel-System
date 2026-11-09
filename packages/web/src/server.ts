@@ -34,7 +34,8 @@ import {
 } from "./auth.ts";
 import { CodeMonitorManager } from "./code-monitor.ts";
 import { CodeMonitorStore, codeMonitorDbPath } from "./code-monitor-store.ts";
-import { broadcastConsoleMessage, sendConsoleMessage } from "./console-socket.ts";
+import { consoleSessionEvent } from "./console-events.ts";
+import { broadcastConsoleMessage, keepConsoleAlive, sendConsoleMessage } from "./console-socket.ts";
 import { buildImage, containerStates, deleteProjectWorkDir } from "./docker.ts";
 import { deleteDoctrine, listDoctrines, saveDoctrine } from "./doctrines.ts";
 import { DroidGateway } from "./droid-gateway.ts";
@@ -137,6 +138,7 @@ import {
 } from "./proxy.ts";
 import { SentinelRuntime } from "./sentinel-session.ts";
 import { checkProxyProfile, hasSingboxImage, pullSingboxImage } from "./singbox.ts";
+import { SnapshotBroadcast } from "./snapshot-broadcast.ts";
 import { EMPTY_SOURCES, normalizeSources, readSources, writeSources } from "./sources.ts";
 import { storeUpload } from "./upload.ts";
 
@@ -434,6 +436,9 @@ export async function startSentinelServer(
 ): Promise<{ close: () => void; url: string; environment: Promise<SentinelEnvReport> }> {
 	const startupCwd = resolve(options.cwd ?? process.cwd());
 	const clients = new Set<WebSocket>();
+	const snapshots = new SnapshotBroadcast(() => {
+		if (clients.size > 0) broadcast({ type: "snapshot", snapshot: runtime.snapshot() });
+	});
 	const sessionsBroadcasts = new Map<string | undefined, Promise<void>>();
 	const clientRequests = new WeakMap<WebSocket, IncomingMessage>();
 	/** Profiles whose connectivity test is running; one is enough per profile. */
@@ -469,7 +474,10 @@ export async function startSentinelServer(
 				}
 			: undefined,
 		hooks: {
-			onSessionEvent: (event) => broadcast({ type: "session_event", event }),
+			onSessionEvent: (event) => {
+				const outbound = consoleSessionEvent(event);
+				if (outbound) broadcast({ type: "session_event", event: outbound });
+			},
 			onStateChange: () => broadcastSnapshot(),
 			onSubagentEvent: (runId, event) => broadcast({ type: "subagent_event", runId, event }),
 			onNotifyStatus: (status) => broadcast({ type: "notify_config", config: runtime.getNotifyConfig(), status }),
@@ -737,7 +745,7 @@ export async function startSentinelServer(
 
 	function broadcastSnapshot(): void {
 		if (clients.size === 0) return;
-		broadcast({ type: "snapshot", snapshot: runtime.snapshot() });
+		snapshots.schedule();
 	}
 
 	/** Findings of the active project, pushed when one is submitted or reviewed. */
@@ -1613,14 +1621,23 @@ export async function startSentinelServer(
 	});
 	wss.on("connection", (socket, request) => {
 		clients.add(socket);
+		keepConsoleAlive(socket);
 		clientRequests.set(socket, request);
 		// Listeners first: the project list needs docker, and a client that sends a
 		// command right after connecting must not have it dropped in the meantime.
 		socket.on("message", (data) => {
 			void handleClientMessage(socket, data.toString());
 		});
-		socket.on("close", () => clients.delete(socket));
-		socket.on("error", () => clients.delete(socket));
+		socket.on("close", (code, reason) => {
+			clients.delete(socket);
+			if (code !== 1000 && code !== 1001) {
+				console.warn(`[sentinel-ws] closed: code=${code} reason=${reason.toString().slice(0, 120) || "none"}`);
+			}
+		});
+		socket.on("error", (error) => {
+			clients.delete(socket);
+			console.warn(`[sentinel-ws] socket error: ${error.message}`);
+		});
 		sendTo(socket, { type: "ui_config", language: getServerLanguage() });
 		sendTo(socket, { type: "snapshot", snapshot: runtime.snapshot() });
 		void projectInfos().then((projects) => {
@@ -4253,6 +4270,7 @@ export async function startSentinelServer(
 					terminal.dispose();
 					runtime.dispose();
 					for (const client of clients) client.terminate();
+					snapshots.cancel();
 					wss.close();
 					server.close();
 				},
