@@ -39,6 +39,7 @@ import type {
 } from "../types.ts";
 import { ModelRolePicker } from "./ModelRolePicker.tsx";
 import { GatekeeperPanel } from "./GatekeeperPanel.tsx";
+import { RemoteModelPicker } from "./RemoteModelPicker.tsx";
 import {
 	capabilityChips,
 	hostOf,
@@ -1099,7 +1100,7 @@ export function SettingsPanel({
 			{draft ? (
 				<Drawer
 					open
-					width="min(760px, calc(100vw - 24px))"
+					size="min(760px, 100vw)"
 					onClose={closeDraft}
 					destroyOnHidden
 					className="modelhub-drawer"
@@ -1294,6 +1295,7 @@ export function SettingsPanel({
 												</Form.Item>
 												<Form.Item label={t("模型 ID")}>
 													<Input
+														aria-label={t("模型 ID")}
 														value={draft.modelId}
 														onChange={(event) => setDraft({ ...draft, modelId: event.target.value })}
 														onBlur={autoFillNewEntry}
@@ -1396,6 +1398,22 @@ export function SettingsPanel({
 													: t("先在上方选择渠道；目录之外的中转用「自定义渠道」。")}
 											</Text>
 										)}
+										{customChannel || channel ? <RemoteModelPicker
+											input={{
+												entryId: draft.id,
+												baseUrl: draft.baseUrl,
+												api: draft.api,
+												apiKey: draft.clearKey ? "" : draft.apiKey.trim() || (draft.id ? null : ""),
+											}}
+											modelId={draft.modelId}
+											onSelect={(modelId) => {
+												setDraft({ ...draft, modelId, name: nameAfterSelection(draft, modelId) });
+												setCustomModel(true);
+												setDefaultsMatches(null);
+												setDefaultsNote("");
+												setAutoLookupKey(`${modelId}|${draft.baseUrl.trim()}`);
+											}}
+										/> : null}
 										<Text type="secondary">
 											{t("保存后立即生效；正在运行的会话会在下一次请求时使用新配置。")}
 										</Text>

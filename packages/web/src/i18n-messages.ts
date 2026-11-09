@@ -28,6 +28,35 @@ export function interpolate(source: string, vars?: Record<string, string | numbe
  * string still renders (in Chinese) until its translation lands.
  */
 export const EN_MESSAGES: Record<string, string> = {
+	获取远端模型列表: "Fetch remote models",
+	远端模型列表: "Remote model list",
+	"使用当前 Base URL 和 API Key 查询，无需先保存；也可手动填写模型 ID。":
+		"Query the current Base URL and API key without saving. You can also enter a model ID manually.",
+	"当前协议不支持获取远端模型列表，请手动填写模型 ID。":
+		"Remote model discovery is unavailable for this protocol. Enter a model ID manually.",
+	"请填写有效的 HTTP 或 HTTPS Base URL。": "Enter a valid HTTP or HTTPS Base URL.",
+	"端点已变化，请重新填写 API Key，或清除已保存的密钥后重试。":
+		"The endpoint has changed. Enter an API key or clear the saved key before retrying.",
+	"端点不支持模型列表接口，请检查 Base URL，或手动填写模型 ID。":
+		"The endpoint does not support model listing. Check the Base URL or enter a model ID manually.",
+	"模型列表接口发生重定向，请填写最终端点地址后重试。":
+		"The model listing endpoint redirects. Enter the final endpoint URL and retry.",
+	"获取模型列表失败（HTTP {status}），请稍后重试。": "Could not fetch models (HTTP {status}). Try again later.",
+	"远端没有返回有效的模型列表。": "The endpoint did not return a valid model list.",
+	"远端模型列表过大，请手动填写模型 ID。": "The remote model list is too large. Enter a model ID manually.",
+	"获取模型列表超时，请检查端点连接后重试。": "Fetching models timed out. Check the endpoint connection and retry.",
+	"无法连接模型列表接口，请检查地址、网络和 API Key。":
+		"Cannot connect to the model listing endpoint. Check the URL, network, and API key.",
+	"获取远端模型列表失败。": "Could not fetch remote models.",
+	"获取远端模型列表失败，请检查后端连接后重试。":
+		"Could not fetch remote models. Check the backend connection and retry.",
+	"请提供 Base URL、协议和 API Key 设置。": "Provide the Base URL, protocol, and API key settings.",
+	"搜索并选择远端模型（{count} 个）": "Search and select a remote model ({count})",
+	"选择后仅填入模型 ID，模型能力与价格请核对。": "Selection fills the model ID only. Verify capabilities and pricing.",
+	"模型列表较大，仅显示部分结果；未找到时可手动填写模型 ID。":
+		"Only part of the large model list is shown. Enter the model ID manually if it is missing.",
+	"远端未返回可用模型，请检查 API Key 权限，或手动填写模型 ID。":
+		"The endpoint returned no available models. Check API key permissions or enter a model ID manually.",
 	默认通知组: "Default notification group",
 	通知组: "Notification groups",
 	通知组名称: "Group name",

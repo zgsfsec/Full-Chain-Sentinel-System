@@ -87,6 +87,7 @@ import type {
 } from "./protocol.ts";
 import { checkProxyConnection } from "./proxy-check.ts";
 import { switchProjectNode } from "./proxy-switch.ts";
+import { handleRemoteModelsApi } from "./remote-models-api.ts";
 import { handleReportApi } from "./report-api.ts";
 import { submitReport } from "./report-content.ts";
 import { VulnReviewer } from "./reviewer.ts";
@@ -1458,6 +1459,17 @@ export async function startSentinelServer(
 					project: () => runtime.currentProject,
 					authorized: () => !authEnabled || hasValidSession(currentAuth(), request),
 				});
+				return;
+			}
+			if (path === "/api/models/remote") {
+				void handleRemoteModelsApi(
+					request,
+					response,
+					agentDir,
+					() =>
+						(!authEnabled || hasValidSession(currentAuth(), request)) &&
+						!consentFor(currentAuth()?.username ?? null).required,
+				);
 				return;
 			}
 			if (path === "/api/reports" || path.startsWith("/api/reports/")) {
