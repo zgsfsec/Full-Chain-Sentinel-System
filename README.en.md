@@ -258,7 +258,7 @@ Connect HTTP, SSE, or stdio MCP servers. Manage local or remote plugin hosts, in
 
 ### 18. Team notifications
 
-Connect DingTalk, Feishu, and WeCom bots. Choose events such as run reports, high-severity findings, goal completion, engagement completion, and POC sync failures, and inspect recent delivery results.
+Create global notification groups under Settings → Notifications. Each group independently selects run reports, high-severity findings, open-source intelligence, goal completion, engagement completion, and POC sync failures, and can contain multiple DingTalk, Feishu, or WeCom robots, including repeated platforms. Automatic events reach matching enabled groups; manually enabling notifications in the composer sends to all enabled groups. Enable or disable groups and individual robots, test each robot, and inspect delivery results by group and recipient. Existing settings load as a default group, preserving channels, event choices, and the body character limit.
 
 <details>
 <summary>View screenshots</summary>
