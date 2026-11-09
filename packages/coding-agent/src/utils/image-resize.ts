@@ -1,4 +1,5 @@
 import { Worker } from "node:worker_threads";
+import { getEmbeddedPhotonWasmPath } from "../config.ts";
 import {
 	IMAGE_RESIZE_WORKER_RESPONSE_TYPE,
 	type ImageResizeOptions,
@@ -21,17 +22,15 @@ function isResizeImageWorkerResponse(value: unknown): value is ResizeImageWorker
 	);
 }
 
-function createResizeWorker(workerSpecifier: string | URL): Worker {
-	return new Worker(workerSpecifier);
-}
-
 async function resizeImageInWorker(
 	workerSpecifier: string | URL,
 	inputBytes: Uint8Array,
 	mimeType: string,
 	options?: ImageResizeOptions,
 ): Promise<ResizedImage | null> {
-	const worker = createResizeWorker(workerSpecifier);
+	const worker = new Worker(workerSpecifier, {
+		workerData: { photonWasmPath: getEmbeddedPhotonWasmPath() },
+	});
 	try {
 		const inputBytesForWorker = toTransferableBytes(inputBytes);
 		return await new Promise<ResizedImage | null>((resolve, reject) => {

@@ -1,10 +1,12 @@
-import { parentPort } from "node:worker_threads";
+import { parentPort, workerData } from "node:worker_threads";
+import { setEmbeddedPhotonWasmPath } from "../config.ts";
 import {
 	IMAGE_RESIZE_WORKER_RESPONSE_TYPE,
 	type ImageResizeOptions,
 	type ResizeImageWorkerResponse,
 	resizeImageInProcess,
 } from "./image-resize-core.ts";
+import { loadPhoton } from "./photon.ts";
 
 interface ResizeImageWorkerRequest {
 	inputBytes: Uint8Array;
@@ -23,11 +25,28 @@ if (!port) {
 	throw new Error("image resize worker requires parentPort");
 }
 
+// Module state is isolated per worker. Register the executable's embedded WASM
+// path before Photon is first loaded in this thread.
+const runtimeData: unknown = workerData;
+if (
+	runtimeData &&
+	typeof runtimeData === "object" &&
+	"photonWasmPath" in runtimeData &&
+	typeof runtimeData.photonWasmPath === "string"
+) {
+	setEmbeddedPhotonWasmPath(runtimeData.photonWasmPath);
+}
+
 port.once("message", (message: unknown) => {
 	void (async () => {
 		try {
 			if (!isResizeImageWorkerRequest(message)) {
 				throw new Error("Invalid image resize worker request");
+			}
+			// A worker-only loading failure must trigger the caller's in-process
+			// fallback instead of looking like an image that cannot fit the limits.
+			if (!(await loadPhoton())) {
+				throw new Error("Image processing engine is unavailable in the resize worker");
 			}
 			const result = await resizeImageInProcess(message.inputBytes, message.mimeType, message.options);
 			const response: ResizeImageWorkerResponse = { type: IMAGE_RESIZE_WORKER_RESPONSE_TYPE, result };
