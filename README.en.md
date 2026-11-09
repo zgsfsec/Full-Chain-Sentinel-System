@@ -132,6 +132,8 @@ Organize target workflows and endpoints into OpenAPI 3.0 documents. Browse model
 
 Search and reference Nuclei templates. Manage official or custom feeds, synchronization schedules, and update records under Settings → POC feeds. Synchronizing templates does not execute tests.
 
+Manual, official, and scheduled syncs use the proxy network of the project selected when the sync starts. Retries keep that project even if the selection changes. With no selected project or no project proxy, downloads use the host network. An unavailable project proxy records a sync failure without falling back to direct access. Feeds and templates remain global.
+
 <details>
 <summary>View screenshots</summary>
 
