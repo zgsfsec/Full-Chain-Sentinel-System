@@ -28,10 +28,10 @@ export const ROLE_LABELS: Record<SentinelModelRoleName, string> = {
 
 export const ROLE_HINTS: Record<SentinelModelRoleName, string> = {
 	main: t("对话页的主代理；改完下次发送时生效，不打断正在跑的会话"),
-	judge: t("AI 审批逐条判定 bash 命令；改完立即生效"),
-	reviewer: t("提交漏洞后自动校准等级与 CVSS；改完立即生效"),
-	supervisor: t("观察模式每 20 次调用或异常时总结；介入模式只给建议，不阻断工具调用"),
-	commander: t("工程模式的指挥官；跟随主模型时共用主模型端点"),
+	judge: t("必须使用按量付费 API；AI 审批逐条判定 bash 命令；改完立即生效"),
+	reviewer: t("建议使用按量付费 API；提交漏洞后自动校准等级与 CVSS；改完立即生效"),
+	supervisor: t("建议使用按量付费 API；观察模式每 20 次调用或异常时总结；介入模式只给建议，不阻断工具调用"),
+	commander: t("建议使用按量付费 API；工程模式的指挥官；跟随主模型时共用主模型端点"),
 	monitor: t("开源情报判断每个新提交是否为安全修复；改完下一次检查生效"),
 };
 

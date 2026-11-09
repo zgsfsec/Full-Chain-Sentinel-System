@@ -981,6 +981,24 @@ export function SettingsPanel({
 				title={t("角色分配")}
 				description={t("为每个工作角色选择模型，修改后立即生效")}
 			>
+				<Alert
+					type="warning"
+					showIcon
+					className="ui-page__alert"
+					title={t("模型计划与限流提示")}
+					description={
+						<Space orientation="vertical" size={6}>
+							<div>
+								{t("Token Plan / Coding Plan 通常有 RPM（每分钟请求数）限制和排队等待机制。多个角色共用计划额度时，可能出现限流、长时间等待或请求超时，拖慢任务执行。")}
+							</div>
+							<div>
+								<strong>{t("守门模型必须使用按量付费 API。")}</strong>{" "}
+								{t("AI 审批需要在命令执行前等待守门判定，请为守门模型配置独立的按量付费端点，避免与主模型共用计划额度。")}
+							</div>
+							<div>{t("指挥端点、监督模型、漏洞评审建议使用按量付费 API，减少计划额度竞争和排队对任务推进的影响。")}</div>
+						</Space>
+					}
+				/>
 				<div className="modelhub-role-list">
 					{ROLE_ORDER.map((role) => {
 						const resolved = library.resolved[role];
@@ -995,6 +1013,11 @@ export function SettingsPanel({
 										{ROLE_LABELS[role]}
 									</Tag>
 									<Text type="secondary">{ROLE_SHORT[role]}</Text>
+									{role === "judge" ? (
+										<Tag color="orange" variant="filled">{t("必须按量 API")}</Tag>
+									) : role === "commander" || role === "supervisor" || role === "reviewer" ? (
+										<Tag variant="filled">{t("建议按量 API")}</Tag>
+									) : null}
 								</div>
 								<div className="modelhub-role-row__model">
 									<Text strong ellipsis title={entry?.name ?? t("未选择模型")}>
