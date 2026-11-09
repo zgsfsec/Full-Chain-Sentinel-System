@@ -10,6 +10,7 @@ export class SentinelConnection {
 	private reconnectDelay = 500;
 	private queue: SentinelClientMessage[] = [];
 	private reconnectTimer: number | undefined;
+	private generation = 0;
 
 	constructor(
 		private readonly onMessage: (message: SentinelServerMessage) => void,
@@ -18,6 +19,8 @@ export class SentinelConnection {
 	) {}
 
 	connect(): void {
+		if (!this.closed && this.socket) return;
+		window.clearTimeout(this.reconnectTimer);
 		this.closed = false;
 		this.open();
 	}
@@ -26,9 +29,10 @@ export class SentinelConnection {
 		if (this.closed) return;
 		const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 		const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+		const generation = ++this.generation;
 		this.socket = socket;
 		socket.onopen = () => {
-			if (this.closed) {
+			if (this.closed || this.socket !== socket) {
 				socket.close();
 				return;
 			}
@@ -42,7 +46,7 @@ export class SentinelConnection {
 			for (const message of this.queue.splice(0)) socket.send(JSON.stringify(message));
 		};
 		socket.onmessage = (event) => {
-			if (this.closed) return;
+			if (this.closed || this.socket !== socket) return;
 			try {
 				this.onMessage(JSON.parse(String(event.data)) as SentinelServerMessage);
 			} catch {
@@ -50,6 +54,7 @@ export class SentinelConnection {
 			}
 		};
 		socket.onclose = async (event) => {
+			if (this.socket !== socket) return;
 			this.socket = null;
 			this.onStatus(false);
 			if (this.closed) return;
@@ -57,13 +62,14 @@ export class SentinelConnection {
 			if (event.code === 4001) this.queue = [];
 			let expired = event.code === 4001;
 			try {
-				const session = await fetch("/api/auth/session", { cache: "no-store" });
+				const session = await fetch("/api/auth/session", { cache: "no-store", signal: AbortSignal.timeout(5000) });
 				// Another tab in this browser may already have the new login cookie.
 				expired = session.status === 401;
 			} catch {
 				// A network failure should retry; an explicit revocation should not.
 			}
-			if (this.closed) return;
+			if (this.closed || generation !== this.generation) return;
+			console.warn(`[sentinel-ws] reconnecting: code=${event.code} reason=${event.reason || "none"}`);
 			if (expired) {
 				this.closed = true;
 				this.queue = [];
@@ -102,5 +108,7 @@ export class SentinelConnection {
 		window.clearTimeout(this.reconnectTimer);
 		this.queue = [];
 		this.socket?.close();
+		this.socket = null;
+		this.generation += 1;
 	}
 }

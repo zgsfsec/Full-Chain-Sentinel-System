@@ -31,7 +31,7 @@ class FakeWebSocket {
 }
 
 const reload = vi.fn();
-const fetchSession = vi.fn(async () => ({ status: 200 }));
+const fetchSession = vi.fn(async (_input: string, _init?: RequestInit) => ({ status: 200 }));
 const storage = new Map<string, string>();
 
 beforeEach(() => {
@@ -57,6 +57,7 @@ beforeEach(() => {
 afterEach(() => {
 	vi.clearAllTimers();
 	vi.useRealTimers();
+	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
 });
 
@@ -123,4 +124,68 @@ test("explicit revocation returns to login even when the status request is offli
 	await FakeWebSocket.instances[0].end(4001, "session_replaced");
 	expect(reload).toHaveBeenCalledOnce();
 	expect(vi.getTimerCount()).toBe(0);
+});
+
+test("connecting twice does not leave a second socket that can invalidate the active one", () => {
+	const connection = new SentinelConnection(vi.fn());
+	connection.connect();
+	connection.connect();
+	expect(FakeWebSocket.instances).toHaveLength(1);
+	connection.close();
+});
+
+test("late close and message callbacks from an old socket cannot affect its replacement", async () => {
+	const onMessage = vi.fn();
+	const status = vi.fn();
+	const connection = new SentinelConnection(onMessage, status);
+	connection.connect();
+	const old = FakeWebSocket.instances[0];
+	old.open();
+	await old.end(1006);
+	await vi.advanceTimersByTimeAsync(500);
+	const current = FakeWebSocket.instances[1];
+	current.open();
+	await old.end(1006);
+	old.onmessage?.({ data: JSON.stringify({ type: "error", message: "stale" }) });
+	expect(connection.connected).toBe(true);
+	expect(status).toHaveBeenLastCalledWith(true);
+	expect(onMessage).not.toHaveBeenCalled();
+	await vi.advanceTimersByTimeAsync(20000);
+	expect(FakeWebSocket.instances).toHaveLength(2);
+	connection.close();
+});
+
+test("a late authorization response from an older connection does not log out the new one", async () => {
+	let finish: ((result: { status: number }) => void) | undefined;
+	fetchSession.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+	const connection = new SentinelConnection(vi.fn());
+	connection.connect();
+	const pending = FakeWebSocket.instances[0].end(1006);
+	connection.connect();
+	FakeWebSocket.instances[1].open();
+	finish?.({ status: 401 });
+	await pending;
+	expect(reload).not.toHaveBeenCalled();
+	expect(connection.connected).toBe(true);
+	connection.close();
+});
+
+test("a stalled authorization check times out and reconnects instead of waiting forever", async () => {
+	vi.spyOn(AbortSignal, "timeout").mockImplementationOnce((delay) => {
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), delay);
+		return controller.signal;
+	});
+	fetchSession.mockImplementationOnce((_input, init) => new Promise((_resolve, reject) => {
+		init?.signal?.addEventListener("abort", () => reject(new Error("timeout")), { once: true });
+	}));
+	const connection = new SentinelConnection(vi.fn());
+	connection.connect();
+	const pending = FakeWebSocket.instances[0].end(1006);
+	await vi.advanceTimersByTimeAsync(5000);
+	await pending;
+	await vi.advanceTimersByTimeAsync(500);
+	expect(FakeWebSocket.instances).toHaveLength(2);
+	expect(reload).not.toHaveBeenCalled();
+	connection.close();
 });
