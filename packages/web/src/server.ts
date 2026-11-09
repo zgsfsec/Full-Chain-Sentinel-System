@@ -34,6 +34,7 @@ import {
 } from "./auth.ts";
 import { CodeMonitorManager } from "./code-monitor.ts";
 import { CodeMonitorStore, codeMonitorDbPath } from "./code-monitor-store.ts";
+import { broadcastConsoleMessage, sendConsoleMessage } from "./console-socket.ts";
 import { buildImage, containerStates, deleteProjectWorkDir } from "./docker.ts";
 import { deleteDoctrine, listDoctrines, saveDoctrine } from "./doctrines.ts";
 import { DroidGateway } from "./droid-gateway.ts";
@@ -364,7 +365,7 @@ function textField(body: Record<string, unknown>, key: string): string {
 }
 
 function sendTo(socket: WebSocket, message: SentinelServerMessage): void {
-	if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+	sendConsoleMessage(socket, message);
 }
 
 /** File mutations report their own outcome so the panel can show it in place. */
@@ -433,6 +434,7 @@ export async function startSentinelServer(
 ): Promise<{ close: () => void; url: string; environment: Promise<SentinelEnvReport> }> {
 	const startupCwd = resolve(options.cwd ?? process.cwd());
 	const clients = new Set<WebSocket>();
+	const sessionsBroadcasts = new Map<string | undefined, Promise<void>>();
 	const clientRequests = new WeakMap<WebSocket, IncomingMessage>();
 	/** Profiles whose connectivity test is running; one is enough per profile. */
 	const proxyChecksInFlight = new Set<string>();
@@ -724,19 +726,17 @@ export async function startSentinelServer(
 	}
 
 	function broadcast(message: SentinelServerMessage): void {
-		let data: string;
+		if (clients.size === 0) return;
 		try {
-			data = JSON.stringify(message);
+			broadcastConsoleMessage(clients, message);
 		} catch (error) {
 			console.error("[sentinel-server] broadcast serialization failed:", error);
 			return;
 		}
-		for (const client of clients) {
-			if (client.readyState === WebSocket.OPEN) client.send(data);
-		}
 	}
 
 	function broadcastSnapshot(): void {
+		if (clients.size === 0) return;
 		broadcast({ type: "snapshot", snapshot: runtime.snapshot() });
 	}
 
@@ -876,10 +876,27 @@ export async function startSentinelServer(
 	}
 
 	async function broadcastSessions(socket?: WebSocket): Promise<void> {
-		const sessions = await sessionViews();
-		const view = { type: "sessions", sessions } satisfies SentinelServerMessage;
-		if (socket) sendTo(socket, view);
-		else broadcast(view);
+		const projectId = runtime.currentProject?.id;
+		if (socket) {
+			if (socket.readyState !== WebSocket.OPEN) return;
+			const sessions = await sessionViews();
+			if (runtime.currentProject?.id === projectId) sendTo(socket, { type: "sessions", sessions });
+			return;
+		}
+		if (clients.size === 0) return;
+		const existing = sessionsBroadcasts.get(projectId);
+		if (existing) return existing;
+		const pending = sessionViews()
+			.then((sessions) => {
+				if (runtime.currentProject?.id === projectId) broadcast({ type: "sessions", sessions });
+			})
+			.catch((error: unknown) => console.error("[sentinel-server] session list refresh failed:", error));
+		sessionsBroadcasts.set(projectId, pending);
+		try {
+			await pending;
+		} finally {
+			sessionsBroadcasts.delete(projectId);
+		}
 	}
 
 	/** The 代理 page's view, with the image's local presence resolved. */
@@ -962,7 +979,7 @@ export async function startSentinelServer(
 		broadcast({
 			type: "projects",
 			projects: await projectInfos(),
-			activeProjectId: runtime.snapshot().project?.id ?? registry.lastActiveProjectId ?? null,
+			activeProjectId: runtime.currentProject?.id ?? registry.lastActiveProjectId ?? null,
 		});
 	}
 
@@ -1298,7 +1315,7 @@ export async function startSentinelServer(
 				sendJson(response, { error: "导入内容无效或过大，请分批导入。" }, 400);
 				return;
 			}
-			const project = runtime.snapshot().project;
+			const project = runtime.currentProject;
 			if (!project || project.id !== body.projectId) {
 				sendJson(response, { error: "当前项目已切换，请关闭窗口后重新导入。" }, 409);
 				return;
@@ -1442,7 +1459,7 @@ export async function startSentinelServer(
 					(id) =>
 						agentDir
 							? listProjects(agentDir).projects.some((project) => project.id === id)
-							: runtime.snapshot().project?.id === id,
+							: runtime.currentProject?.id === id,
 					() =>
 						(!authEnabled || hasValidSession(currentAuth(), request)) &&
 						!consentFor(currentAuth()?.username ?? null).required,
@@ -1450,7 +1467,7 @@ export async function startSentinelServer(
 				return;
 			}
 			if (path === "/api/assets/import" && request.method === "GET") {
-				const project = runtime.snapshot().project;
+				const project = runtime.currentProject;
 				sendJson(
 					response,
 					project ? { id: project.id, name: project.name } : { error: t("尚未选择项目") },
@@ -1610,7 +1627,7 @@ export async function startSentinelServer(
 			sendTo(socket, {
 				type: "projects",
 				projects,
-				activeProjectId: runtime.snapshot().project?.id ?? null,
+				activeProjectId: runtime.currentProject?.id ?? null,
 			});
 		});
 		// Engineering mode: the board and doctrine list are pushed per connect.
@@ -1797,13 +1814,11 @@ export async function startSentinelServer(
 				}
 				case "get_tree": {
 					const { tree, leafId, forkPoints } = runtime.getTree();
-					socket.send(JSON.stringify({ type: "tree", tree, leafId, forkPoints } satisfies SentinelServerMessage));
+					sendTo(socket, { type: "tree", tree, leafId, forkPoints });
 					return;
 				}
 				case "get_state":
-					socket.send(
-						JSON.stringify({ type: "snapshot", snapshot: runtime.snapshot() } satisfies SentinelServerMessage),
-					);
+					sendTo(socket, { type: "snapshot", snapshot: runtime.snapshot() });
 					return;
 				case "get_model_library":
 					sendTo(socket, { type: "model_library", library: runtime.getModelLibrary() });
@@ -1865,15 +1880,13 @@ export async function startSentinelServer(
 				}
 				case "get_permissions": {
 					const view = runtime.getPermissions();
-					socket.send(
-						JSON.stringify({
-							type: "permissions",
-							config: view.config,
-							effectiveSubagent: view.effectiveSubagent,
-							presets: [...view.presets],
-							tools: view.tools,
-						} satisfies SentinelServerMessage),
-					);
+					sendTo(socket, {
+						type: "permissions",
+						config: view.config,
+						effectiveSubagent: view.effectiveSubagent,
+						presets: [...view.presets],
+						tools: view.tools,
+					});
 					return;
 				}
 				case "save_permissions": {
@@ -1894,27 +1907,23 @@ export async function startSentinelServer(
 					return;
 				}
 				case "get_notify_config":
-					socket.send(
-						JSON.stringify({
-							type: "notify_config",
-							config: runtime.getNotifyConfig(),
-							status: runtime.getNotifyStatus(),
-						} satisfies SentinelServerMessage),
-					);
+					sendTo(socket, {
+						type: "notify_config",
+						config: runtime.getNotifyConfig(),
+						status: runtime.getNotifyStatus(),
+					});
 					return;
 				case "save_notify_config":
 					runtime.saveNotifyConfig(message.config);
-					socket.send(
-						JSON.stringify({
-							type: "notify_config",
-							config: runtime.getNotifyConfig(),
-							status: runtime.getNotifyStatus(),
-						} satisfies SentinelServerMessage),
-					);
+					sendTo(socket, {
+						type: "notify_config",
+						config: runtime.getNotifyConfig(),
+						status: runtime.getNotifyStatus(),
+					});
 					return;
 				case "test_notify": {
 					const result = await runtime.testNotify(message.config, message.channel ?? "dingtalk");
-					socket.send(JSON.stringify({ type: "notify_test_result", result } satisfies SentinelServerMessage));
+					sendTo(socket, { type: "notify_test_result", result });
 					return;
 				}
 				case "get_environment":
@@ -2657,7 +2666,7 @@ export async function startSentinelServer(
 				}
 				case "get_stats": {
 					const stats = runtime.getStats();
-					if (stats) socket.send(JSON.stringify({ type: "stats", stats } satisfies SentinelServerMessage));
+					if (stats) sendTo(socket, { type: "stats", stats });
 					return;
 				}
 				case "list_projects": {
@@ -2696,7 +2705,7 @@ export async function startSentinelServer(
 						sendError(socket, t("确认失败：请输入完整项目名「{name}」", { name: target.name }));
 						return;
 					}
-					const wasActive = runtime.snapshot().project?.id === message.id;
+					const wasActive = runtime.currentProject?.id === message.id;
 					if (message.scope === "container") {
 						// Only the container goes: the registry entry, the work directory,
 						// the sessions and every record stay. The project needs an explicit
@@ -2782,7 +2791,7 @@ export async function startSentinelServer(
 					}
 					// A stopped project cannot be worked in, so the console leaves it; the
 					// operator re-enters after starting the container again.
-					if (runtime.snapshot().project?.id === message.id) {
+					if (runtime.currentProject?.id === message.id) {
 						await runtime.detachProject(target.workDir);
 						broadcastSnapshot();
 					}
@@ -2950,7 +2959,7 @@ export async function startSentinelServer(
 					return;
 				}
 				case "terminal_open": {
-					const project = runtime.snapshot().project;
+					const project = runtime.currentProject;
 					if (!project) {
 						sendTo(socket, {
 							type: "terminal_state",
@@ -3770,7 +3779,7 @@ export async function startSentinelServer(
 						sendError(socket, t("未配置配置目录，无法使用工程模式"));
 						return;
 					}
-					const project = runtime.snapshot().project;
+					const project = runtime.currentProject;
 					if (!project) {
 						sendError(socket, t("请先创建或选择一个项目，工程属于项目"));
 						return;
@@ -4189,9 +4198,7 @@ export async function startSentinelServer(
 	}
 
 	function sendError(socket: WebSocket, messageText: string): void {
-		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: "error", message: messageText } satisfies SentinelServerMessage));
-		}
+		sendTo(socket, { type: "error", message: messageText });
 	}
 
 	await runtime.init();

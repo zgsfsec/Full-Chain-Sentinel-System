@@ -59,6 +59,7 @@ test("a listed session surfaces its status without the raw custom state", () => 
 	const listed = withSessionStatus(info);
 	expect(listed.status).toBe("todo");
 	expect("customState" in listed).toBe(false);
+	expect("allMessagesText" in listed).toBe(false);
 	expect(listed.firstMessage).toBe("hi");
 });
 

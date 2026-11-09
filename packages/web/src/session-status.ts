@@ -58,7 +58,7 @@ export interface SentinelSessionEngineRef {
 }
 
 /** A listed session with its operator status, without the raw custom state. */
-export interface SentinelSessionListEntry extends Omit<SessionInfo, "customState"> {
+export interface SentinelSessionListEntry extends Omit<SessionInfo, "customState" | "allMessagesText"> {
 	status?: SentinelSessionStatus;
 	/** Present when this session is an engineering task's conversation. */
 	engine?: SentinelSessionEngineRef;
@@ -66,7 +66,8 @@ export interface SentinelSessionListEntry extends Omit<SessionInfo, "customState
 
 /** Drop `customState` from a listed session and surface the status it holds. */
 export function withSessionStatus(info: SessionInfo): SentinelSessionListEntry {
-	const { customState, ...rest } = info;
+	// The sidebar needs metadata and the first prompt, never the full transcript.
+	const { customState, allMessagesText: _allMessagesText, ...rest } = info;
 	const status = customState ? sessionStatusFromEntry(customState[SESSION_STATUS_CUSTOM_TYPE]) : undefined;
 	return status ? { ...rest, status } : rest;
 }
