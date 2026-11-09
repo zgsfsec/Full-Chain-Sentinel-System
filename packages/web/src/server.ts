@@ -97,6 +97,7 @@ import type { WorkerSession } from "./worker.ts";
 interface AcquiredTaskSession {
 	session: WorkerSession;
 	manager: SessionManager;
+	release(): void;
 }
 
 import {

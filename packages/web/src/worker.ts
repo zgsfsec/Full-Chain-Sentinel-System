@@ -63,7 +63,7 @@ export type AcquireTaskSession = (input: {
 	reopen: boolean;
 	goalPort: GoalPort;
 	onFinding(): void;
-}) => Promise<{ session: WorkerSession; manager: SessionManager }>;
+}) => Promise<{ session: WorkerSession; manager: SessionManager; release(): void }>;
 
 /** Terminal outcome the engine reacts to. */
 export interface WorkerOutcome {
@@ -100,6 +100,7 @@ export class EngineWorker {
 	private readonly hooks: WorkerHooks;
 	private session: WorkerSession | undefined;
 	private manager: SessionManager | undefined;
+	private releaseSession: (() => void) | undefined;
 	private unsubscribeWorker: () => void = () => {};
 	private goal: SentinelGoal | undefined;
 	private roundUsageStart: SentinelGoalUsage = emptyUsage();
@@ -112,6 +113,8 @@ export class EngineWorker {
 	 * every path that would start or continue a round checks this first.
 	 */
 	private cancelled = false;
+	private disposed = false;
+	private starting = false;
 	private timeLimitTimer: NodeJS.Timeout | undefined;
 	/** Per-task fuses the engine derived from its limits. */
 	private readonly limits: { tokenLimit: number | null; timeLimitMin: number | null };
@@ -133,7 +136,7 @@ export class EngineWorker {
 	}
 
 	get isRunning(): boolean {
-		return this.session !== undefined && !this.settled;
+		return (this.starting || this.session !== undefined) && !this.settled && !this.cancelled;
 	}
 
 	/** The engine uses this to keep a paused/aborted state from being overwritten. */
@@ -165,8 +168,9 @@ export class EngineWorker {
 	 * under a paused engine.
 	 */
 	async start(): Promise<void> {
+		this.starting = true;
 		const continuation = this.task.pendingContinue;
-		const { session, manager } = await this.acquire({
+		const { session, manager, release } = await this.acquire({
 			taskSessionId: this.task.sessionId,
 			// A task with a session id is always continued in that conversation,
 			// whether it is a restart resume, a commander continuation, or a task the
@@ -177,7 +181,13 @@ export class EngineWorker {
 		});
 		this.session = session;
 		this.manager = manager;
+		this.releaseSession = release;
 		this.hooks.onStarted(manager.getSessionId());
+		if (this.disposed) {
+			this.releaseSession = undefined;
+			release();
+			return;
+		}
 		if (this.stopped()) return;
 		this.unsubscribeWorker = session.subscribe((event) => this.onEvent(event));
 
@@ -332,11 +342,15 @@ export class EngineWorker {
 		return true;
 	}
 
-	/** The worker stops driving; the session itself stays with the runtime. */
+	/** Release the live session; its persisted conversation remains reopenable. */
 	dispose(): void {
+		this.disposed = true;
 		this.cancelled = true;
 		if (this.timeLimitTimer) clearTimeout(this.timeLimitTimer);
 		this.unsubscribeWorker();
+		const release = this.releaseSession;
+		this.releaseSession = undefined;
+		release?.();
 	}
 
 	/** No round may start or continue once the worker was stopped. */

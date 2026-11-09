@@ -9,7 +9,7 @@
 import type { AgentSessionEvent, SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, test } from "vitest";
 import type { SentinelEngineTask } from "../src/protocol.ts";
-import { EngineWorker, type WorkerSession } from "../src/worker.ts";
+import { type AcquireTaskSession, EngineWorker, type WorkerSession } from "../src/worker.ts";
 
 interface FakeSession extends WorkerSession {
 	prompts: string[];
@@ -91,10 +91,7 @@ function managerOf(): SessionManager {
 	} as unknown as SessionManager;
 }
 
-function workerFor(
-	acquire: (input: { taskSessionId: string | null }) => Promise<{ session: WorkerSession; manager: SessionManager }>,
-	settled: string[] = [],
-): EngineWorker {
+function workerFor(acquire: AcquireTaskSession, settled: string[] = []): EngineWorker {
 	return new EngineWorker(
 		task(),
 		async (input) => acquire(input),
@@ -108,7 +105,7 @@ function workerFor(
 	);
 }
 
-const immediateFor = (session: FakeSession) => async () => ({ session, manager: managerOf() });
+const immediateFor = (session: FakeSession) => async () => ({ session, manager: managerOf(), release: () => {} });
 
 test("abort while the session is being acquired leaves the objective unstarted", async () => {
 	const session = fakeSession();
@@ -119,7 +116,7 @@ test("abort while the session is being acquired leaves the objective unstarted",
 	const settled: string[] = [];
 	const worker = workerFor(async () => {
 		await gate;
-		return { session, manager: managerOf() };
+		return { session, manager: managerOf(), release: () => {} };
 	}, settled);
 
 	const started = worker.start();
@@ -197,4 +194,64 @@ test("abort of a compacting session still aborts it", async () => {
 	await worker.abort("操作员暂停");
 
 	expect(session.abortCalls).toBe(1);
+});
+
+test("a worker reserves its concurrency slot while acquiring its session", async () => {
+	let acquired: () => void = () => {};
+	const gate = new Promise<void>((resolve) => {
+		acquired = resolve;
+	});
+	const worker = workerFor(async () => {
+		await gate;
+		return { session: fakeSession(), manager: managerOf(), release: () => {} };
+	});
+	expect(worker.isRunning).toBe(false);
+	const started = worker.start();
+	expect(worker.isRunning).toBe(true);
+	await worker.abort("stop");
+	expect(worker.isRunning).toBe(false);
+	acquired();
+	await started;
+	worker.dispose();
+});
+
+test("disposing during acquisition releases the eventual session exactly once", async () => {
+	let acquired: () => void = () => {};
+	const gate = new Promise<void>((resolve) => {
+		acquired = resolve;
+	});
+	const session = fakeSession();
+	let releases = 0;
+	const worker = workerFor(async () => {
+		await gate;
+		return {
+			session,
+			manager: managerOf(),
+			release: () => {
+				releases += 1;
+			},
+		};
+	});
+	const started = worker.start();
+	worker.dispose();
+	acquired();
+	await started;
+	worker.dispose();
+	expect(releases).toBe(1);
+	expect(session.prompts).toEqual([]);
+});
+
+test("disposing an acquired worker returns ownership to the runtime once", async () => {
+	let releases = 0;
+	const worker = workerFor(async () => ({
+		session: fakeSession(),
+		manager: managerOf(),
+		release: () => {
+			releases += 1;
+		},
+	}));
+	await worker.start();
+	worker.dispose();
+	worker.dispose();
+	expect(releases).toBe(1);
 });

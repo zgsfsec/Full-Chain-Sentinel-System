@@ -142,7 +142,7 @@ test("a continuation reopens the same session and injects the commander instruct
 		async (input) => {
 			reopen = input.reopen;
 			taskSessionId = input.taskSessionId;
-			return { session, manager };
+			return { session, manager, release: () => {} };
 		},
 		{ onStarted: () => {}, onEvent: () => {}, onSettled: () => {}, onProgress: () => {} },
 		{ tokenLimit: null, timeLimitMin: null },
@@ -176,7 +176,7 @@ test("a provider error hands the task back instead of burning another round", as
 	const outcomes: WorkerOutcome[] = [];
 	const worker = new EngineWorker(
 		task({ status: "queued", criteria: [], sessionId: null }),
-		async () => ({ session, manager }),
+		async () => ({ session, manager, release: () => {} }),
 		{ onStarted: () => {}, onEvent: () => {}, onSettled: (outcome) => outcomes.push(outcome), onProgress: () => {} },
 		{ tokenLimit: null, timeLimitMin: null },
 	);
@@ -205,7 +205,7 @@ test("a normal round still continues on its own", async () => {
 	const outcomes: WorkerOutcome[] = [];
 	const worker = new EngineWorker(
 		task({ status: "queued", criteria: [], sessionId: null }),
-		async () => ({ session, manager }),
+		async () => ({ session, manager, release: () => {} }),
 		{ onStarted: () => {}, onEvent: () => {}, onSettled: (outcome) => outcomes.push(outcome), onProgress: () => {} },
 		{ tokenLimit: null, timeLimitMin: null },
 	);

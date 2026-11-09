@@ -481,6 +481,9 @@ interface ManagedSession {
 	 * engine's worker — not by the console's goal bar.
 	 */
 	taskSession?: boolean;
+	/** The worker finished; retain only while the operator is viewing it. */
+	taskReleased?: boolean;
+	taskReleasePending?: boolean;
 	/**
 	 * The business-modeling run in force for this session, read from the branch
 	 * at (re)build time. The two modeling tools are active exactly while this is
@@ -595,6 +598,7 @@ export class SentinelRuntime {
 	private readonly supervisor: Supervisor;
 
 	private sessions = new Map<string, ManagedSession>();
+	private sessionLists = new Map<string, Promise<SentinelSessionListEntry[]>>();
 	private activeKey: string | undefined;
 	private modelRuntime: ModelRuntime | undefined;
 	/** Set when models.json changed under a live runtime, so the next use refreshes it. */
@@ -744,6 +748,7 @@ export class SentinelRuntime {
 		this.activeContainer = container;
 		this.sessionDir = getDefaultSessionDir(this.cwd, this.agentDir);
 		this.activeKey = await this.createSessionInto(SessionManager.create(this.cwd, this.sessionDir || undefined));
+		this.evictReleasedTaskSessions();
 		this.hooks.onStateChange();
 	}
 
@@ -1145,7 +1150,12 @@ export class SentinelRuntime {
 		managed.taskSession = task !== undefined;
 		// Emits session_start, which connects MCP servers and lets extensions
 		// contribute skills and prompt templates.
-		await created.session.bindExtensions({});
+		try {
+			await created.session.bindExtensions({});
+		} catch (error) {
+			created.session.dispose();
+			throw error;
+		}
 		managed.key = manager.getSessionId();
 		if (!task) {
 			this.supervisor.attach({
@@ -1257,7 +1267,7 @@ export class SentinelRuntime {
 	 */
 	async acquireTaskSession(
 		options: TaskSessionOptions,
-	): Promise<{ session: ManagedSession["session"]; manager: SessionManager; unsubscribe: () => void }> {
+	): Promise<{ session: ManagedSession["session"]; manager: SessionManager; release(): void }> {
 		const sessionDir = getDefaultSessionDir(options.project.cwd, this.agentDir);
 		// A continuation or a resume reopens the task's own conversation. A live
 		// session cannot be reused as-is: its goal tools still point at the worker
@@ -1271,7 +1281,7 @@ export class SentinelRuntime {
 			if (!options.taskSessionId) throw new Error(t("任务没有可恢复的会话，无法在原会话上继续"));
 			const existing = this.sessions.get(options.taskSessionId);
 			if (existing) {
-				if (existing.session.isStreaming) throw new Error(t("任务会话仍在运行，请先中止再续跑"));
+				if (!existing.session.isIdle) throw new Error(t("任务会话仍在运行，请先中止再续跑"));
 				existing.unsubscribe();
 				existing.session.dispose();
 				this.sessions.delete(existing.key);
@@ -1299,8 +1309,33 @@ export class SentinelRuntime {
 		return {
 			session: managed.session,
 			manager: managed.manager,
-			unsubscribe: managed.unsubscribe,
+			release: () => this.releaseTaskSession(managed),
 		};
+	}
+
+	private releaseTaskSession(managed: ManagedSession): void {
+		// A continuation can replace this instance before its old worker disposes.
+		if (this.sessions.get(managed.key) !== managed) return;
+		managed.taskReleased = true;
+		if (managed.key === this.activeKey) return;
+		if (!managed.session.isIdle) {
+			if (managed.taskReleasePending) return;
+			managed.taskReleasePending = true;
+			void managed.session.waitForIdle().then(() => {
+				managed.taskReleasePending = false;
+				this.releaseTaskSession(managed);
+			});
+			return;
+		}
+		managed.unsubscribe();
+		managed.session.dispose();
+		this.sessions.delete(managed.key);
+	}
+
+	private evictReleasedTaskSessions(): void {
+		for (const managed of this.sessions.values()) {
+			if (managed.taskReleased) this.releaseTaskSession(managed);
+		}
 	}
 
 	private sessionLabel(managed: ManagedSession): string {
@@ -2640,7 +2675,7 @@ export class SentinelRuntime {
 	 * nothing can be written outside the evidence directory.
 	 */
 	async fetchPluginArtifact(hostId: string, pluginId: string, path: string): Promise<string> {
-		const project = this.snapshot().project;
+		const project = this.currentProject;
 		if (!project) throw new Error(t("请先创建或选择一个项目，再把插件产物落进证据目录"));
 		const data = await pluginService.downloadPluginArtifact(this.agentDir, hostId, pluginId, path);
 		const safeSegments = path
@@ -4152,6 +4187,7 @@ export class SentinelRuntime {
 			manager.appendCustomEntry(SESSION_PRESET_CUSTOM_TYPE, { id: presetId, at: Date.now() });
 		}
 		this.activeKey = await this.createSessionInto(manager);
+		this.evictReleasedTaskSessions();
 		this.hooks.onStateChange();
 	}
 
@@ -4197,18 +4233,32 @@ export class SentinelRuntime {
 			const file = managed.manager.getSessionFile();
 			if (file && resolveFsPath(file) === normalized) {
 				this.activeKey = managed.key;
+				this.evictReleasedTaskSessions();
 				this.hooks.onStateChange();
 				return;
 			}
 		}
 		const manager = SessionManager.open(normalized, this.sessionDir || undefined, this.cwd);
 		this.activeKey = await this.createSessionInto(manager);
+		this.evictReleasedTaskSessions();
 		this.hooks.onStateChange();
 	}
 
 	async listSessions(): Promise<SentinelSessionListEntry[]> {
-		const sessions = await SessionManager.list(this.cwd, this.sessionDir || undefined);
-		return sessions.map(withSessionStatus);
+		// Progress from several background workers must not scan the same history
+		// concurrently. Share only in-flight work; the next refresh reads fresh data.
+		const key = this.sessionDir;
+		const existing = this.sessionLists.get(key);
+		if (existing) return existing;
+		const listing = SessionManager.list(this.cwd, key || undefined).then((sessions) =>
+			sessions.map(withSessionStatus),
+		);
+		this.sessionLists.set(key, listing);
+		try {
+			return await listing;
+		} finally {
+			this.sessionLists.delete(key);
+		}
 	}
 
 	/**
@@ -4662,7 +4712,7 @@ export class SentinelRuntime {
 		return {
 			container,
 			path: await requireDirectory(container, path),
-			projectName: this.snapshot().project?.name ?? "work",
+			projectName: this.currentProject?.name ?? "work",
 		};
 	}
 

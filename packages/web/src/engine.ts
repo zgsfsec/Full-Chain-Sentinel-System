@@ -138,7 +138,7 @@ export interface EngineHooks {
  */
 export type RuntimeAcquireTaskSession = (
 	options: TaskSessionOptions,
-) => Promise<{ session: WorkerSession; manager: SessionManager }>;
+) => Promise<{ session: WorkerSession; manager: SessionManager; release(): void }>;
 
 interface EngineLive {
 	engine: SentinelEngine;
@@ -1289,6 +1289,11 @@ export class EngineManager {
 			entry.commanderPromptInFlight = false;
 		}
 		this.afterCommanderSettled(entry);
+		if (entry.engine.status !== "running") {
+			entry.commanderUnsubscribe();
+			entry.commander?.dispose();
+			entry.commander = undefined;
+		}
 	}
 
 	/**
@@ -1603,6 +1608,11 @@ export class EngineManager {
 		if (!commander) return;
 		try {
 			await commander.abort();
+			if (entry.commander === commander) {
+				entry.commanderUnsubscribe();
+				commander.dispose();
+				entry.commander = undefined;
+			}
 		} catch (error) {
 			this.pushCommanderEvent(entry, {
 				kind: "status",
