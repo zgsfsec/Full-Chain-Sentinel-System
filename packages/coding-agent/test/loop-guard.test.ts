@@ -126,11 +126,16 @@ describe("StutterDetector", () => {
 		expect(signal?.count).toBeGreaterThanOrEqual(12);
 	});
 
+	test("still catches exact multiline cycles", () => {
+		const text = "one step.\ntwo steps.\nthree steps.\n".repeat(30);
+		expect(new StutterDetector().push(text)?.kind).toBe("cycle");
+	});
+
 	test("trips on a line alternating with other lines, not just consecutive repeats", () => {
 		const detector = new StutterDetector();
 		const text = `Let me do it.\n\nHmm.\n\n`.repeat(6) + "Let me do it.\n\n".repeat(6);
 		const signal = detector.push(text);
-		expect(signal?.kind).toBe("lines");
+		expect(signal?.kind).toBe("lines_total");
 		expect(signal?.preview).toBe("Let me do it.");
 		expect(signal?.count).toBe(12);
 		// The trim starts where the repeated line first appeared.
@@ -162,6 +167,74 @@ describe("StutterDetector", () => {
 			"接着试 /api/dynamic。",
 		].join("\n");
 		expect(detector.push(text)).toBeUndefined();
+	});
+
+	test.each(["```", "```typescript", "~~~", "~~~python"])(
+		"does not count normal %s code fences as repeated output",
+		(fence) => {
+			const text = Array.from(
+				{ length: 16 },
+				(_, index) =>
+					`### Case ${index}\n${fence}\nconst result${index} = check(${index});\n${fence.startsWith("`") ? "```" : "~~~"}\n`,
+			).join("\n");
+			const detector = new StutterDetector();
+			for (let length = 8; length < text.length; length += 8) {
+				expect(detector.push(text.slice(0, length))).toBeUndefined();
+			}
+			expect(detector.push(text)).toBeUndefined();
+		},
+	);
+
+	test("does not combine distant identical lines across a report", () => {
+		const text = Array.from({ length: 16 }, (_, index) =>
+			[`Target ${index}:`, "HTTP/1.1 200 OK", `Response body ${index}`, `Evidence ${index}`].join("\n"),
+		).join("\n");
+		expect(new StutterDetector().push(text)).toBeUndefined();
+	});
+
+	test("does not carry old matches into a new section", () => {
+		const prefix = "Let me do it.\nHmm.\n".repeat(11);
+		const progress = Array.from({ length: 60 }, (_, index) => `Finished check ${index}.`).join("\n");
+		const text = `${prefix}${progress}\nLet me do it.\n`;
+		expect(new StutterDetector().push(text)).toBeUndefined();
+	});
+
+	test("does not combine common phrases across table rows", () => {
+		const text = Array.from(
+			{ length: 20 },
+			(_, index) => `| ${index} | request completed successfully | result-${index} |`,
+		).join("\n");
+		const detector = new StutterDetector();
+		for (let length = 8; length < text.length; length += 8) {
+			expect(detector.push(text.slice(0, length))).toBeUndefined();
+		}
+		expect(detector.push(text)).toBeUndefined();
+	});
+
+	test("does not treat changing row identifiers as noise in a periodic cycle", () => {
+		const text = Array.from(
+			{ length: 40 },
+			(_, index) => `| ${index + 10} | request completed successfully |\n`,
+		).join("");
+		const detector = new StutterDetector();
+		for (let length = 8; length < text.length; length += 8) {
+			expect(detector.push(text.slice(0, length))).toBeUndefined();
+		}
+		expect(detector.push(text)).toBeUndefined();
+	});
+
+	test("still catches consecutive formatting-only output that makes no progress", () => {
+		expect(new StutterDetector().push("```\n".repeat(6))).toMatchObject({ kind: "lines", count: 6 });
+	});
+
+	test("single-character content still breaks a run of code fences", () => {
+		const text = ["a", "b", "c", "d", "e", "f"].map((line) => `\`\`\`\n${line}\n\`\`\`\n`).join("\n");
+		expect(new StutterDetector().push(text)).toBeUndefined();
+	});
+
+	test("still catches an irregular phrase loop when its line is completed", () => {
+		const text = `${["Let me run. Let me be. Let me do.", "Let me be. Let me run."].join(" ").repeat(20)}\nDone.\n`;
+		expect(new StutterDetector().push(text)?.kind).toBe("cycle");
 	});
 
 	test("reset clears the run", () => {
@@ -213,6 +286,41 @@ describe("RepeatChain", () => {
 });
 
 describe("loop-guard extension", () => {
+	test("does not abort, trim, or nudge a normal response containing many code blocks", async () => {
+		const { api, sendMessage, emit } = createApi();
+		loopGuardExtension(api);
+		const ctx = createContext();
+		const text = Array.from(
+			{ length: 16 },
+			(_, index) => `示例 ${index}\n\`\`\`typescript\nconst result${index} = check(${index});\n\`\`\`\n`,
+		).join("\n");
+		const message = assistantMessage(text);
+		message.stopReason = "stop";
+		await emit("message_start", { type: "message_start", message }, ctx);
+		await stream(emit, message, ctx);
+		const ended = await emit("message_end", { type: "message_end", message }, ctx);
+		await emit("agent_settled", { type: "agent_settled", aborted: false }, ctx);
+		expect(ctx.abort).not.toHaveBeenCalled();
+		expect(ended.message).toBeUndefined();
+		expect(message.content).toEqual([{ type: "text", text }]);
+		expect(sendMessage).not.toHaveBeenCalled();
+	});
+
+	test("describes nonconsecutive repetition without calling it a consecutive run", async () => {
+		const { api, sendMessage, emit } = createApi();
+		loopGuardExtension(api);
+		const ctx = createContext();
+		const message = assistantMessage("Let me do it.\nHmm.\n".repeat(12));
+		await emit("message_start", { type: "message_start", message }, ctx);
+		await stream(emit, message, ctx);
+		await emit("message_end", { type: "message_end", message }, ctx);
+		await emit("agent_settled", { type: "agent_settled", aborted: true }, ctx);
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		const [draft] = sendMessage.mock.calls[0] as SentMessage;
+		expect(draft.content).toContain("同一行在近期输出中反复出现 12 次");
+		expect(draft.content).not.toContain("同一行连续出现");
+	});
+
 	test("aborts a stuttering stream, trims the tail, and nudges with a new run", async () => {
 		const { api, sendMessage, emit } = createApi();
 		loopGuardExtension(api);

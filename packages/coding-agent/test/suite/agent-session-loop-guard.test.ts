@@ -24,6 +24,31 @@ describe("loop-guard extension", () => {
 		while (harnesses.length > 0) harnesses.pop()?.cleanup();
 	});
 
+	it("preserves normal reports with code fences and shared phrases across table rows", async () => {
+		const text =
+			Array.from(
+				{ length: 16 },
+				(_, index) => `### Case ${index}\n\`\`\`typescript\nconst result${index} = check(${index});\n\`\`\`\n`,
+			).join("\n") +
+			Array.from(
+				{ length: 20 },
+				(_, index) => `| ${index} | request completed successfully | result-${index} |\n`,
+			).join("");
+		const harness = await createHarness({ extensionFactories: [loopGuardExtension] });
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage(text), fauxAssistantMessage("Unexpected continuation")]);
+
+		await harness.session.prompt("输出检查报告");
+
+		expect(getAssistantTexts(harness)).toEqual([text]);
+		expect(harness.getPendingResponseCount()).toBe(1);
+		expect(
+			harness.sessionManager
+				.getEntries()
+				.some((entry) => entry.type === "custom_message" && entry.customType === "zg-loop-guard"),
+		).toBe(false);
+	});
+
 	it("aborts a stuttering response and continues with a nudge", async () => {
 		const requests: string[] = [];
 		const harness = await createHarness({ extensionFactories: [loopGuardExtension] });

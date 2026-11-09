@@ -17,8 +17,8 @@
  */
 
 export interface StutterSignal {
-	/** `lines` is the same non-blank line repeated; `cycle` is a periodic tail. */
-	kind: "lines" | "cycle";
+	/** Consecutive lines, frequent nonconsecutive lines, or a repeating tail. */
+	kind: "lines" | "lines_total" | "cycle";
 	/** The repeated text, trimmed for display. */
 	preview: string;
 	/** How often it had repeated when the signal tripped. */
@@ -31,11 +31,13 @@ export interface StutterOptions {
 	/** Consecutive identical non-blank lines that trip the detector. */
 	repeatLines: number;
 	/**
-	 * Total occurrences of one non-blank line (consecutive or not) that trip the
-	 * detector. Alternation like `Let me do it.` / `Hmm.` / `Let me do it.` never
-	 * builds a consecutive run, but it is the same loop.
+	 * Occurrences of one content line in the recent window that trip the detector
+	 * when it accounts for at least half that window. Formatting-only lines and
+	 * code fences do not count here; their consecutive runs are still detected.
 	 */
 	repeatLinesTotal: number;
+	/** Maximum non-blank lines retained for nonconsecutive repetition checks. */
+	repeatLineWindow: number;
 	/** Length of the tail window scanned for a periodic cycle. */
 	cycleWindow: number;
 	/** Longest repeating unit treated as a cycle. */
@@ -44,7 +46,7 @@ export interface StutterOptions {
 	cycleMinRepeats: number;
 	/** How much new text to accumulate between cycle scans. */
 	cycleScanStride: number;
-	/** Fraction of the window allowed to differ before a period is not a cycle. */
+	/** Fraction of a single-line window allowed to differ; multiline cycles must match exactly. */
 	cycleTolerance: number;
 	/**
 	 * Repetitions of one 3-word gram inside the cycle window that trip the
@@ -57,6 +59,7 @@ export interface StutterOptions {
 export const STUTTER_DEFAULTS: StutterOptions = {
 	repeatLines: 6,
 	repeatLinesTotal: 12,
+	repeatLineWindow: 48,
 	cycleWindow: 600,
 	cycleMaxPeriod: 50,
 	cycleMinRepeats: 12,
@@ -79,10 +82,8 @@ export class StutterDetector {
 	private run = 0;
 	private runStart = 0;
 	private lastCycleScan = 0;
-	/** Total occurrences per line, so alternation counts where a run cannot build. */
-	private readonly lineCounts = new Map<string, number>();
-	/** Where each line first appeared, so a total-count trip trims from there. */
-	private readonly lineFirst = new Map<string, number>();
+	/** A bounded recent window, rather than counts accumulated across a whole report. */
+	private readonly recentLines: { line: string; start: number }[] = [];
 
 	constructor(options: StutterOptions = STUTTER_DEFAULTS) {
 		this.options = options;
@@ -96,8 +97,7 @@ export class StutterDetector {
 		this.run = 0;
 		this.runStart = 0;
 		this.lastCycleScan = 0;
-		this.lineCounts.clear();
-		this.lineFirst.clear();
+		this.recentLines.length = 0;
 	}
 
 	/** Fold the text so far and report a repetition the first time one trips. */
@@ -109,23 +109,25 @@ export class StutterDetector {
 			const line = text.slice(start, newline).trim();
 			this.lineStart = newline + 1;
 			this.consumed = newline + 1;
-			const signal = this.observeLine(line, start);
+			const signal = this.observeLine(line, start) ?? this.observeGrams(text, start, newline);
 			if (signal) return signal;
 		}
 		if (text.length - this.lastCycleScan < this.options.cycleScanStride) return undefined;
 		this.lastCycleScan = text.length;
-		return this.observeCycle(text) ?? this.observeGrams(text);
+		return this.observeCycle(text) ?? this.observeGrams(text, this.lineStart, text.length);
 	}
 
 	private observeLine(line: string, start: number): StutterSignal | undefined {
 		// Blank lines are transparent: they separate the repeats in practice without
 		// breaking the run.
-		if (line.length < 2) return undefined;
-		const total = (this.lineCounts.get(line) ?? 0) + 1;
-		this.lineCounts.set(line, total);
-		if (!this.lineFirst.has(line)) this.lineFirst.set(line, start);
-		if (total >= this.options.repeatLinesTotal) {
-			return { kind: "lines", preview: line.slice(0, 80), count: total, offset: this.lineFirst.get(line) ?? start };
+		if (line.length === 0) return undefined;
+		this.recentLines.push({ line, start });
+		if (this.recentLines.length > this.options.repeatLineWindow) this.recentLines.shift();
+		if (line.length >= 2 && /[\p{L}\p{N}]/u.test(line) && !/^(`{3,}|~{3,})/.test(line)) {
+			const matches = this.recentLines.filter((entry) => entry.line === line);
+			if (matches.length >= this.options.repeatLinesTotal && matches.length * 2 >= this.recentLines.length) {
+				return { kind: "lines_total", preview: line.slice(0, 80), count: matches.length, offset: matches[0].start };
+			}
 		}
 		if (line === this.previousLine) {
 			this.run += 1;
@@ -134,7 +136,9 @@ export class StutterDetector {
 			this.run = 1;
 			this.runStart = start;
 		}
-		if (this.run < this.options.repeatLines) return undefined;
+		// Single-character content breaks a run, but braces and similar lines are
+		// too common in normal code to trigger an interruption by themselves.
+		if (line.length < 2 || this.run < this.options.repeatLines) return undefined;
 		return { kind: "lines", preview: line.slice(0, 80), count: this.run, offset: this.runStart };
 	}
 
@@ -146,10 +150,12 @@ export class StutterDetector {
 		const { cycleWindow, cycleMaxPeriod, cycleMinRepeats, cycleTolerance } = this.options;
 		if (text.length < cycleWindow) return undefined;
 		const window = text.slice(-cycleWindow);
+		// Changing identifiers in otherwise similar rows are progress, not noise.
+		const tolerance = window.includes("\n") ? 0 : cycleTolerance;
 		for (let period = 1; period <= cycleMaxPeriod; period += 1) {
 			if (window.length / period < cycleMinRepeats) break;
 			const total = window.length - period;
-			const allowed = Math.floor(total * cycleTolerance);
+			const allowed = Math.floor(total * tolerance);
 			let mismatches = 0;
 			for (let index = period; index < window.length; index += 1) {
 				if (window[index] !== window[index - period] && ++mismatches > allowed) break;
@@ -175,9 +181,12 @@ export class StutterDetector {
 	 * not care about order: a 3-word gram that keeps reappearing in the tail is
 	 * the same loop.
 	 */
-	private observeGrams(text: string): StutterSignal | undefined {
+	private observeGrams(text: string, start: number, end: number): StutterSignal | undefined {
 		const { cycleWindow, gramMinRepeats } = this.options;
-		const window = text.slice(-cycleWindow);
+		// A shared phrase in distinct table rows or code examples is not a stalled
+		// paragraph. Keep phrase matching within one line, including completed lines.
+		const windowStart = Math.max(start, end - cycleWindow);
+		const window = text.slice(windowStart, end);
 		const tokens = window.split(/\s+/).filter((token) => token.length > 0);
 		if (tokens.length < gramMinRepeats + 2) return undefined;
 		const grams = new Map<string, number>();
@@ -194,7 +203,7 @@ export class StutterDetector {
 			kind: "cycle",
 			preview: best.gram.slice(0, 80),
 			count: best.count,
-			offset: Math.max(0, text.length - cycleWindow),
+			offset: windowStart,
 		};
 	}
 }

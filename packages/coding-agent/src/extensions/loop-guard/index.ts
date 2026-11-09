@@ -173,7 +173,11 @@ function trimStutter(message: AssistantMessage, keep: number): AssistantMessage 
 
 function stutterDraft(signal: StutterSignal, exhausted: boolean): CustomMessageEntryDraft {
 	const repeated =
-		signal.kind === "lines" ? `同一行连续出现 ${signal.count} 次` : `同一段内容重复约 ${signal.count} 次`;
+		signal.kind === "lines"
+			? `同一行连续出现 ${signal.count} 次`
+			: signal.kind === "lines_total"
+				? `同一行在近期输出中反复出现 ${signal.count} 次`
+				: `同一段内容重复约 ${signal.count} 次`;
 	const next = exhausted
 		? "重复已经连续发生多次，本轮不再自动继续。请检查上下文（必要时压缩上下文或换一个模型）后重新下达指令。"
 		: "请换一种方式继续：先用一两句话说明目前的进展和下一步打算，然后执行下一步，不要重复已经输出过的内容。";
