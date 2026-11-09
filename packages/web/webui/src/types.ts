@@ -3,6 +3,7 @@
 import type { CodeVulnTag } from "../../src/code-vuln-tags.ts";
 import type { CodeReproductionResult } from "../../src/code-reproduction.ts";
 import type { UiLanguage } from "../../src/i18n-messages.ts";
+import type { SentinelNotifyConfig, SentinelNotifyStatus, SentinelNotifyTarget } from "../../src/notify-types.ts";
 import { t } from "./i18n.ts";
 
 export type SentinelMode = "review" | "ai" | "auto";
@@ -324,36 +325,17 @@ export interface SentinelTestResult {
 	detail?: string;
 }
 
-/** The two chat robots a finished notification can go to. */
-export type SentinelNotifyChannel = "dingtalk" | "feishu" | "wecom";
-
-/** One robot's connection settings. */
-export interface SentinelNotifyChannelConfig {
-	enabled: boolean;
-	webhook: string;
-	secret: string;
-	keyword: string;
-}
-
-/** Notification configuration (mirrors notifications.json). */
-export interface SentinelNotifyConfig extends SentinelNotifyChannelConfig {
-	/** Which notifications to push while either channel is enabled; all default on. */
-	kinds: { runs: boolean; vulns: boolean; codeIntel: boolean; goals: boolean; engines: boolean; pocs: boolean };
-	/** Characters of notification body to keep per section; 0 keeps all of it. */
-	summaryLimit: number;
-	feishu: SentinelNotifyChannelConfig;
-	/** WeCom group robot: webhook only (no signing/keyword on the platform). */
-	wecom: SentinelNotifyChannelConfig;
-}
-
-/** Outcome of the most recent notification send. */
-export interface SentinelNotifyStatus {
-	at: number | null;
-	ok: boolean;
-	error?: string;
-	subject?: string;
-	channels?: Partial<Record<SentinelNotifyChannel, { ok: boolean; error?: string }>>;
-}
+export type {
+	SentinelNotifyChannel,
+	SentinelNotifyChannelConfig,
+	SentinelNotifyConfig,
+	SentinelNotifyDelivery,
+	SentinelNotifyGroup,
+	SentinelNotifyKind,
+	SentinelNotifyKinds,
+	SentinelNotifyStatus,
+	SentinelNotifyTarget,
+} from "../../src/notify-types.ts";
 
 export interface SentinelApprovalRequest {
 	id: string;
@@ -1695,7 +1677,7 @@ export type SentinelClientMessage =
 	| { type: "save_permissions"; config: SentinelPermissionsConfig }
 	| { type: "get_notify_config" }
 	| { type: "save_notify_config"; config: SentinelNotifyConfig }
-	| { type: "test_notify"; config: SentinelNotifyConfig; channel?: SentinelNotifyChannel }
+	| { type: "test_notify"; target: SentinelNotifyTarget }
 	| { type: "get_stats" }
 	| { type: "list_projects" }
 	/** `proxyId` absent follows the default on the 代理 page, `null` means none. */

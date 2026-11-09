@@ -267,18 +267,11 @@ function hasVisibleAssistantContent(message: AgentMessageView): boolean {
 export function App() {
 	const [snapshot, setSnapshot] = useState<SentinelStateSnapshot | null>(null);
 	const [sessions, setSessions] = useState<SessionInfoView[]>([]);
-	const [notifyConfig, setNotifyConfig] = useState<SentinelNotifyConfig>({
-		enabled: false,
-		webhook: "",
-		secret: "",
-		keyword: "",
-		kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
-		summaryLimit: 2000,
-		feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
-		wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
-	});
+	const [notifyConfig, setNotifyConfig] = useState<SentinelNotifyConfig>({ groups: [], summaryLimit: 2000 });
 	const [notifyStatus, setNotifyStatus] = useState<SentinelNotifyStatus>({ at: null, ok: true });
-	const notifyAvailable = notifyConfig.enabled || notifyConfig.feishu.enabled || notifyConfig.wecom.enabled;
+	const notifyAvailable = notifyConfig.groups.some(
+		(group) => group.enabled && group.kinds.runs && group.targets.some((target) => target.enabled && target.webhook.trim()),
+	);
 	const [assetConfig, setAssetConfig] = useState<SentinelAssetConfigView | null>(null);
 	const [assetBusy, setAssetBusy] = useState(false);
 	const [webSearchConfig, setWebSearchConfig] = useState<SentinelWebSearchConfigView | null>(null);
@@ -3273,7 +3266,7 @@ export function App() {
 											text,
 											streamingBehavior: behavior,
 											images,
-											notify: notifyRun ?? notifyAvailable,
+											notify: notifyRun ?? undefined,
 											...(attachModelIds && attachModelIds.length > 0 ? { attachModelIds } : {}),
 										});
 									}}
@@ -3712,10 +3705,10 @@ export function App() {
 								config={notifyConfig}
 								status={notifyStatus}
 								onSave={(next) => send({ type: "save_notify_config", config: next })}
-								onTest={async (candidate, channel) => {
+								onTest={async (target) => {
 									const result = await new Promise<SentinelTestResult | null>((resolve) => {
 										notifyTestResolverRef.current = resolve;
-										connectionRef.current?.send({ type: "test_notify", config: candidate, channel });
+										connectionRef.current?.send({ type: "test_notify", target });
 										window.setTimeout(() => {
 											if (notifyTestResolverRef.current === resolve) {
 												notifyTestResolverRef.current = null;

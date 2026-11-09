@@ -18,9 +18,10 @@ import { t } from "./i18n.ts";
 import type {
 	SentinelCodeCommit,
 	SentinelCodeMonitor,
-	SentinelNotifyChannel,
 	SentinelNotifyChannelConfig,
 	SentinelNotifyConfig,
+	SentinelNotifyDelivery,
+	SentinelNotifyKind,
 	SentinelNotifyStatus,
 	SentinelTestResult,
 	SentinelVulnerability,
@@ -52,7 +53,7 @@ export function signedWebhookUrl(webhook: string, secret: string, timestampMs: n
 }
 
 /** A DingTalk markdown body, with the keyword prepended when one is configured. */
-export function buildPayload(config: SentinelNotifyConfig, title: string, markdown: string): string {
+export function buildPayload(config: SentinelNotifyChannelConfig, title: string, markdown: string): string {
 	const prefix = config.keyword ? `${config.keyword}\n` : "";
 	return JSON.stringify({
 		msgtype: "markdown",
@@ -93,7 +94,7 @@ function clipToBytes(text: string, maxBytes: number): string {
  * the operator asked to keep in full still has to fit, so it is cut here and the
  * note says which limit did it.
  */
-export function fitPayload(config: SentinelNotifyConfig, title: string, markdown: string): string {
+export function fitPayload(config: SentinelNotifyChannelConfig, title: string, markdown: string): string {
 	const overhead = Buffer.byteLength(buildPayload(config, title, ""), "utf-8");
 	if (overhead + Buffer.byteLength(markdown, "utf-8") <= MAX_BODY_BYTES) {
 		return buildPayload(config, title, markdown);
@@ -105,7 +106,11 @@ export function fitPayload(config: SentinelNotifyConfig, title: string, markdown
 }
 
 /** One delivery attempt. Returns the failure reason, or undefined on success. */
-async function attempt(config: SentinelNotifyConfig, title: string, markdown: string): Promise<string | undefined> {
+async function attempt(
+	config: SentinelNotifyChannelConfig,
+	title: string,
+	markdown: string,
+): Promise<string | undefined> {
 	const url = signedWebhookUrl(config.webhook, config.secret, Date.now());
 	let response: Response;
 	try {
@@ -165,7 +170,7 @@ function delay(ms: number): Promise<void> {
  * caller records the result and moves on.
  */
 export async function sendDingTalk(
-	config: SentinelNotifyConfig,
+	config: SentinelNotifyChannelConfig,
 	title: string,
 	markdown: string,
 ): Promise<SentinelNotifyStatus> {
@@ -185,7 +190,7 @@ export async function sendDingTalk(
 }
 
 /** Settings-screen "send a test message" action. */
-export async function testDingTalk(config: SentinelNotifyConfig): Promise<SentinelTestResult> {
+export async function testDingTalk(config: SentinelNotifyChannelConfig): Promise<SentinelTestResult> {
 	if (!config.webhook.trim()) return { ok: false, message: t("请先填写 webhook 地址") };
 	const urlError = webhookUrlError(config.webhook.trim());
 	if (urlError) return { ok: false, message: urlError, detail: t("钉钉自定义机器人只接受 https。") };
@@ -463,73 +468,67 @@ export async function testWecom(config: SentinelNotifyChannelConfig): Promise<Se
 		: { ok: false, message: t("发送失败"), detail: status.error };
 }
 
-/** Channels that are enabled and have a webhook, in a stable display order. */
-export function enabledNotifyChannels(config: SentinelNotifyConfig): SentinelNotifyChannel[] {
-	const channels: SentinelNotifyChannel[] = [];
-	if (config.enabled && config.webhook.trim()) channels.push("dingtalk");
-	if (config.feishu?.enabled && config.feishu.webhook.trim()) channels.push("feishu");
-	if (config.wecom?.enabled && config.wecom.webhook.trim()) channels.push("wecom");
-	return channels;
+/** Match automatic events by group; an omitted kind is a manual broadcast. */
+export function enabledNotifyTargets(config: SentinelNotifyConfig, kind?: SentinelNotifyKind) {
+	return config.groups
+		.filter((group) => group.enabled && (!kind || group.kinds[kind]))
+		.flatMap((group) =>
+			group.targets.filter((target) => target.enabled && target.webhook.trim()).map((target) => ({ group, target })),
+		);
 }
 
-export function hasEnabledNotifyChannel(config: SentinelNotifyConfig): boolean {
-	return enabledNotifyChannels(config).length > 0;
+export function hasEnabledNotifyChannel(config: SentinelNotifyConfig, kind?: SentinelNotifyKind): boolean {
+	return enabledNotifyTargets(config, kind).length > 0;
 }
 
-/**
- * Send one notification to every enabled robot. A failure on one channel does
- * not suppress the other; the aggregate result lists both outcomes.
- */
+/** Each robot has its own outcome, including repeated platforms in the same group. */
 export async function sendNotifications(
 	config: SentinelNotifyConfig,
 	title: string,
 	markdown: string,
+	kind?: SentinelNotifyKind,
 ): Promise<SentinelNotifyStatus> {
-	const channels = enabledNotifyChannels(config);
-	if (channels.length === 0) {
-		return { at: Date.now(), ok: false, error: t("未启用通知渠道或未配置 webhook") };
-	}
-	const results = await Promise.all(
-		channels.map(async (channel) => ({
-			channel,
-			status:
-				channel === "dingtalk"
-					? await sendDingTalk(config, title, markdown)
-					: channel === "wecom"
-						? await sendWecom(
-								config.wecom ?? { enabled: false, webhook: "", secret: "", keyword: "" },
-								title,
-								markdown,
-							)
-						: await sendFeishu(
-								config.feishu ?? { enabled: false, webhook: "", secret: "", keyword: "" },
-								title,
-								markdown,
-							),
-		})),
+	const targets = enabledNotifyTargets(config, kind);
+	if (targets.length === 0) return { at: Date.now(), ok: false, error: t("没有匹配的已启用通知组或机器人") };
+	const deliveries: SentinelNotifyDelivery[] = new Array(targets.length);
+	let next = 0;
+	// Bound concurrent requests even when a notification fans out to many robots.
+	await Promise.all(
+		Array.from({ length: Math.min(4, targets.length) }, async () => {
+			while (next < targets.length) {
+				const index = next++;
+				const { group, target } = targets[index];
+				let status: SentinelNotifyStatus;
+				try {
+					status =
+						target.channel === "dingtalk"
+							? await sendDingTalk(target, title, markdown)
+							: target.channel === "feishu"
+								? await sendFeishu(target, title, markdown)
+								: await sendWecom(target, title, markdown);
+				} catch (error) {
+					status = { at: Date.now(), ok: false, error: error instanceof Error ? error.message : String(error) };
+				}
+				deliveries[index] = {
+					groupId: group.id,
+					groupName: group.name,
+					targetId: target.id,
+					targetName: target.name,
+					channel: target.channel,
+					ok: status.ok,
+					...(status.ok ? {} : { error: status.error ?? t("发送失败") }),
+				};
+			}
+		}),
 	);
-	const outcomes: NonNullable<SentinelNotifyStatus["channels"]> = {};
-	const errors: string[] = [];
-	for (const { channel, status } of results) {
-		if (status.ok) {
-			outcomes[channel] = { ok: true };
-		} else {
-			const error = status.error ?? t("发送失败");
-			outcomes[channel] = { ok: false, error };
-			errors.push(
-				channel === "dingtalk"
-					? t("钉钉：{error}", { error })
-					: channel === "wecom"
-						? t("企微：{error}", { error })
-						: t("飞书：{error}", { error }),
-			);
-		}
-	}
+	const errors = deliveries
+		.filter((entry) => !entry.ok)
+		.map((entry) => `${entry.groupName} / ${entry.targetName}：${entry.error}`);
 	return {
 		at: Date.now(),
 		ok: errors.length === 0,
-		...(errors.length > 0 ? { error: errors.join("；") } : {}),
-		channels: outcomes,
+		deliveries,
+		...(errors.length ? { error: errors.join("；") } : {}),
 	};
 }
 

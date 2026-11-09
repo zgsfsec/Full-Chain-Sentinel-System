@@ -12,6 +12,7 @@ import type { CodeVulnTag } from "./code-vuln-tags.ts";
 import type { DroidDevice, DroidToken } from "./droid.ts";
 import type { UiLanguage } from "./i18n-messages.ts";
 import type { IosDevice, IosToken } from "./ios.ts";
+import type { SentinelNotifyConfig, SentinelNotifyStatus, SentinelNotifyTarget } from "./notify-types.ts";
 import type { SentinelPermissionPreset, SentinelPermissionSet, SentinelPermissionsConfig } from "./permissions.ts";
 import type { SentinelPluginManifest } from "./plugin-manifest.ts";
 import type { SentinelSessionListEntry, SentinelSessionStatus } from "./session-status.ts";
@@ -290,59 +291,17 @@ export interface SentinelModelLibraryView {
 	};
 }
 
-/** The chat robots a finished notification can go to. */
-export type SentinelNotifyChannel = "dingtalk" | "feishu" | "wecom";
-
-/** One robot's connection settings. */
-export interface SentinelNotifyChannelConfig {
-	enabled: boolean;
-	/** Custom-robot webhook URL, including its access token. */
-	webhook: string;
-	/** Optional signing secret ("加签"). Empty sends an unsigned request. */
-	secret: string;
-	/** Optional custom keyword, prepended to the body for keyword-secured robots. */
-	keyword: string;
-}
-
-/**
- * Notification configuration persisted in notifications.json. DingTalk keeps the
- * legacy top-level fields; Feishu is nested so an existing file still loads.
- */
-export interface SentinelNotifyConfig extends SentinelNotifyChannelConfig {
-	/**
-	 * Which notifications to push while either channel is enabled. All default to
-	 * on, which is what a config written before the checkboxes existed does; a
-	 * run forced from the composer still pushes with run reports off, because an
-	 * explicit ask beats a general filter.
-	 */
-	kinds: { runs: boolean; vulns: boolean; codeIntel: boolean; goals: boolean; engines: boolean; pocs: boolean };
-	/**
-	 * How many characters of notification body to keep, counted per section (a run's
-	 * closing summary, a goal's conclusion, a finding's raw packet). 0 keeps all of
-	 * it. Each platform's byte limit is enforced separately, whatever this says.
-	 */
-	summaryLimit: number;
-	feishu: SentinelNotifyChannelConfig;
-	/**
-	 * WeCom group robot. Its webhook already carries the access token, and the
-	 * platform has no signing or keyword mode of its own, so only the webhook is
-	 * used; the inherited secret/keyword fields stay empty.
-	 */
-	wecom: SentinelNotifyChannelConfig;
-}
-
-/** Outcome of the most recent notification send, for the settings screen. */
-export interface SentinelNotifyStatus {
-	/** Epoch milliseconds of the attempt, or null when nothing was sent yet. */
-	at: number | null;
-	ok: boolean;
-	/** Failure reason(s), or the platform error code when a robot rejected it. */
-	error?: string;
-	/** What the notification was for, e.g. the session title. */
-	subject?: string;
-	/** Per-channel outcome for the most recent multi-channel send. */
-	channels?: Partial<Record<SentinelNotifyChannel, { ok: boolean; error?: string }>>;
-}
+export type {
+	SentinelNotifyChannel,
+	SentinelNotifyChannelConfig,
+	SentinelNotifyConfig,
+	SentinelNotifyDelivery,
+	SentinelNotifyGroup,
+	SentinelNotifyKind,
+	SentinelNotifyKinds,
+	SentinelNotifyStatus,
+	SentinelNotifyTarget,
+} from "./notify-types.ts";
 
 /**
  * One mounted tool of the live session, listed on the permissions screen so the
@@ -1983,7 +1942,7 @@ export type SentinelClientMessage =
 	| { type: "save_permissions"; config: SentinelPermissionsConfig }
 	| { type: "get_notify_config" }
 	| { type: "save_notify_config"; config: SentinelNotifyConfig }
-	| { type: "test_notify"; config: SentinelNotifyConfig; channel?: SentinelNotifyChannel }
+	| { type: "test_notify"; target: SentinelNotifyTarget }
 	| { type: "get_stats" }
 	| { type: "list_projects" }
 	/** `proxyId` absent follows the default on the 代理 page, `null` means none. */

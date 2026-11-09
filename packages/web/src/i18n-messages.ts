@@ -28,6 +28,48 @@ export function interpolate(source: string, vars?: Record<string, string | numbe
  * string still renders (in Chinese) until its translation lands.
  */
 export const EN_MESSAGES: Record<string, string> = {
+	默认通知组: "Default notification group",
+	通知组: "Notification groups",
+	通知组名称: "Group name",
+	新增通知组: "Add notification group",
+	编辑通知组: "Edit notification group",
+	保存通知组: "Save notification group",
+	启用通知组: "Enable notification group",
+	启用机器人: "Enable robot",
+	机器人名称: "Robot name",
+	接收机器人: "Recipient robots",
+	添加机器人: "Add robot",
+	新机器人: "New robot",
+	移除机器人: "Remove robot",
+	"移除此机器人？": "Remove this robot?",
+	"删除通知组？": "Delete notification group?",
+	"删除后，该组将不再接收通知。": "This group will stop receiving notifications.",
+	"例如：安全团队、运维团队": "For example: security team, operations team",
+	"例如：安全团队钉钉群": "For example: security team DingTalk group",
+	"所有通知组全局生效。各组选定类别后，自动通知会发送到该组所有已启用的机器人；同一事件可发送到多个组。":
+		"Groups apply globally. Automatic events go to every enabled robot in each matching group; an event can reach multiple groups.",
+	"自动通知按勾选类别发送；手动通知发送到所有已启用组，不受类别限制。":
+		"Automatic notifications follow the selected events. Manual notifications reach all enabled groups, regardless of event selection.",
+	"可添加多个同类型机器人，分别填写群地址。":
+		"Add multiple robots, including the same platform, each with its own group URL.",
+	还没有接收机器人: "No recipient robots yet",
+	"添加一个机器人，填写群地址并发送测试消息。": "Add a robot, enter its group URL, and send a test message.",
+	还没有通知组: "No notification groups yet",
+	"新增通知组，选择事件类别并添加接收机器人。":
+		"Add a notification group, choose its events, and add recipient robots.",
+	仅手动通知: "Manual notifications only",
+	"测试使用当前填写内容，无需先保存。": "Tests use the current fields. No need to save first.",
+	"测试超时，请检查连接后重试": "Test timed out. Check the connection and try again.",
+	"所有组共用正文字数上限，各平台的单条消息字节上限仍会单独限制。":
+		"All groups share the body character limit. Each platform also enforces its own message byte limit.",
+	请填写通知组名称: "Enter a notification group name",
+	请填写机器人名称: "Enter a robot name",
+	启用的通知组至少需要一个已启用的机器人: "An enabled group needs at least one enabled robot",
+	通知组标识重复: "Duplicate notification group ID",
+	机器人标识重复: "Duplicate robot ID",
+	通知渠道类型无效: "Invalid notification channel type",
+	通知组配置无效: "Invalid notification group configuration",
+	没有匹配的已启用通知组或机器人: "No matching enabled notification groups or robots",
 	"动态（{n}）": "Activity ({n})",
 	监控仓库: "Watched repositories",
 	"待处理（{n}）": "Needs attention ({n})",

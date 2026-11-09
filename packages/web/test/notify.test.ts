@@ -6,7 +6,7 @@
  */
 
 import { createHmac } from "node:crypto";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,10 +16,12 @@ import {
 	buildRunNotification,
 	buildWecomPayload,
 	clipText,
+	enabledNotifyTargets,
 	feishuSignature,
 	fitFeishuPayload,
 	fitPayload,
 	fitWecomPayload,
+	hasEnabledNotifyChannel,
 	sendDingTalk,
 	sendFeishu,
 	sendNotifications,
@@ -37,26 +39,35 @@ import {
 	readNotifyConfig,
 	writeNotifyConfig,
 } from "../src/notify-config.ts";
-import type { SentinelNotifyConfig } from "../src/protocol.ts";
+import type {
+	SentinelNotifyChannelConfig,
+	SentinelNotifyConfig,
+	SentinelNotifyGroup,
+	SentinelNotifyKind,
+	SentinelNotifyKinds,
+	SentinelNotifyTarget,
+} from "../src/protocol.ts";
 
-const CONFIG: SentinelNotifyConfig = {
-	enabled: true,
-	webhook: "",
-	secret: "",
-	keyword: "",
-	kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
-	summaryLimit: 2000,
-	feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
-	wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
+const ROBOT: SentinelNotifyChannelConfig = { enabled: true, webhook: "", secret: "", keyword: "" };
+const WECOM = ROBOT;
+const ALL_KINDS: SentinelNotifyKinds = {
+	runs: true,
+	vulns: true,
+	codeIntel: true,
+	goals: true,
+	engines: true,
+	pocs: true,
 };
 
-/** A WeCom webhook pointed at the fake robot. */
-const WECOM: SentinelNotifyConfig["wecom"] = {
-	enabled: true,
-	webhook: "",
-	secret: "",
-	keyword: "",
-};
+function robot(id: string, patch: Partial<SentinelNotifyTarget> = {}): SentinelNotifyTarget {
+	return { ...ROBOT, id, name: id, channel: "dingtalk", webhook: `${baseUrl}&robot=${id}`, ...patch };
+}
+function group(id: string, patch: Partial<SentinelNotifyGroup> = {}): SentinelNotifyGroup {
+	return { id, name: id, enabled: true, kinds: { ...ALL_KINDS }, targets: [robot(id)], ...patch };
+}
+function config(groups: SentinelNotifyGroup[]): SentinelNotifyConfig {
+	return { groups, summaryLimit: 2000 };
+}
 
 /** Requests the fake robot received, in order. */
 interface Received {
@@ -89,6 +100,10 @@ beforeAll(async () => {
 			const text = body.markdown?.text ?? body.markdown?.content ?? body.card?.elements?.[0]?.content ?? "";
 			const reject = rejectWith && text.includes(rejectWith.match) ? rejectWith : null;
 			response.setHeader("content-type", "application/json");
+			if (request.url?.includes("reply=null")) {
+				response.end("null");
+				return;
+			}
 			if (body.card) {
 				response.end(JSON.stringify({ StatusCode: 0, StatusMessage: "success", code: 0, msg: "success" }));
 				return;
@@ -128,7 +143,7 @@ test("without a secret the webhook is used as-is", () => {
 });
 
 test("a configured keyword is prepended to the markdown body", async () => {
-	const status = await sendDingTalk({ ...CONFIG, webhook: baseUrl, keyword: "Full Chain Sentinel" }, "T", "### body");
+	const status = await sendDingTalk({ ...ROBOT, webhook: baseUrl, keyword: "Full Chain Sentinel" }, "T", "### body");
 	expect(status.ok).toBe(true);
 	expect(received).toHaveLength(1);
 	expect(received[0]?.body.markdown?.text).toBe("Full Chain Sentinel\n### body");
@@ -137,7 +152,7 @@ test("a configured keyword is prepended to the markdown body", async () => {
 
 test("a robot error is reported with its errcode and the 310000 hint", async () => {
 	rejectWith = { match: "### body", errcode: 310000, errmsg: "keywords not in content" };
-	const status = await sendDingTalk({ ...CONFIG, webhook: baseUrl }, "T", "### body");
+	const status = await sendDingTalk({ ...ROBOT, webhook: baseUrl }, "T", "### body");
 	expect(status.ok).toBe(false);
 	expect(status.error).toContain("310000");
 	expect(status.error).toContain("加签校验失败或缺少自定义关键词");
@@ -148,21 +163,21 @@ test("a robot error is reported with its errcode and the 310000 hint", async () 
 test("a rejected send is retried and can still succeed", async () => {
 	// The robot accepts everything, so the three attempts all land and the last
 	// result is a success.
-	const status = await sendDingTalk({ ...CONFIG, webhook: baseUrl }, "T", "### retry-body");
+	const status = await sendDingTalk({ ...ROBOT, webhook: baseUrl }, "T", "### retry-body");
 	expect(status.ok).toBe(true);
 	expect(received).toHaveLength(1);
 	expect(status.at).toBeGreaterThan(0);
 });
 
 test("a missing webhook fails without any request", async () => {
-	const status = await sendDingTalk({ ...CONFIG, webhook: "  " }, "T", "### body");
+	const status = await sendDingTalk({ ...ROBOT, webhook: "  " }, "T", "### body");
 	expect(status.ok).toBe(false);
 	expect(status.error).toContain("未配置 webhook");
 	expect(received).toHaveLength(0);
 });
 
 test("the settings-screen test refuses a non-https webhook", async () => {
-	const result = await testDingTalk({ ...CONFIG, webhook: "http://example.com/robot/send" });
+	const result = await testDingTalk({ ...ROBOT, webhook: "http://example.com/robot/send" });
 	expect(result.ok).toBe(false);
 	expect(result.message).toContain("https");
 	expect(received).toHaveLength(0);
@@ -231,12 +246,12 @@ test("clipText leaves text alone at or under the limit, and at 0", () => {
 test("the payload is cut to fit DingTalk's own 20000-byte limit, whatever the operator asked for", () => {
 	// A body far over the platform limit: the request must still be sendable.
 	const body = "字".repeat(20000);
-	const payload = fitPayload(CONFIG, "t", body);
+	const payload = fitPayload(ROBOT, "t", body);
 	expect(Buffer.byteLength(payload, "utf-8")).toBeLessThanOrEqual(20000);
 	expect(payload).toContain("超出钉钉单条上限，已截断，全文 20000 字");
 
 	// A body that fits is passed through untouched.
-	const small = fitPayload(CONFIG, "t", "hello");
+	const small = fitPayload(ROBOT, "t", "hello");
 	expect(small).toBe(
 		JSON.stringify({ msgtype: "markdown", markdown: { title: "t", text: "hello" }, at: { isAtAll: false } }),
 	);
@@ -372,158 +387,233 @@ test("the settings-screen test refuses a non-https WeCom webhook", async () => {
 	expect(result.detail).toContain("https");
 });
 
-test("sendNotifications delivers to DingTalk, Feishu and WeCom independently", async () => {
+test("multiple groups and repeated platforms deliver independently", async () => {
 	const status = await sendNotifications(
-		{
-			...CONFIG,
-			webhook: baseUrl,
-			keyword: "KW",
-			feishu: { enabled: true, webhook: baseUrl, secret: "FSEC", keyword: "zgagent" },
-			wecom: { enabled: true, webhook: baseUrl, secret: "", keyword: "" },
-		},
+		config([
+			group("security", { targets: [robot("d1"), robot("d2"), robot("f", { channel: "feishu" })] }),
+			group("ops", { targets: [robot("w", { channel: "wecom" })] }),
+		]),
 		"both",
 		"### both",
+		"vulns",
 	);
-	expect(status).toMatchObject({
-		ok: true,
-		channels: { dingtalk: { ok: true }, feishu: { ok: true }, wecom: { ok: true } },
-	});
-	expect(received).toHaveLength(3);
+	expect(status.ok).toBe(true);
+	expect(received).toHaveLength(4);
+	expect(status.deliveries).toMatchObject([
+		{ groupId: "security", targetId: "d1", channel: "dingtalk", ok: true },
+		{ groupId: "security", targetId: "d2", channel: "dingtalk", ok: true },
+		{ groupId: "security", targetId: "f", channel: "feishu", ok: true },
+		{ groupId: "ops", targetId: "w", channel: "wecom", ok: true },
+	]);
 });
 
-test("the notification config round-trips through notifications.json with 0600", () => {
-	const dir = mkdtempSync(join(tmpdir(), "sentinel-notify-"));
+test.each<SentinelNotifyKind>(["runs", "vulns", "codeIntel", "goals", "engines", "pocs"])(
+	"%s reaches only matching enabled groups and robots",
+	async (kind) => {
+		const settings = config([
+			group("wanted"),
+			group("filtered", { kinds: { ...ALL_KINDS, [kind]: false } }),
+			group("disabled", { enabled: false }),
+			group("robots-off", { targets: [robot("off", { enabled: false }), robot("blank", { webhook: "" })] }),
+		]);
+		expect(hasEnabledNotifyChannel(settings, kind)).toBe(true);
+		const status = await sendNotifications(settings, "event", "body", kind);
+		expect(received).toHaveLength(1);
+		expect(status.deliveries?.map((entry) => entry.groupId)).toEqual(["wanted"]);
+		expect(received[0]?.url).toContain("robot=wanted");
+	},
+);
+
+test("manual notifications reach every enabled group even if all event kinds are off", async () => {
+	const none = Object.fromEntries(Object.keys(ALL_KINDS).map((kind) => [kind, false])) as SentinelNotifyKinds;
+	const settings = config([
+		group("one", { kinds: none }),
+		group("two", { kinds: none }),
+		group("off", { enabled: false }),
+	]);
+	expect(hasEnabledNotifyChannel(settings, "runs")).toBe(false);
+	expect(hasEnabledNotifyChannel(settings)).toBe(true);
+	const status = await sendNotifications(settings, "manual", "body");
+	expect(status.ok).toBe(true);
+	expect(received).toHaveLength(2);
+	expect(status.deliveries?.map((entry) => entry.groupId)).toEqual(["one", "two"]);
+});
+
+test("empty selections make no webhook requests", async () => {
+	const settings = config([group("off", { enabled: false })]);
+	expect(enabledNotifyTargets(settings)).toEqual([]);
+	expect((await sendNotifications(settings, "empty", "body", "runs")).ok).toBe(false);
+	expect(received).toHaveLength(0);
+});
+
+test("one failed robot does not stop the others or overwrite a same-platform result", async () => {
+	const status = await sendNotifications(
+		config([group("team", { targets: [robot("bad", { webhook: "bad-url" }), robot("good")] })]),
+		"t",
+		"body",
+		"vulns",
+	);
+	expect(status.ok).toBe(false);
+	expect(status.deliveries).toMatchObject([
+		{ targetId: "bad", ok: false },
+		{ targetId: "good", ok: true },
+	]);
+	expect(status.error).toContain("team / bad");
+	expect(received).toHaveLength(1);
+});
+
+test("groups round-trip with independent kinds, targets and file permissions", () => {
+	const dir = mkdtempSync(join(tmpdir(), "sentinel-notify-groups-"));
 	try {
-		expect(readNotifyConfig(dir)).toEqual({
+		expect(readNotifyConfig(dir)).toEqual({ groups: [], summaryLimit: DEFAULT_SUMMARY_LIMIT });
+		const settings = config([
+			group("security", {
+				name: " Security ",
+				kinds: { ...ALL_KINDS, runs: false, codeIntel: false },
+				targets: [robot("d1"), robot("d2", { secret: " SEC ", keyword: " KW " })],
+			}),
+			group("ops", {
+				enabled: false,
+				kinds: { ...ALL_KINDS, vulns: false },
+				targets: [robot("w", { channel: "wecom", secret: "unused", keyword: "unused" })],
+			}),
+		]);
+		writeNotifyConfig(dir, settings);
+		const saved = readNotifyConfig(dir);
+		expect(saved.groups[0]).toMatchObject({
+			id: "security",
+			name: "Security",
+			kinds: { runs: false, codeIntel: false, vulns: true },
+		});
+		expect(saved.groups[0]?.targets[1]).toMatchObject({ secret: "SEC", keyword: "KW" });
+		expect(saved.groups[1]).toMatchObject({
 			enabled: false,
-			webhook: "",
-			secret: "",
-			keyword: "",
-			kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
-			summaryLimit: DEFAULT_SUMMARY_LIMIT,
-			feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
-			wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
+			kinds: { vulns: false },
+			targets: [{ secret: "", keyword: "" }],
 		});
-		writeNotifyConfig(dir, {
-			enabled: true,
-			webhook: " https://x/y ",
-			secret: " SEC ",
-			keyword: " KW ",
-			kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
-			summaryLimit: 5000,
-			feishu: {
-				enabled: true,
-				webhook: " https://open.feishu.cn/open-apis/bot/v2/hook/test ",
-				secret: " FSEC ",
-				keyword: " zgagent ",
-			},
-			wecom: {
-				enabled: true,
-				webhook: " https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test ",
-				secret: "",
-				keyword: "",
-			},
-		});
-		expect(readNotifyConfig(dir)).toEqual({
-			enabled: true,
-			webhook: "https://x/y",
-			secret: "SEC",
-			keyword: "KW",
-			kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
-			summaryLimit: 5000,
-			feishu: {
-				enabled: true,
-				webhook: "https://open.feishu.cn/open-apis/bot/v2/hook/test",
-				secret: "FSEC",
-				keyword: "zgagent",
-			},
-			wecom: {
-				enabled: true,
-				webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
-				secret: "",
-				keyword: "",
-			},
-		});
-		chmodSync(notificationsJsonPath(dir), 0o600);
 		expect(statSync(notificationsJsonPath(dir)).mode & 0o777).toBe(0o600);
-		expect(readFileSync(notificationsJsonPath(dir), "utf-8")).toContain('"dingtalk"');
-		expect(readFileSync(notificationsJsonPath(dir), "utf-8")).toContain('"feishu"');
-		expect(readFileSync(notificationsJsonPath(dir), "utf-8")).toContain('"wecom"');
+		expect(JSON.parse(readFileSync(notificationsJsonPath(dir), "utf-8"))).toEqual(saved);
+		writeNotifyConfig(dir, { groups: [], summaryLimit: 0 });
+		expect(readNotifyConfig(dir)).toEqual({ groups: [], summaryLimit: 0 });
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
 
-test("a stored limit is normalized: missing reads as the default, negative as 0", () => {
-	const dir = mkdtempSync(join(tmpdir(), "sentinel-notify-limit-"));
+test("old settings become a default group and preserve disabled channels and kinds", () => {
+	const dir = mkdtempSync(join(tmpdir(), "sentinel-notify-migrate-"));
 	try {
-		writeNotifyConfig(dir, {
-			enabled: true,
-			webhook: "https://x/y",
-			secret: "",
-			keyword: "",
-			kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
-			summaryLimit: -5,
-			feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
-			wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
-		});
-		expect(readNotifyConfig(dir).summaryLimit).toBe(0);
-
-		// A file written before the field existed keeps the default.
-		const legacy = JSON.parse(readFileSync(notificationsJsonPath(dir), "utf-8")) as {
-			dingtalk: Record<string, unknown>;
-		};
-		delete legacy.dingtalk.summaryLimit;
-		writeFileSync(notificationsJsonPath(dir), JSON.stringify(legacy));
-		expect(readNotifyConfig(dir).summaryLimit).toBe(DEFAULT_SUMMARY_LIMIT);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-});
-
-test("kinds default to all on and a cleared kind survives the round trip", () => {
-	const dir = mkdtempSync(join(tmpdir(), "sentinel-notify-kinds-"));
-	try {
-		// A file from before the checkboxes existed pushes everything, as it did.
 		writeFileSync(
 			notificationsJsonPath(dir),
-			JSON.stringify({ dingtalk: { enabled: true, webhook: "https://x/y" } }),
+			JSON.stringify({
+				dingtalk: {
+					enabled: false,
+					webhook: " https://example.com/d ",
+					secret: " SEC ",
+					keyword: " KW ",
+					kinds: { vulns: false, codeIntel: false },
+					summaryLimit: 5000,
+				},
+				feishu: { enabled: true, webhook: "https://example.com/f", secret: "FSEC", keyword: "ops" },
+				wecom: { enabled: true, webhook: "https://example.com/w" },
+			}),
 		);
-		expect(readNotifyConfig(dir).kinds).toEqual({
-			runs: true,
-			vulns: true,
-			codeIntel: true,
-			goals: true,
-			engines: true,
-			pocs: true,
+		const saved = readNotifyConfig(dir);
+		expect(saved.summaryLimit).toBe(5000);
+		expect(saved.groups).toHaveLength(1);
+		expect(saved.groups[0]).toMatchObject({
+			id: "default",
+			enabled: true,
+			kinds: { vulns: false, codeIntel: false, runs: true },
 		});
-
-		writeNotifyConfig(dir, {
-			...CONFIG,
-			kinds: { runs: false, vulns: false, codeIntel: false, goals: true, engines: true, pocs: true },
-		});
-		expect(readNotifyConfig(dir).kinds).toEqual({
-			runs: false,
-			vulns: false,
-			codeIntel: false,
-			goals: true,
-			engines: true,
-			pocs: true,
-		});
+		expect(saved.groups[0]?.targets).toMatchObject([
+			{ channel: "dingtalk", enabled: false, webhook: "https://example.com/d", secret: "SEC", keyword: "KW" },
+			{ channel: "feishu", enabled: true, secret: "FSEC", keyword: "ops" },
+			{ channel: "wecom", enabled: true, secret: "", keyword: "" },
+		]);
+		writeNotifyConfig(dir, saved);
+		expect(readNotifyConfig(dir)).toEqual(saved);
+		expect(readFileSync(notificationsJsonPath(dir), "utf-8")).not.toContain('"dingtalk":');
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
 
-test.each([
-	{ vulns: true, codeIntel: false },
-	{ vulns: false, codeIntel: true },
-])("open-source intel and high-severity findings are saved independently: %j", (choices) => {
-	const dir = mkdtempSync(join(tmpdir(), "sentinel-notify-intel-"));
+test("missing legacy kinds default on and an all-disabled old config stays quiet", () => {
+	const dir = mkdtempSync(join(tmpdir(), "sentinel-notify-defaults-"));
 	try {
-		const config = { ...CONFIG, kinds: { ...CONFIG.kinds, ...choices } };
-		writeNotifyConfig(dir, config);
-		expect(readNotifyConfig(dir).kinds).toEqual(config.kinds);
+		writeFileSync(
+			notificationsJsonPath(dir),
+			JSON.stringify({ dingtalk: { enabled: false, webhook: "https://example.com/d" } }),
+		);
+		const saved = readNotifyConfig(dir);
+		expect(saved.groups[0]?.kinds).toEqual(ALL_KINDS);
+		expect(hasEnabledNotifyChannel(saved)).toBe(false);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("invalid enabled groups cannot replace saved settings", () => {
+	const dir = mkdtempSync(join(tmpdir(), "sentinel-notify-invalid-"));
+	try {
+		const original = config([group("valid")]);
+		writeNotifyConfig(dir, original);
+		for (const invalid of [
+			group("nameless", { name: " " }),
+			group("empty", { targets: [] }),
+			group("blank", { targets: [robot("blank", { name: "" })] }),
+			group("bad-url", { targets: [robot("bad", { webhook: "http://example.com/plain" })] }),
+			group("duplicate", { targets: [robot("same"), robot("same")] }),
+		])
+			expect(() => writeNotifyConfig(dir, config([invalid]))).toThrow();
+		expect(() => writeNotifyConfig(dir, config([group("same"), group("same")]))).toThrow();
+		expect(readNotifyConfig(dir)).toEqual(original);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("summary limits normalize and malformed files default to no active groups", () => {
+	const dir = mkdtempSync(join(tmpdir(), "sentinel-notify-limit-"));
+	try {
+		writeNotifyConfig(dir, { groups: [], summaryLimit: -5 });
+		expect(readNotifyConfig(dir).summaryLimit).toBe(0);
+		writeFileSync(notificationsJsonPath(dir), JSON.stringify({ groups: [] }));
+		expect(readNotifyConfig(dir).summaryLimit).toBe(DEFAULT_SUMMARY_LIMIT);
+		writeFileSync(notificationsJsonPath(dir), "broken-json");
+		expect(readNotifyConfig(dir).groups).toEqual([]);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("a robot with an unexpected reply cannot reject the entire group delivery", async () => {
+	const status = await sendNotifications(
+		config([
+			group("team", { targets: [robot("unexpected", { webhook: `${baseUrl}&reply=null` }), robot("healthy")] }),
+		]),
+		"t",
+		"body",
+		"vulns",
+	);
+	expect(status.ok).toBe(false);
+	expect(status.deliveries).toMatchObject([
+		{ targetId: "unexpected", ok: false },
+		{ targetId: "healthy", ok: true },
+	]);
+	expect(received).toHaveLength(2);
+});
+
+test("a broken group can be disabled without repairing its webhook first", () => {
+	const dir = mkdtempSync(join(tmpdir(), "sentinel-notify-mute-"));
+	try {
+		const settings = config([
+			group("broken", { enabled: false, targets: [robot("invalid", { webhook: "old-invalid-url" })] }),
+		]);
+		writeNotifyConfig(dir, settings);
+		expect(readNotifyConfig(dir)).toEqual(settings);
+		expect(hasEnabledNotifyChannel(readNotifyConfig(dir))).toBe(false);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

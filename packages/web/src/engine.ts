@@ -60,6 +60,7 @@ import type {
 	SentinelEngineScheduleInput,
 	SentinelEngineTask,
 	SentinelGoalUsage,
+	SentinelNotifyStatus,
 	SentinelPreset,
 	SentinelProjectInfo,
 } from "./protocol.ts";
@@ -114,6 +115,8 @@ const COMMANDER_BASH_DENYLIST: RegExp[] = [
 ];
 
 export interface EngineHooks {
+	/** Delivery results appear alongside chat and open-source notifications. */
+	onNotifyStatus?(status: SentinelNotifyStatus): void;
 	/** Save the final report and images before marking the engineering run complete. */
 	archiveReport?(engine: SentinelEngine, report: string): Promise<void>;
 	/** An engine's stored state changed; consoles refresh the board. */
@@ -1747,7 +1750,7 @@ export class EngineManager {
 
 	private notifyEngineDone(engine: SentinelEngine): void {
 		const config = readNotifyConfig(this.agentDir);
-		if (!hasEnabledNotifyChannel(config) || !config.kinds.engines) return;
+		if (!hasEnabledNotifyChannel(config, "engines")) return;
 		const done = engine.tasks.filter((task) => task.status === "done").length;
 		const failed = engine.tasks.filter((task) => ["failed", "blocked", "aborted"].includes(task.status)).length;
 		const markdown = [
@@ -1760,7 +1763,10 @@ export class EngineManager {
 			"",
 			engine.report?.slice(0, config.summaryLimit || 2000) ?? "",
 		].join("\n");
-		void sendNotifications(config, t("工程已完成：{name}", { name: engine.name }), markdown);
+		const title = t("工程已完成：{name}", { name: engine.name });
+		void sendNotifications(config, title, markdown, "engines").then((status) => {
+			this.hooks.onNotifyStatus?.({ ...status, subject: title });
+		});
 	}
 }
 

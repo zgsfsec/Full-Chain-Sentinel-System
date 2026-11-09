@@ -561,6 +561,7 @@ export async function startSentinelServer(
 							container: project.container,
 						});
 					},
+					onNotifyStatus: (status) => runtime.recordNotifyStatus(status),
 					onChange: (engine) => {
 						broadcast({ type: "engine_update", engine });
 						codeMonitors?.syncEngine(engine.id, engine.status);
@@ -636,10 +637,10 @@ export async function startSentinelServer(
 					},
 					notify: (monitor, commit) => {
 						const config = runtime.getNotifyConfig();
-						if (!config.kinds.codeIntel || !hasEnabledNotifyChannel(config)) return;
+						if (!hasEnabledNotifyChannel(config, "codeIntel")) return;
 						const { title, markdown } = buildCodeMonitorNotification(monitor, commit, config.summaryLimit);
-						void sendNotifications(config, title, markdown)
-							.then((status) => broadcast({ type: "notify_config", config: runtime.getNotifyConfig(), status }))
+						void sendNotifications(config, title, markdown, "codeIntel")
+							.then((status) => runtime.recordNotifyStatus({ ...status, subject: title }))
 							.catch(() => {
 								// A notification is best-effort; the finding is already on the page.
 							});
@@ -1939,7 +1940,7 @@ export async function startSentinelServer(
 					});
 					return;
 				case "test_notify": {
-					const result = await runtime.testNotify(message.config, message.channel ?? "dingtalk");
+					const result = await runtime.testNotify(message.target);
 					sendTo(socket, { type: "notify_test_result", result });
 					return;
 				}

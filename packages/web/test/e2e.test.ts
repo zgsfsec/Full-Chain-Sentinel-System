@@ -1623,7 +1623,7 @@ test("a finished run notifies the DingTalk group, and the composer flag can forc
 	// Nothing has been sent yet: notifications are off by default.
 	send({ type: "get_notify_config" });
 	const initial = await waitFor((message) => message.type === "notify_config");
-	expect((initial as { config: { enabled: boolean } }).config.enabled).toBe(false);
+	expect((initial as { config: SentinelNotifyConfig }).config.groups).toEqual([]);
 	expect(dingtalk).toHaveLength(0);
 
 	// Enable notifications against the local robot.
@@ -1631,21 +1631,33 @@ test("a finished run notifies the DingTalk group, and the composer flag can forc
 	send({
 		type: "save_notify_config",
 		config: {
-			enabled: true,
-			webhook: dingtalkUrl,
-			secret: "SECe2e",
-			keyword: "Full Chain Sentinel",
-			kinds: { runs: true, vulns: true, codeIntel: false, goals: true, engines: true, pocs: true },
+			groups: [
+				{
+					id: "team",
+					name: "安全团队",
+					enabled: true,
+					kinds: { runs: true, vulns: true, codeIntel: false, goals: true, engines: true, pocs: true },
+					targets: [
+						{
+							id: "robot",
+							name: "钉钉群",
+							channel: "dingtalk",
+							enabled: true,
+							webhook: dingtalkUrl,
+							secret: "SECe2e",
+							keyword: "Full Chain Sentinel",
+						},
+					],
+				},
+			],
 			summaryLimit: 2000,
-			feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
-			wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
 		},
 	});
 	const saved = await waitFor((message) => message.type === "notify_config");
 	expect((saved as { config: SentinelNotifyConfig }).config).toMatchObject({
-		enabled: true,
-		keyword: "Full Chain Sentinel",
-		kinds: { vulns: true, codeIntel: false },
+		groups: [
+			{ enabled: true, kinds: { vulns: true, codeIntel: false }, targets: [{ keyword: "Full Chain Sentinel" }] },
+		],
 	});
 
 	// One ordinary run. The send is fire-and-forget, so wait on the robot.
@@ -1705,24 +1717,52 @@ test("a finished run notifies the DingTalk group, and the composer flag can forc
 	send({
 		type: "save_notify_config",
 		config: {
-			enabled: true,
-			webhook: dingtalkUrl,
-			secret: "",
-			keyword: "",
-			kinds: { runs: false, vulns: false, codeIntel: true, goals: true, engines: true, pocs: true },
+			groups: [
+				{
+					id: "team",
+					name: "安全团队",
+					enabled: true,
+					kinds: { runs: false, vulns: false, codeIntel: true, goals: true, engines: true, pocs: true },
+					targets: [
+						{
+							id: "robot",
+							name: "钉钉群",
+							channel: "dingtalk",
+							enabled: true,
+							webhook: dingtalkUrl,
+							secret: "",
+							keyword: "",
+						},
+					],
+				},
+			],
 			summaryLimit: 2000,
-			feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
-			wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
 		},
 	});
-	const filtered = await waitFor((message) => message.type === "notify_config" && !message.config.kinds.runs);
-	expect((filtered as { config: SentinelNotifyConfig }).config.kinds).toMatchObject({
+	const filtered = await waitFor(
+		(message) => message.type === "notify_config" && !message.config.groups[0]?.kinds.runs,
+	);
+	expect((filtered as { config: SentinelNotifyConfig }).config.groups[0]?.kinds).toMatchObject({
 		vulns: false,
 		codeIntel: true,
 	});
+	const broadcast = structuredClone((filtered as { config: SentinelNotifyConfig }).config);
+	const secondGroup = structuredClone(broadcast.groups[0]);
+	secondGroup.id = "ops";
+	secondGroup.name = "运维团队";
+	broadcast.groups.push(secondGroup);
+	send({ type: "save_notify_config", config: broadcast });
+	await waitFor((message) => message.type === "notify_config" && message.config.groups.length === 2);
 	send({ type: "prompt", text: "force a notification", notify: true });
-	await waitUntil(() => dingtalk.length > 0);
+	await waitUntil(() => dingtalk.length === 2);
 	expect(dingtalk[0]?.text).toContain("**状态**：完成");
+	const delivered = await waitFor(
+		(message) => message.type === "notify_config" && message.status.deliveries?.length === 2,
+	);
+	expect(delivered.type === "notify_config" && delivered.status.deliveries?.map((entry) => entry.groupId)).toEqual([
+		"team",
+		"ops",
+	]);
 });
 
 test("the agent's finding lands in the hub as pending, and the operator reviews and exports it", async () => {
@@ -1790,17 +1830,29 @@ test("a critical finding is pushed to DingTalk the moment it is submitted", asyn
 	send({
 		type: "save_notify_config",
 		config: {
-			enabled: true,
-			webhook: dingtalkUrl,
-			secret: "SECe2e",
-			keyword: "Full Chain Sentinel",
-			kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
+			groups: [
+				{
+					id: "team",
+					name: "安全团队",
+					enabled: true,
+					kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
+					targets: [
+						{
+							id: "robot",
+							name: "钉钉群",
+							channel: "dingtalk",
+							enabled: true,
+							webhook: dingtalkUrl,
+							secret: "SECe2e",
+							keyword: "Full Chain Sentinel",
+						},
+					],
+				},
+			],
 			summaryLimit: 2000,
-			feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
-			wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
 		},
 	});
-	await waitFor((message) => message.type === "notify_config" && message.config.enabled);
+	await waitFor((message) => message.type === "notify_config" && message.config.groups[0]?.enabled);
 	dingtalk.length = 0;
 
 	const scenario = VULN_SCENARIOS[1];
@@ -1821,17 +1873,29 @@ test("a critical finding is pushed to DingTalk the moment it is submitted", asyn
 	send({
 		type: "save_notify_config",
 		config: {
-			enabled: false,
-			webhook: dingtalkUrl,
-			secret: "",
-			keyword: "",
-			kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
+			groups: [
+				{
+					id: "team",
+					name: "安全团队",
+					enabled: false,
+					kinds: { runs: true, vulns: true, codeIntel: true, goals: true, engines: true, pocs: true },
+					targets: [
+						{
+							id: "robot",
+							name: "钉钉群",
+							channel: "dingtalk",
+							enabled: true,
+							webhook: dingtalkUrl,
+							secret: "",
+							keyword: "",
+						},
+					],
+				},
+			],
 			summaryLimit: 2000,
-			feishu: { enabled: false, webhook: "", secret: "", keyword: "" },
-			wecom: { enabled: false, webhook: "", secret: "", keyword: "" },
 		},
 	});
-	await waitFor((message) => message.type === "notify_config" && !message.config.enabled);
+	await waitFor((message) => message.type === "notify_config" && !message.config.groups[0]?.enabled);
 });
 
 test("turning vuln_submit off removes the tool, while reading the hub stays available", async () => {
