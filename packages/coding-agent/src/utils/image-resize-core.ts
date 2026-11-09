@@ -107,11 +107,11 @@ export async function resizeImageInProcess(
 		let targetHeight = originalHeight;
 
 		if (targetWidth > opts.maxWidth) {
-			targetHeight = Math.round((targetHeight * opts.maxWidth) / targetWidth);
+			targetHeight = Math.max(1, Math.round((targetHeight * opts.maxWidth) / targetWidth));
 			targetWidth = opts.maxWidth;
 		}
 		if (targetHeight > opts.maxHeight) {
-			targetWidth = Math.round((targetWidth * opts.maxHeight) / targetHeight);
+			targetWidth = Math.max(1, Math.round((targetWidth * opts.maxHeight) / targetHeight));
 			targetHeight = opts.maxHeight;
 		}
 

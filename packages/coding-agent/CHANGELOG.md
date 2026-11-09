@@ -38,6 +38,7 @@
 - Exported `createLoopGuardExtension` and `LOOP_GUARD_CUSTOM_TYPE` from the SDK so embedded hosts can mount the extension (the CLI already loaded it as a built-in)
 - Fixed tools supplied through `baseToolsOverride` losing their `promptSnippet` and `promptGuidelines`: the definition rebuilt from the AgentTool dropped both, so the tool vanished from the system prompt's tool section and its guidelines from the rules section. `wrapToolDefinition` now carries the metadata, and the duplicated `Object.assign` in the bash and PowerShell wrappers is gone.
 - Fixed Mistral streams being aborted mid-generation (e.g. during long thinking) after the request timeout; the timeout now applies only to waiting for response headers ([#10609](https://github.com/earendil-works/pi/issues/10609))
+- Fixed image resize workers in standalone binaries missing the embedded Photon WASM path and silently omitting uploads instead of falling back to the main process when their image engine cannot load. Very narrow images now retain at least one pixel per dimension when scaled, and processing failures no longer always claim the image exceeded the inline size limit.
 
 ## [1.1.0] - 2026-10-07
 

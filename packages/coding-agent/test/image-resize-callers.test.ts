@@ -12,6 +12,7 @@ vi.mock("../src/utils/image-resize.js", () => ({
 import { processFileArguments } from "../src/cli/file-processor.ts";
 import type { ExtensionToolContext } from "../src/core/extensions/types.ts";
 import { createReadTool, createReadToolDefinition } from "../src/core/tools/read.ts";
+import { processImage } from "../src/utils/image-process.ts";
 import { resizeImage } from "../src/utils/image-resize.ts";
 
 const TINY_PNG_BASE64 =
@@ -29,6 +30,16 @@ describe("image resize callers", () => {
 
 	afterEach(() => {
 		rmSync(testDir, { recursive: true, force: true });
+	});
+
+	it("does not label every image processing failure as an oversized upload", async () => {
+		const result = await processImage(Buffer.from(TINY_PNG_BASE64, "base64"), "image/png");
+
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.message).toContain("image processing failed or inline image limits could not be met");
+		expect(result.message).toContain("re-exporting as PNG/JPEG");
+		expect(result.message).toContain("check the image processor installation");
 	});
 
 	it("read tool returns text-only output when auto-resize cannot produce a safe image", async () => {

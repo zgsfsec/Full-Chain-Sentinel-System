@@ -88,7 +88,8 @@ export async function processImage(
 		if (!resized) {
 			return {
 				ok: false,
-				message: "[Image omitted: could not be resized below the inline image size limit.]",
+				message:
+					"[Image omitted: image processing failed or inline image limits could not be met. Try re-exporting as PNG/JPEG. If all images fail, check the image processor installation.]",
 			};
 		}
 

@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { convertToPng, loadPngTranscoder } from "../src/utils/image-convert.ts";
 import { formatDimensionNote, resizeImage } from "../src/utils/image-resize.ts";
+import { loadPhoton } from "../src/utils/photon.ts";
 
 // Small 2x2 red PNG image (base64) - generated with ImageMagick
 const TINY_PNG =
@@ -91,6 +92,34 @@ it("loadPngTranscoder converts synchronously to oriented PNG data", async () => 
 });
 
 describe("resizeImage", () => {
+	it.each([
+		[1, 6000, 1, 2000],
+		[6000, 1, 2000, 1],
+	])(
+		"resizes %ix%i images without rounding a dimension to zero",
+		async (width, height, expectedWidth, expectedHeight) => {
+			const photon = (await loadPhoton())!;
+			const image = new photon.PhotonImage(new Uint8Array(width * height * 4).fill(255), width, height);
+			let input: Uint8Array;
+			try {
+				input = new Uint8Array(image.get_bytes());
+			} finally {
+				image.free();
+			}
+
+			const result = await resizeImage(input, "image/png");
+
+			expect(result).toMatchObject({
+				originalWidth: width,
+				originalHeight: height,
+				width: expectedWidth,
+				height: expectedHeight,
+				wasResized: true,
+			});
+			expect(result!.data.length).toBeLessThan(4.5 * 1024 * 1024);
+		},
+	);
+
 	it("should keep caller input bytes intact", async () => {
 		const input = new Uint8Array(imageBytes(TINY_PNG));
 		const originalByteLength = input.byteLength;
