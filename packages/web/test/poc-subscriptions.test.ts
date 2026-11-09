@@ -9,7 +9,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
+import { createPocSubscriptionDownload } from "../src/poc-subscription-network.ts";
 import {
 	clampIntervalHours,
 	isDue,
@@ -22,6 +23,8 @@ import {
 } from "../src/poc-subscriptions.ts";
 import { PocStore } from "../src/pocs.ts";
 import type { SentinelPocSource } from "../src/protocol.ts";
+
+vi.mock("../src/poc-subscription-network.ts", { spy: true });
 
 const TEMPLATE = (id: string): string => `id: ${id}\ninfo:\n  name: Template ${id}\n  severity: high\n  tags: cve\n`;
 
@@ -242,3 +245,32 @@ test("the one-click official source is created once, then syncs whatever URL it 
 	});
 	expect(store.get("t-official")).toBeDefined();
 });
+
+test.each(["manual", "auto", "official"] as const)(
+	"%s syncing imports through the project-aware downloader",
+	async (trigger) => {
+		const id = `network-${trigger}`;
+		const source =
+			trigger === "official"
+				? subscriptions.ensureOfficial()
+				: subscriptions.save({ name: id, url: `https://example.com/${id}.zip`, intervalHours: 0, enabled: true });
+		if (!("source" in source)) throw new Error(source.error);
+		const download = vi.fn(async () => buildZip([{ name: `${id}.yaml`, data: Buffer.from(TEMPLATE(id)) }]));
+		if (trigger === "auto") download.mockRejectedValueOnce(new Error("temporary proxy failure"));
+		const networkSelections = vi.mocked(createPocSubscriptionDownload).mock.calls.length;
+		vi.mocked(createPocSubscriptionDownload).mockReturnValueOnce(download);
+
+		await subscriptions.sync(source.source.id, trigger === "auto" ? "auto" : "manual");
+
+		expect(createPocSubscriptionDownload).toHaveBeenLastCalledWith(dir);
+		expect(createPocSubscriptionDownload).toHaveBeenCalledTimes(networkSelections + 1);
+		expect(download).toHaveBeenCalledTimes(trigger === "auto" ? 2 : 1);
+		expect(download).toHaveBeenCalledWith(source.source.url, expect.any(String), expect.any(String));
+		expect(store.get(id)).toBeDefined();
+		expect(subscriptions.list().find((entry) => entry.id === source.source.id)?.lastResult).toMatchObject({
+			ok: true,
+			imported: 1,
+			trigger: trigger === "auto" ? "auto" : "manual",
+		});
+	},
+);

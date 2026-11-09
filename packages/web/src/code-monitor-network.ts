@@ -1,8 +1,6 @@
 /** GitHub reads use the project's existing proxy network; model calls stay on the host. */
 import { execInContainer } from "./docker.ts";
-import { ensureProjectReady, listProjects, projectProxySettings, projectSidecarName } from "./projects.ts";
-import { projectOpenVpnConfigPath, projectProxyConfigPath, projectWireGuardConfigPath, proxyEnabled } from "./proxy.ts";
-import { checkSidecar } from "./singbox.ts";
+import { createProjectNetwork, type ProjectNetworkOperations } from "./project-network.ts";
 
 /** curl follows redirects and decodes compression; only response files touch disk. */
 export const GITHUB_CONTAINER_REQUEST = `import base64, json, pathlib, subprocess, sys, tempfile
@@ -31,21 +29,6 @@ with tempfile.TemporaryDirectory(prefix="sentinel-github-") as directory:
                 pairs.append([name.decode("latin-1"), value.strip().decode("latin-1")])
         print(json.dumps({"status": int(result.stdout), "headers": pairs, "body": base64.b64encode(body.read_bytes()).decode("ascii")}))
 `;
-
-async function withAbort<T>(operation: Promise<T>, signal: AbortSignal | null): Promise<T> {
-	if (!signal) return operation;
-	signal.throwIfAborted();
-	let onAbort = (): void => {};
-	const aborted = new Promise<never>((_resolve, reject) => {
-		onAbort = () => reject(signal.reason);
-		signal.addEventListener("abort", onAbort, { once: true });
-	});
-	try {
-		return await Promise.race([operation, aborted]);
-	} finally {
-		signal.removeEventListener("abort", onAbort);
-	}
-}
 
 function containerResponse(stdout: string): Response {
 	const raw: unknown = JSON.parse(stdout);
@@ -78,49 +61,18 @@ function containerResponse(stdout: string): Response {
 export function createProjectGithubFetch(
 	agentDir: string,
 	projectId: string,
-	operations: {
+	operations: ProjectNetworkOperations & {
 		fetch?: typeof fetch;
-		ensureReady?: typeof ensureProjectReady;
-		checkSidecar?: typeof checkSidecar;
 		exec?: typeof execInContainer;
 	} = {},
 ): typeof fetch {
-	let ready: Promise<void> | undefined;
-	let readyKey = "";
+	const network = createProjectNetwork(agentDir, projectId, operations);
 	return async (input, init) => {
 		const request = new Request(input, init);
 		request.signal.throwIfAborted();
-		const project = listProjects(agentDir).projects.find((entry) => entry.id === projectId);
-		if (!project) throw new Error("监控所属项目不存在，请重新选择项目");
-		const settings = projectProxySettings(agentDir, project);
-		if (!proxyEnabled(settings)) return (operations.fetch ?? fetch)(input, init);
-		if (project.manualStop) throw new Error("项目容器已手动停止；GitHub API 使用项目代理，请先启动项目容器");
+		const project = await network(request.signal);
+		if (!project) return (operations.fetch ?? fetch)(input, init);
 		if (request.method !== "GET") throw new Error("GitHub 代理传输只支持 GET 请求");
-		const networkKey = JSON.stringify([project, settings]);
-		if (!ready || readyKey !== networkKey) {
-			readyKey = networkKey;
-			ready = (async () => {
-				if (!(await (operations.ensureReady ?? ensureProjectReady)(project, agentDir))) {
-					throw new Error("项目代理或容器未就绪，请在项目与环境页面检查代理连接和容器状态");
-				}
-				const configPath = project.gateway
-					? ""
-					: settings.mode === "wireguard"
-						? projectWireGuardConfigPath(agentDir, projectId)
-						: settings.mode === "openvpn"
-							? projectOpenVpnConfigPath(agentDir, projectId)
-							: projectProxyConfigPath(agentDir, projectId);
-				const health = await (operations.checkSidecar ?? checkSidecar)(
-					project.container,
-					projectSidecarName(project),
-					configPath,
-				);
-				if (!health.joined || health.netnsStale || health.configStale) {
-					throw new Error("项目容器尚未使用当前代理网络，请在项目页面应用代理配置或重建容器");
-				}
-			})();
-		}
-		await withAbort(ready, request.signal);
 		request.signal.throwIfAborted();
 		const result = await (operations.exec ?? execInContainer)(
 			project.container,
