@@ -206,6 +206,8 @@ Windows 解压 `sentinel-web-windows-x64.zip` 后，在 PowerShell 运行 `.\sen
 
 模型库集中管理端点，将主模型、守门、漏洞评审、监督、指挥和监测六个角色分配给不同模型。环境页检查 Docker、镜像、挂载与目录权限，并管理镜像源、网络与默认代理。
 
+添加或编辑模型时，可使用当前 Base URL 和 API Key「获取远端模型列表」，搜索并选择模型 ID，无需先保存；支持 OpenAI 兼容、Anthropic 和 Gemini 接口。已有模型可复用已保存的密钥；服务商未提供列表接口时仍可手动填写，模型能力与价格需单独核对。
+
 <details>
 <summary>查看界面截图</summary>
 

@@ -206,6 +206,8 @@ Enable a supervision model and intervention policy for a conversation. Review ph
 
 Manage endpoints in the model library and assign six roles: main, gatekeeper, reviewer, supervisor, commander, and monitor. The environment page checks Docker, images, mounts, and directory access and configures mirrors, networking, and the default proxy.
 
+When adding or editing a model, choose **Fetch remote models** to search and select model IDs using the current Base URL and API key without saving first. OpenAI-compatible, Anthropic, and Gemini endpoints are supported. Existing entries can reuse their saved key. Manual entry remains available when the provider has no listing endpoint; verify capabilities and pricing separately.
+
 <details>
 <summary>View screenshots</summary>
 
