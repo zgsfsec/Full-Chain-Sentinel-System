@@ -374,6 +374,7 @@ export function App() {
 	/** The persistent-goal start dialog. It is only reachable in auto mode. */
 	const [goalOpen, setGoalOpen] = useState(false);
 	const [connected, setConnected] = useState(false);
+	const [connectionWarning, setConnectionWarning] = useState(false);
 	/**
 	 * Whether the active session is running right now. The server only broadcasts a
 	 * snapshot when a run starts and ends, so the events are what keep this current
@@ -1753,6 +1754,13 @@ export function App() {
 	}, []);
 
 	const authReady = authState === "ready";
+	useEffect(() => {
+		setConnectionWarning(false);
+		if (!authReady || connected) return;
+		// Keep real connection state immediate; only the banner has a grace period.
+		const timer = window.setTimeout(() => setConnectionWarning(true), 2000);
+		return () => window.clearTimeout(timer);
+	}, [authReady, connected]);
 
 	const logout = useCallback(async () => {
 		await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
@@ -2852,7 +2860,7 @@ export function App() {
 					{/* A page that throws costs that page, not the console: the shell stays
 					    usable and the message says what broke. */}
 					<PageBoundary key={page} onHome={() => openPage("dashboard")}>
-					{connected ? null : (
+					{connected || !connectionWarning ? null : (
 						<Alert
 							type="warning"
 							showIcon
