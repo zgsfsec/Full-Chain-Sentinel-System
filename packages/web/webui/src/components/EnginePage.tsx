@@ -318,6 +318,15 @@ export function EnginePage(props: EnginePageProps) {
 	const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 	const [report, setReport] = useState<{ markdown: string; filename: string } | null>(null);
 	const [editingSchedule, setEditingSchedule] = useState(false);
+	const [page, setPage] = useState(1);
+	const [pageSize, setPageSize] = useState(20);
+	const lastPage = Math.max(1, Math.ceil(props.engines.length / pageSize));
+	useEffect(() => {
+		setPage(1);
+	}, [props.project?.id]);
+	useEffect(() => {
+		setPage((current) => Math.min(current, lastPage));
+	}, [lastPage]);
 
 	const board = useMemo(() => props.engines.find((engine) => engine.id === boardId) ?? null, [props.engines, boardId]);
 	const scheduleActive = !!board?.schedule && board.schedule.phase !== "finished";
@@ -652,6 +661,7 @@ export function EnginePage(props: EnginePageProps) {
 
 	return (
 		<Page
+			className="engine-list"
 			title={t("工程")}
 			description={
 				props.hasProject
@@ -679,7 +689,17 @@ export function EnginePage(props: EnginePageProps) {
 				dataSource={props.engines}
 				search={false}
 				options={false}
-				pagination={false}
+				pagination={{
+					current: Math.min(page, lastPage),
+					pageSize,
+					showSizeChanger: true,
+					pageSizeOptions: [20, 50, 100],
+					showTotal: (total) => t("共 {total} 条", { total }),
+					onChange: (next, size) => {
+						setPage(size !== pageSize ? 1 : next);
+						setPageSize(size);
+					},
+				}}
 				scroll={{ x: 1010 }}
 				onRow={(engine) => ({
 					onClick: () => openBoard(engine.id),
