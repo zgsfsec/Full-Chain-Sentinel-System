@@ -884,11 +884,30 @@ export class EngineManager {
 			return { ok: true };
 		}
 		const worker = entry.workers.get(taskId);
-		if (!worker)
+		if (task.status !== "running")
 			return {
 				ok: false,
 				error: t("任务 {id} 不在运行中（当前状态：{status}）", { id: taskId, status: task.status }),
 			};
+		if (!worker || !worker.isRunning) {
+			// Recover a stale running row whose worker has already exited. Keeping
+			// it running would permanently reserve an engine concurrency slot.
+			const summary = t("中止：{reason}", { reason });
+			const seq = (entry.taskSeq.get(taskId) ?? this.store.listEvents(taskId).at(-1)?.seq ?? 0) + 1;
+			entry.taskSeq.set(taskId, seq);
+			const event: SentinelEngineEvent = { seq, at: Date.now(), kind: "status", status: "aborted", note: summary };
+			try {
+				this.store.appendEvent(taskId, event);
+				this.hooks.onTaskEvent(taskId, event);
+			} finally {
+				this.settleTask(entry, taskId, {
+					status: "aborted",
+					summary,
+					usage: worker?.currentUsage() ?? task.usage ?? emptyUsage(),
+				});
+			}
+			return { ok: true };
+		}
 		await worker.abort(t("中止：{reason}", { reason }));
 		return { ok: true };
 	}
@@ -1500,18 +1519,8 @@ export class EngineManager {
 					this.hooks.onChange(entry.engine);
 				},
 				onSettled: (outcome) => {
-					entry.workers.delete(taskId);
-					workerRefDispose(worker);
-					this.store.updateTask(taskId, {
-						status: outcome.status,
-						endedAt: Date.now(),
-						summary: outcome.summary,
-						usage: outcome.usage,
-						error: outcome.status === "failed" || outcome.status === "aborted" ? outcome.summary : null,
-					});
-					entry.engine = this.store.getEngine(entry.engine.id) ?? entry.engine;
-					this.hooks.onChange(entry.engine);
-					this.onTaskTerminal(entry, taskId, outcome);
+					if (entry.workers.get(taskId) !== worker) return;
+					this.settleTask(entry, taskId, outcome);
 				},
 			},
 			{
@@ -1534,25 +1543,49 @@ export class EngineManager {
 			// The session exists now; record its id for the resume path.
 			this.store.updateTask(taskId, { sessionId: worker.sessionId });
 		} catch (error) {
-			entry.workers.delete(taskId);
-			worker.dispose();
 			// A pause/abort that landed while the session was being acquired already
 			// wrote the real state; a startup failure must not overwrite it with
 			// "failed", which would offer a retry for work the operator just stopped.
-			if (entry.engine.status !== "running" || worker.isCancelled) return;
-			this.store.updateTask(taskId, {
-				status: "failed",
-				endedAt: Date.now(),
-				error: t("任务启动失败：{error}", { error: errorText(error) }),
-				summary: t("任务启动失败：{error}", { error: errorText(error) }),
-			});
-			entry.engine = this.store.getEngine(entry.engine.id) ?? entry.engine;
+			// Check before dispose(), which also marks the worker as cancelled.
+			if (
+				entry.engine.status !== "running" ||
+				worker.isCancelled ||
+				entry.workers.get(taskId) !== worker ||
+				this.store.getTask(taskId)?.status !== "running"
+			) {
+				worker.dispose();
+				return;
+			}
+			try {
+				this.settleTask(entry, taskId, {
+					status: "failed",
+					summary: t("任务启动失败：{error}", { error: errorText(error) }),
+					usage: worker.currentUsage(),
+				});
+			} finally {
+				worker.dispose();
+			}
+		}
+	}
+
+	private settleTask(entry: EngineLive, taskId: string, outcome: WorkerOutcome): void {
+		// Persist first: a storage failure must leave the worker reachable so an
+		// operator can retry aborting it instead of orphaning a running row.
+		this.store.updateTask(taskId, {
+			status: outcome.status,
+			endedAt: Date.now(),
+			summary: outcome.summary,
+			usage: outcome.usage,
+			error: outcome.status === "failed" || outcome.status === "aborted" ? outcome.summary : null,
+		});
+		const worker = entry.workers.get(taskId);
+		entry.workers.delete(taskId);
+		if (worker) workerRefDispose(worker);
+		entry.engine = this.store.getEngine(entry.engine.id) ?? entry.engine;
+		try {
 			this.hooks.onChange(entry.engine);
-			this.onTaskTerminal(entry, taskId, {
-				status: "failed",
-				summary: t("任务启动失败：{error}", { error: errorText(error) }),
-				usage: emptyUsage(),
-			});
+		} finally {
+			this.onTaskTerminal(entry, taskId, outcome);
 		}
 	}
 

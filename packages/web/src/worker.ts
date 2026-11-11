@@ -535,12 +535,17 @@ export class EngineWorker {
 		if (this.settled) return;
 		this.settled = true;
 		if (this.timeLimitTimer) clearTimeout(this.timeLimitTimer);
-		this.push({
-			kind: "status",
-			status: status === "done" ? "done" : status === "aborted" ? "aborted" : "error",
-			note: summary,
-		});
-		this.hooks.onSettled({ status, summary, usage });
+		try {
+			this.push({
+				kind: "status",
+				status: status === "done" ? "done" : status === "aborted" ? "aborted" : "error",
+				note: summary,
+			});
+		} finally {
+			// Live event delivery must not prevent the engine from recording the
+			// terminal state and releasing the task's concurrency slot.
+			this.hooks.onSettled({ status, summary, usage });
+		}
 	}
 
 	private persistGoal(): void {
