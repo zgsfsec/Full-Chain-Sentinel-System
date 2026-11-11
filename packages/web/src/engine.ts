@@ -44,7 +44,6 @@ import { EngineStore } from "./engine-store.ts";
 import { resolveJudgeEndpoint } from "./gatekeeper.ts";
 import { clampRoundLimit } from "./goal.ts";
 import { t } from "./i18n.ts";
-import { IntelligenceQueries } from "./intelligence-query.ts";
 import { acquireIntelligenceSession, intelligenceSessionDir } from "./intelligence-session.ts";
 import type { IntelligenceEngineInput } from "./intelligence-types.ts";
 import { modelsJsonPath } from "./model-config.ts";
@@ -188,7 +187,6 @@ export class EngineManager {
 	private readonly hooks: EngineHooks;
 	private readonly acquireTaskSession: RuntimeAcquireTaskSession;
 	private readonly live = new Map<string, EngineLive>();
-	private readonly intelligenceQueries: IntelligenceQueries;
 	private readonly finishingIntelligence = new Set<string>();
 	private modelRuntime: ModelRuntime | undefined;
 	private modelRuntimePromise: Promise<ModelRuntime> | undefined;
@@ -205,7 +203,6 @@ export class EngineManager {
 
 	constructor(agentDir: string, hooks: EngineHooks, acquireTaskSession: RuntimeAcquireTaskSession) {
 		this.agentDir = agentDir;
-		this.intelligenceQueries = new IntelligenceQueries(agentDir, `${agentDir}/intelligence-queries.db`);
 		this.store = new EngineStore(`${agentDir}/engines.db`);
 		this.hooks = hooks;
 		this.acquireTaskSession = acquireTaskSession;
@@ -1052,7 +1049,6 @@ export class EngineManager {
 			await this.deleteEngine(engine.id);
 			removed += 1;
 		}
-		this.intelligenceQueries.purgeProject(projectId);
 		return removed;
 	}
 
@@ -1071,7 +1067,6 @@ export class EngineManager {
 		this.live.clear();
 		this.disposed = true;
 		this.store.close();
-		this.intelligenceQueries.close();
 	}
 
 	// --- commander ---------------------------------------------------------
@@ -1546,7 +1541,6 @@ export class EngineManager {
 					agentDir: this.agentDir,
 					project,
 					input: analysis,
-					queries: this.intelligenceQueries,
 					goalPort: input.goalPort,
 					sessionId: input.taskSessionId,
 					model,

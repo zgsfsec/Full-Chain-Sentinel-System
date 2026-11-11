@@ -4,7 +4,6 @@ import { join } from "node:path";
 import * as sdk from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, test, vi } from "vitest";
 import { createGoal, emptyUsage } from "../src/goal.ts";
-import { IntelligenceQueries } from "../src/intelligence-query.ts";
 import { acquireIntelligenceSession } from "../src/intelligence-session.ts";
 import { DEFAULT_INTELLIGENCE_TEMPLATE, type IntelligenceEngineInput } from "../src/intelligence-types.ts";
 
@@ -14,21 +13,13 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-test("real analysis session exposes only scoped intelligence and goal tools; completion requires evidence", async () => {
+test("real analysis session exposes only goal tools and accepts an alert report without external queries", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "intel-session-"));
 	cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
 	mkdirSync(join(dir, "extensions"));
 	// Loading this extension would fail the test; analysis must not load user code or context.
 	writeFileSync(join(dir, "extensions", "unexpected.ts"), 'throw new Error("extension loaded")');
 	writeFileSync(join(dir, "AGENTS.md"), "UNTRUSTED_CONTEXT_MARKER");
-	const queries = new IntelligenceQueries(
-		dir,
-		join(dir, "q.db"),
-		vi.fn(async () => {
-			throw new Error("No network permitted in test");
-		}),
-	);
-	cleanups.push(() => queries.close());
 	const goal = createGoal({
 		id: "goal",
 		criteria: [],
@@ -48,7 +39,6 @@ test("real analysis session exposes only scoped intelligence and goal tools; com
 		agentDir: dir,
 		project: { id: "p", name: "P", cwd: dir },
 		input,
-		queries,
 		model: undefined,
 		modelRuntime: undefined,
 		sessionId: null,
@@ -63,7 +53,7 @@ test("real analysis session exposes only scoped intelligence and goal tools; com
 	const create = vi.spyOn(sdk, "createAgentSession");
 	const created = await acquireIntelligenceSession(options);
 	cleanups.push(created.release);
-	const names = ["goal_blocked", "goal_complete", "goal_progress", "ip_intelligence"];
+	const names = ["goal_blocked", "goal_complete", "goal_progress"];
 	expect(
 		created.session
 			.getAllTools()
@@ -72,16 +62,18 @@ test("real analysis session exposes only scoped intelligence and goal tools; com
 	).toEqual(names);
 	expect(created.session.getActiveToolNames().sort()).toEqual(names);
 	expect(created.session.systemPrompt).not.toContain("UNTRUSTED_CONTEXT_MARKER");
+	expect(created.session.systemPrompt).toContain("依据批次内的设备告警和证据进行分析");
 	const tool = create.mock.calls[0]?.[0]?.customTools?.find((entry) => entry.name === "goal_complete");
 	if (!tool) throw new Error("Missing completion tool");
 	const params = {
-		summary: "# Analysis\nPrivate address; no external query applicable.",
-		evidence: ["scoped intelligence"],
+		summary: "# Analysis\nNo device alert evidence is available for this IP.",
+		evidence: ["batch alert snapshot"],
 		findings: { submitted: 0, note: "只做情报分析" },
 	};
-	await expect(tool.execute("before-query", params, undefined, undefined, {} as never)).rejects.toThrow("缺少");
+	await expect(
+		tool.execute("empty-report", { ...params, summary: " " }, undefined, undefined, {} as never),
+	).rejects.toThrow();
 	expect(complete).not.toHaveBeenCalled();
-	await queries.lookup("p", input, "192.168.1.1");
 	await tool.execute("complete", params, undefined, undefined, {} as never);
 	expect(complete).toHaveBeenCalledOnce();
 	await expect(acquireIntelligenceSession({ ...options, sessionId: "missing" })).rejects.toThrow("文件丢失");

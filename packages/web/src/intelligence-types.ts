@@ -35,10 +35,6 @@ export interface IntelligenceTemplate {
 	id: string;
 	name: string;
 	prompt: string;
-	rdap: boolean;
-	assets: boolean;
-	queryLimit: number;
-	resultsPerIp: number;
 	limits: SentinelEngineLimits;
 }
 
@@ -135,11 +131,7 @@ export const DEFAULT_INTELLIGENCE_TEMPLATE: IntelligenceTemplate = {
 	id: "threat-ip-analysis",
 	name: "威胁 IP 分析",
 	prompt:
-		"分析设备上报的威胁 IP，结合 WHOIS/RDAP、ASN 和资产测绘记录关联告警。区分事实和推断，标明来源、时间及不确定性，输出逐 IP 摘要、跨 IP 关联和防御建议。仅查询公开情报，不直接连接告警 IP。",
-	rdap: true,
-	assets: true,
-	queryLimit: 500,
-	resultsPerIp: 20,
+		"分析设备上报的威胁 IP 和告警证据。区分事实和推断，标明来源、时间及不确定性，输出逐 IP 摘要、跨 IP 关联和防御建议。",
 	limits: { concurrency: 1, roundLimit: 5, tokenLimit: null, timeLimitMin: 30, maxRetries: 0 },
 };
 

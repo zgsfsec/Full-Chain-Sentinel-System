@@ -124,13 +124,7 @@ export function parseIntelligencePolicy(value: unknown): IntelligencePolicy {
 	const input = objectValue(value);
 	const template = objectValue(input.template, "template");
 	const limits = objectValue(template.limits, "template.limits");
-	if (
-		typeof input.enabled !== "boolean" ||
-		typeof template.rdap !== "boolean" ||
-		typeof template.assets !== "boolean"
-	) {
-		throw new IntelligenceError("enabled、rdap 和 assets 必须是布尔值");
-	}
+	if (typeof input.enabled !== "boolean") throw new IntelligenceError("enabled 必须是布尔值");
 	const threshold = int(input.threshold, "threshold", 1, 200);
 	const batchSize = int(input.batchSize, "batchSize", threshold, 200);
 	return {
@@ -144,10 +138,6 @@ export function parseIntelligencePolicy(value: unknown): IntelligencePolicy {
 			// Name and prompt are resolved from the engineering doctrine on save.
 			name: DEFAULT_INTELLIGENCE_TEMPLATE.name,
 			prompt: DEFAULT_INTELLIGENCE_TEMPLATE.prompt,
-			rdap: template.rdap,
-			assets: template.assets,
-			queryLimit: int(template.queryLimit, "template.queryLimit", 1, 2000),
-			resultsPerIp: int(template.resultsPerIp, "template.resultsPerIp", 1, 100),
 			limits: {
 				concurrency: int(limits.concurrency, "limits.concurrency", 1, 8),
 				roundLimit: int(limits.roundLimit, "limits.roundLimit", 1, 99),

@@ -82,19 +82,13 @@ function PolicyForm({ projectId, initial, doctrines, onManageDoctrines, onSaved 
 		<Form.Item name={["template", "prompt"]} hidden><Input /></Form.Item>
 		{selectedDoctrine && <Form.Item label="指挥思路预览"><Input.TextArea readOnly rows={5} value={selectedDoctrine.text} /></Form.Item>}
 		<Space wrap align="start">
-			<Form.Item name={["template", "rdap"]} label="WHOIS/RDAP 与 ASN" valuePropName="checked"><Switch /></Form.Item>
-			<Form.Item name={["template", "assets"]} label="已有资产测绘" valuePropName="checked"><Switch /></Form.Item>
-			<Form.Item name={["template", "queryLimit"]} label="单批查询预算" rules={[{ required: true }]}><InputNumber min={1} max={2000} /></Form.Item>
-			<Form.Item name={["template", "resultsPerIp"]} label="每 IP 每平台最多结果" rules={[{ required: true }]}><InputNumber min={1} max={100} /></Form.Item>
-		</Space>
-		<Space wrap align="start">
 			<Form.Item name={["template", "limits", "roundLimit"]} label="Agent 续跑轮数" rules={[{ required: true }]}><InputNumber min={1} max={99} /></Form.Item>
 			<Form.Item name={["template", "limits", "tokenLimit"]} label="Token 上限（空为不限）"><InputNumber min={1} max={10000000} /></Form.Item>
 			<Form.Item name={["template", "limits", "timeLimitMin"]} label="时间上限（分钟，空为不限）"><InputNumber min={1} max={1440} /></Form.Item>
 		</Space>
 		<Form.Item name={["template", "limits", "concurrency"]} hidden><InputNumber /></Form.Item>
 		<Form.Item name={["template", "limits", "maxRetries"]} hidden><InputNumber /></Form.Item>
-		<p className="muted">每批由一个分析 Agent 汇总全部 IP。资产查询复用「设置 → 资产测绘」中的 Key 和 BaseURL，由控制台主机发起。每公网 IP 最多消耗 5 次逻辑查询，平台限流重试另计。工程使用指挥官模型，默认跟随主模型。</p>
+		<p className="muted">每批由一个分析 Agent 按所选工程指挥思路分析 IP 告警并汇总报告。工程使用指挥官模型，默认跟随主模型。</p>
 		<Button type="primary" loading={busy} disabled={!selectedDoctrine} onClick={() => { void save(); }}>保存策略</Button>
 	</Form>;
 }
@@ -217,7 +211,7 @@ function ThreatIntelWorkspace({ project, refreshRevision, onOpenEngine, onManage
 				<label>到<Input disabled={busy} type="datetime-local" value={before} onChange={(event) => { setBefore(event.target.value); setPreview(null); }} /></label>
 				<Button loading={busy} onClick={() => { void run(async () => { const result = await api<{ events: number; blockedBatches: number }>(project.id, "cleanup/preview", filters); if (alive.current) setPreview({ ...result, filters }); }); }}>预览清理数量</Button>
 				{preview && <><p>将删除 {preview.events} 条告警，关联 {preview.blockedBatches} 个未处理批次。</p><Popconfirm title={`永久删除 ${preview.events} 条告警？`} onConfirm={() => run(async () => { await api(project.id, "cleanup", preview.filters); if (alive.current) { setPreview(null); setCleanupOpen(false); } })}><Button danger disabled={busy || preview.blockedBatches > 0 || preview.events === 0}>确认删除</Button></Popconfirm></>}
-				<Popconfirm title="清空本项目全部告警和批次记录？" description="保留数据源、策略和幂等记录；工程指挥思路、工程、报告及工程证据独立保留。请先中止未结束的批次。" onConfirm={() => run(async () => { await api(project.id, "clear", { confirmProjectId: project.id }); if (alive.current) { setCleanupOpen(false); setPreview(null); } })}><Button danger disabled={busy}>清空项目情报</Button></Popconfirm>
+				<Popconfirm title="清空本项目全部告警和批次记录？" description="保留数据源、策略和幂等记录；工程指挥思路、工程及报告独立保留。请先中止未结束的批次。" onConfirm={() => run(async () => { await api(project.id, "clear", { confirmProjectId: project.id }); if (alive.current) { setCleanupOpen(false); setPreview(null); } })}><Button danger disabled={busy}>清空项目情报</Button></Popconfirm>
 			</Space>
 		</Modal>
 	</Page>;

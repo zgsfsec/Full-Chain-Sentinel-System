@@ -355,9 +355,9 @@ export class EngineStore {
 				workspace: "intelligence",
 				roundLimit: input.template.limits.roundLimit,
 				attempt: 1,
-				objective: `查询以下全部 IP 并分析告警。告警仅展示最近三条样本，原始记录保留在威胁反制页。\n${JSON.stringify(alerts)}\n完成时在 goal_complete.summary 提交完整 Markdown 报告。`,
+				objective: `分析以下全部 IP 的设备告警和证据。告警仅展示最近三条样本，原始记录保留在威胁反制页。\n${JSON.stringify(alerts)}\n完成时在 goal_complete.summary 提交完整 Markdown 报告。`,
 				criteria: [
-					"全部 IP 已查询，逐 IP 标明事实、来源、时间与不确定性",
+					"已分析全部 IP 的告警，逐 IP 标明事实、来源、时间与不确定性",
 					"给出告警关联、跨 IP 关联和防御建议，提交完整 Markdown 报告",
 				],
 			});
