@@ -45,6 +45,9 @@ import { checkEnvironment } from "./env-check.ts";
 import { guessMimeType } from "./files.ts";
 import { FolderArchiveManager, folderArchiveContentDisposition } from "./folder-archive.ts";
 import { getServerLanguage, setServerLanguage, t } from "./i18n.ts";
+import { IntelligenceManager } from "./intelligence.ts";
+import { handleIntelligenceApi, handleIntelligenceIngest } from "./intelligence-api.ts";
+import { IntelligenceStore } from "./intelligence-store.ts";
 import { IosGateway } from "./ios-gateway.ts";
 import { MitmCenter } from "./mitm.ts";
 import { handleMitmApi } from "./mitm-api.ts";
@@ -650,6 +653,16 @@ export async function startSentinelServer(
 				})
 			: undefined;
 	codeMonitors?.start();
+	const intelligenceStore = agentDir ? new IntelligenceStore(join(agentDir, "intelligence.db")) : undefined;
+	const intelligence =
+		intelligenceStore && engines && agentDir
+			? new IntelligenceManager(intelligenceStore, engines, (id) => {
+					const project = listProjects(agentDir).projects.find((entry) => entry.id === id);
+					return project
+						? { id: project.id, name: project.name, cwd: project.workDir, container: project.container }
+						: undefined;
+				})
+			: undefined;
 
 	// One-time, best-effort: fill 工程/任务/会话名 on findings submitted before
 	// those columns existed. It runs off the startup path, because listing every
@@ -1370,6 +1383,12 @@ export async function startSentinelServer(
 	const requestHandler = (request: IncomingMessage, response: ServerResponse): void => {
 		const url = new URL(request.url ?? "/", "http://localhost");
 		const path = url.pathname;
+		// Devices authenticate with source-scoped credentials, independent of the
+		// browser's hidden entry URL and login cookie. No management routes bypass it.
+		if (path === "/api/intelligence/v1/ingest") {
+			void handleIntelligenceIngest(request, response, intelligence);
+			return;
+		}
 		// Bulk iOS pulls upload raw bytes here, before the browser gate: the device
 		// authenticates with its own token, exactly like the WebSocket upgrade.
 		if (path.startsWith("/api/ios/upload/")) {
@@ -1453,6 +1472,18 @@ export async function startSentinelServer(
 			}
 			if (path.startsWith("/plugin-icon/")) {
 				void servePluginIcon(runtime, request, response);
+				return;
+			}
+			if (path.startsWith("/api/intelligence/")) {
+				void handleIntelligenceApi(
+					request,
+					response,
+					intelligence,
+					(id) => Boolean(agentDir && listProjects(agentDir).projects.some((project) => project.id === id)),
+					() =>
+						(!authEnabled || hasValidSession(currentAuth(), request)) &&
+						!consentFor(currentAuth()?.username ?? null).required,
+				);
 				return;
 			}
 			if (path === "/api/mitm" || path.startsWith("/api/mitm/")) {
@@ -2771,6 +2802,7 @@ export async function startSentinelServer(
 					// their task sessions die with the project, so cascade.
 					if (engines) await engines.purgeProject(message.id);
 					codeMonitors?.removeByProject(message.id);
+					intelligenceStore?.purgeProject(message.id);
 					const purged = runtime.purgeProjectVulns(message.id);
 					const purgedGates = runtime.purgeProjectGates(message.id);
 					const purgedModels = runtime.purgeProjectApiModels(message.id);
@@ -4237,6 +4269,7 @@ export async function startSentinelServer(
 	}
 
 	await runtime.init();
+	intelligence?.start();
 
 	return await new Promise((resolvePromise) => {
 		const port = options.port ?? 7777;
@@ -4280,6 +4313,8 @@ export async function startSentinelServer(
 				url: consoleUrl(),
 				environment,
 				close: () => {
+					intelligence?.stop();
+					intelligenceStore?.close();
 					subscriptionScheduler?.stop();
 					pocImports.close();
 					folderArchives.dispose();

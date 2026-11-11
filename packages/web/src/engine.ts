@@ -44,6 +44,9 @@ import { EngineStore } from "./engine-store.ts";
 import { resolveJudgeEndpoint } from "./gatekeeper.ts";
 import { clampRoundLimit } from "./goal.ts";
 import { t } from "./i18n.ts";
+import { IntelligenceQueries } from "./intelligence-query.ts";
+import { acquireIntelligenceSession, intelligenceSessionDir } from "./intelligence-session.ts";
+import type { IntelligenceEngineInput } from "./intelligence-types.ts";
 import { modelsJsonPath } from "./model-config.ts";
 import { resolveLibraryRole } from "./model-library.ts";
 import { hasEnabledNotifyChannel, sendNotifications } from "./notify.ts";
@@ -185,6 +188,8 @@ export class EngineManager {
 	private readonly hooks: EngineHooks;
 	private readonly acquireTaskSession: RuntimeAcquireTaskSession;
 	private readonly live = new Map<string, EngineLive>();
+	private readonly intelligenceQueries: IntelligenceQueries;
+	private readonly finishingIntelligence = new Set<string>();
 	private modelRuntime: ModelRuntime | undefined;
 	private modelRuntimePromise: Promise<ModelRuntime> | undefined;
 	/** models.json changed since the runtime was created: refresh before the next use. */
@@ -200,6 +205,7 @@ export class EngineManager {
 
 	constructor(agentDir: string, hooks: EngineHooks, acquireTaskSession: RuntimeAcquireTaskSession) {
 		this.agentDir = agentDir;
+		this.intelligenceQueries = new IntelligenceQueries(agentDir, `${agentDir}/intelligence-queries.db`);
 		this.store = new EngineStore(`${agentDir}/engines.db`);
 		this.hooks = hooks;
 		this.acquireTaskSession = acquireTaskSession;
@@ -362,6 +368,21 @@ export class EngineManager {
 		return this.getEngine(stored.id) ?? stored;
 	}
 
+	/** Persist a batch and its single restricted analysis task before scheduling. */
+	createIntelligenceEngine(project: SentinelProjectInfo, input: IntelligenceEngineInput): SentinelEngine {
+		const engine = this.store.createIntelligenceEngine(project, input);
+		if (!this.live.has(engine.id)) {
+			this.live.set(engine.id, this.emptyLive(engine));
+			this.hooks.onChange(engine);
+			this.tick();
+		}
+		return this.getEngine(engine.id) ?? engine;
+	}
+
+	findIntelligenceEngine(attemptId: string): SentinelEngine | undefined {
+		return this.store.findIntelligenceEngine(attemptId);
+	}
+
 	/** Operator pause: stop dispatching, abort running tasks, keep everything for resume. */
 	async pauseEngine(id: string): Promise<void> {
 		const entry = this.live.get(id);
@@ -390,10 +411,19 @@ export class EngineManager {
 	async abortEngine(id: string): Promise<void> {
 		const entry = this.live.get(id);
 		if (!entry) throw new Error(t("工程不存在"));
+		const analysis = this.store.intelligenceInput(id);
+		if (analysis && ["completed", "stopped"].includes(entry.engine.status)) return;
 		this.disableActiveSchedule(entry, "manual");
+		if (analysis) {
+			this.store.setEngineStatus(id, "stopped", "操作员终止", Date.now());
+			entry.engine = this.store.getEngine(id) ?? entry.engine;
+			for (const task of entry.engine.tasks)
+				if (task.status === "queued" || task.status === "paused")
+					this.store.updateTask(task.id, { status: "aborted", endedAt: Date.now(), error: "工程已终止" });
+		}
 		await this.stopWorkers(entry, "aborted", t("工程已终止"));
 		await this.stopCommander(entry);
-		this.store.setEngineStatus(id, "stopped", t("操作员终止"), Date.now());
+		this.store.setEngineStatus(id, "stopped", analysis ? "操作员终止" : t("操作员终止"), Date.now());
 		entry.engine = this.store.getEngine(id) ?? entry.engine;
 		this.hooks.onChange(entry.engine);
 		this.armScheduler();
@@ -744,6 +774,9 @@ export class EngineManager {
 	async deleteEngine(id: string): Promise<void> {
 		const entry = this.live.get(id);
 		if (!entry) throw new Error(t("工程不存在"));
+		if (this.store.intelligenceInput(id) && ["running", "paused"].includes(entry.engine.status)) {
+			throw new Error("请先在威胁反制页中止批次，再删除关联工程");
+		}
 		if (entry.engine.status === "running" || entry.engine.status === "paused") {
 			if (entry.engine.status === "running") await this.stopWorkers(entry, "aborted", t("工程已删除"));
 		}
@@ -829,6 +862,7 @@ export class EngineManager {
 	addTargets(id: string, targetsText: string): void {
 		const entry = this.live.get(id);
 		if (!entry) throw new Error(t("工程不存在"));
+		if (this.store.intelligenceInput(id)) throw new Error("情报工程的范围固定为批次快照，请通过数据源上报新 IP");
 		const targets = parseTargetLines(targetsText);
 		if (targets.length === 0) throw new Error(t("追加的目标列表为空"));
 		this.store.addTargets(id, targets);
@@ -850,6 +884,8 @@ export class EngineManager {
 	async steerCommander(id: string, text: string): Promise<void> {
 		const entry = this.live.get(id);
 		if (!entry) throw new Error(t("工程不存在"));
+		if (this.store.intelligenceInput(id))
+			throw new Error("情报工程按模板执行，请在威胁反制页修改后续批次模板；当前报告和过程见任务看板");
 		const trimmed = text.trim();
 		if (!trimmed) throw new Error(t("消息不能为空"));
 		if (entry.engine.status === "running") {
@@ -881,6 +917,7 @@ export class EngineManager {
 			this.store.updateTask(taskId, { status: "aborted", endedAt: Date.now(), error: reason });
 			entry.engine = this.store.getEngine(entry.engine.id) ?? entry.engine;
 			this.hooks.onChange(entry.engine);
+			if (this.store.intelligenceInput(entry.engine.id)) void this.finishIntelligence(entry);
 			return { ok: true };
 		}
 		const worker = entry.workers.get(taskId);
@@ -952,7 +989,11 @@ export class EngineManager {
 			};
 		}
 		const project = this.projectOf(entry.engine);
-		const sessionDir = getDefaultSessionDir(project.cwd, this.agentDir);
+		const analysis = this.store.intelligenceInput(entry.engine.id);
+		if (analysis && task.status !== "paused") return { error: "情报批次失败后请在威胁反制页重试" };
+		const sessionDir = analysis
+			? intelligenceSessionDir(this.agentDir, project.id)
+			: getDefaultSessionDir(project.cwd, this.agentDir);
 		if (!SessionManager.findById(project.cwd, task.sessionId, sessionDir)) {
 			return {
 				error: t("任务 {id} 的会话文件不存在，无法在原会话上继续；请用 dispatch_task 重新派发", { id: taskId }),
@@ -991,6 +1032,8 @@ export class EngineManager {
 		if (!task || !task.sessionId) throw new Error(t("该任务没有会话（可能尚未启动或已被删除）"));
 		const engine = this.store.getEngine(task.engineId);
 		if (!engine) throw new Error(t("任务所属工程不存在"));
+		if (this.store.intelligenceInput(engine.id))
+			throw new Error("分析会话使用专用查询权限，请在工程任务的执行过程中查看记录");
 		const project = this.projectOf(engine);
 		const sessionDir = getDefaultSessionDir(project.cwd, this.agentDir);
 		// Task rows keep the session id, but a session file is named
@@ -1005,9 +1048,11 @@ export class EngineManager {
 	async purgeProject(projectId: string): Promise<number> {
 		let removed = 0;
 		for (const engine of this.store.listEngines(projectId)) {
+			if (this.store.intelligenceInput(engine.id)) await this.abortEngine(engine.id);
 			await this.deleteEngine(engine.id);
 			removed += 1;
 		}
+		this.intelligenceQueries.purgeProject(projectId);
 		return removed;
 	}
 
@@ -1026,6 +1071,7 @@ export class EngineManager {
 		this.live.clear();
 		this.disposed = true;
 		this.store.close();
+		this.intelligenceQueries.close();
 	}
 
 	// --- commander ---------------------------------------------------------
@@ -1218,6 +1264,27 @@ export class EngineManager {
 
 	/** Build (or rebuild) the commander session and give it its opening brief. */
 	private async startCommander(entry: EngineLive, kind: "initial" | "resume"): Promise<void> {
+		if (this.store.intelligenceInput(entry.engine.id)) {
+			for (const task of this.store.getEngine(entry.engine.id)?.tasks ?? []) {
+				if (task.status !== "paused") continue;
+				this.store.updateTask(task.id, {
+					status: "queued",
+					endedAt: null,
+					pendingContinue: task.sessionId
+						? {
+								instruction: "从已有情报证据继续完成批次报告。",
+								criteria: task.criteria,
+								roundLimit: entry.engine.limits.roundLimit,
+								requestedAt: Date.now(),
+							}
+						: null,
+				});
+			}
+			entry.engine = this.store.getEngine(entry.engine.id) ?? entry.engine;
+			this.tick();
+			void this.finishIntelligence(entry);
+			return;
+		}
 		if (entry.commander) {
 			entry.commanderUnsubscribe();
 			entry.commander.dispose();
@@ -1470,8 +1537,23 @@ export class EngineManager {
 		const task = this.store.getTask(taskId);
 		if (!task || task.status !== "queued") return;
 		const project = this.projectOf(entry.engine);
-		const acquire: WorkerAcquire = (input) =>
-			this.acquireTaskSession({
+		const analysis = this.store.intelligenceInput(entry.engine.id);
+		const acquire: WorkerAcquire = async (input) => {
+			if (analysis) {
+				const model = await this.resolveCommanderModel();
+				if (!model) throw new Error("请先配置主模型或指挥官模型");
+				return acquireIntelligenceSession({
+					agentDir: this.agentDir,
+					project,
+					input: analysis,
+					queries: this.intelligenceQueries,
+					goalPort: input.goalPort,
+					sessionId: input.taskSessionId,
+					model,
+					modelRuntime: await this.ensureModelRuntime(),
+				});
+			}
+			return this.acquireTaskSession({
 				taskTitle: task.title,
 				// Recorded on every finding this task submits, so the hub can filter
 				// by 工程/任务 long after the task's session is gone.
@@ -1493,6 +1575,7 @@ export class EngineManager {
 					input.onFinding();
 				},
 			});
+		};
 		const worker = new EngineWorker(
 			task,
 			acquire,
@@ -1541,6 +1624,7 @@ export class EngineManager {
 		try {
 			await worker.start();
 			// The session exists now; record its id for the resume path.
+			if (this.disposed || this.live.get(entry.engine.id) !== entry) return;
 			this.store.updateTask(taskId, { sessionId: worker.sessionId });
 		} catch (error) {
 			// A pause/abort that landed while the session was being acquired already
@@ -1548,6 +1632,7 @@ export class EngineManager {
 			// "failed", which would offer a retry for work the operator just stopped.
 			// Check before dispose(), which also marks the worker as cancelled.
 			if (
+				this.disposed ||
 				entry.engine.status !== "running" ||
 				worker.isCancelled ||
 				entry.workers.get(taskId) !== worker ||
@@ -1592,6 +1677,11 @@ export class EngineManager {
 	/** A task reached a terminal state: tell the commander and fill the freed slot. */
 	private onTaskTerminal(entry: EngineLive, taskId: string, outcome: WorkerOutcome): void {
 		if (entry.engine.status !== "running") return;
+		if (this.store.intelligenceInput(entry.engine.id)) {
+			void this.finishIntelligence(entry);
+			this.tick();
+			return;
+		}
 		const task = this.store.getTask(taskId);
 		const label =
 			outcome.status === "done"
@@ -1608,6 +1698,32 @@ export class EngineManager {
 				"需要换思路重派再用 dispatch_task。",
 		);
 		this.tick();
+	}
+
+	private async finishIntelligence(entry: EngineLive): Promise<void> {
+		if (this.disposed || entry.engine.status !== "running" || this.finishingIntelligence.has(entry.engine.id)) return;
+		const board = this.store.getEngine(entry.engine.id)?.tasks ?? [];
+		if (!board.length || board.some((task) => ["running", "queued", "paused"].includes(task.status))) return;
+		this.finishingIntelligence.add(entry.engine.id);
+		try {
+			if (board.some((task) => task.status !== "done"))
+				throw new Error(board.find((task) => task.status !== "done")?.summary ?? "批次分析未完成");
+			const report = board.map((task) => task.summary ?? "").join("\n\n");
+			if (!report.trim()) throw new Error("分析报告为空");
+			await this.hooks.archiveReport?.(entry.engine, report);
+			if (this.disposed || this.live.get(entry.engine.id) !== entry || entry.engine.status !== "running") return;
+			this.store.setEngineReport(entry.engine.id, report);
+			this.store.setEngineStatus(entry.engine.id, "completed", null, Date.now());
+			entry.reportSettled = true;
+		} catch (error) {
+			if (this.disposed || this.live.get(entry.engine.id) !== entry || entry.engine.status !== "running") return;
+			this.store.setEngineStatus(entry.engine.id, "stopped", errorText(error), Date.now());
+		} finally {
+			this.finishingIntelligence.delete(entry.engine.id);
+		}
+		if (this.disposed || this.live.get(entry.engine.id) !== entry) return;
+		entry.engine = this.store.getEngine(entry.engine.id) ?? entry.engine;
+		this.hooks.onChange(entry.engine);
 	}
 
 	private async stopWorkers(

@@ -24,6 +24,17 @@ export interface SentinelDoctrine {
 /** Built-in playbooks for penetration testing, source audits and CTF challenges. */
 const BUILTIN_DOCTRINES: SentinelDoctrine[] = [
 	{
+		id: "threat-ip-analysis",
+		name: "威胁 IP 分析",
+		text: [
+			"分析设备上报的威胁 IP，结合 WHOIS/RDAP、ASN 和已有资产测绘记录关联告警。仅查询公开情报，不直接连接告警 IP。",
+			"逐 IP 整理网络注册、ASN、组织、已收录端口和服务；记录查询来源及时间，无记录或查询失败应如实说明。",
+			"结合设备告警识别时间、规则、ASN、服务特征等关联，区分事实和推断。网络持有组织或地理位置不能直接证明攻击者身份。",
+			"报告包含逐 IP 摘要、跨 IP 关联、不确定性、采样限制和防御建议，不自动下发处置。",
+		].join("\n"),
+		builtin: true,
+	},
+	{
 		id: "attack-defense-web",
 		name: "攻防Web渗透打点",
 		text: [

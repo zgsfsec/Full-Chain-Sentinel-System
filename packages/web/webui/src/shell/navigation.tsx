@@ -83,7 +83,10 @@ export const NAV_GROUPS: { group: string; items: MenuEntry[] }[] = [
 	},
 	{
 		group: "情报",
-		items: [{ page: "codeintel", label: t("开源情报"), icon: RadarChartOutlined }],
+		items: [
+			{ page: "codeintel", label: t("开源情报"), icon: RadarChartOutlined },
+			{ page: "threatintel", label: getLanguage() === "en" ? "Threat Intelligence" : "威胁反制", icon: SafetyCertificateOutlined },
+		],
 	},
 	{
 		group: "执行与审计",

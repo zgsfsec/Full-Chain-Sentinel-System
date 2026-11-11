@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { type CodeReproductionResult, parseCodeReproductionResult } from "./code-reproduction.ts";
+import type { IntelligenceEngineInput } from "./intelligence-types.ts";
 import type {
 	SentinelEngine,
 	SentinelEngineEvent,
@@ -85,6 +86,9 @@ CREATE TABLE IF NOT EXISTS engine_events (
 );
 CREATE INDEX IF NOT EXISTS idx_engine_tasks_engine ON engine_tasks(engine_id, seq ASC);
 CREATE INDEX IF NOT EXISTS idx_engine_events_owner ON engine_events(owner_id, seq ASC);
+CREATE TABLE IF NOT EXISTS engine_intelligence (
+ engine_id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL UNIQUE, input TEXT NOT NULL
+);
 `;
 
 interface EngineRow {
@@ -294,6 +298,77 @@ export class EngineStore {
 			.prepare("SELECT * FROM engine_tasks WHERE engine_id = ? ORDER BY seq ASC")
 			.all(id) as unknown as TaskRow[];
 		return engineFromRow(row, tasks.map(taskFromRow));
+	}
+
+	intelligenceInput(engineId: string): IntelligenceEngineInput | undefined {
+		const row = this.db.prepare("SELECT input FROM engine_intelligence WHERE engine_id=?").get(engineId) as
+			| { input: string }
+			| undefined;
+		return row ? (JSON.parse(row.input) as IntelligenceEngineInput) : undefined;
+	}
+
+	findIntelligenceEngine(attemptId: string): SentinelEngine | undefined {
+		const row = this.db.prepare("SELECT engine_id FROM engine_intelligence WHERE attempt_id=?").get(attemptId) as
+			| { engine_id: string }
+			| undefined;
+		return row ? this.getEngine(row.engine_id) : undefined;
+	}
+
+	/** Association and initial task commit together, before any model request. */
+	createIntelligenceEngine(project: { id: string; name: string }, input: IntelligenceEngineInput): SentinelEngine {
+		this.db.exec("BEGIN IMMEDIATE");
+		try {
+			const existing = this.findIntelligenceEngine(input.attemptId);
+			if (existing) {
+				if (existing.projectId !== project.id) throw new Error("分析批次项目不匹配");
+				this.db.exec("COMMIT");
+				return existing;
+			}
+			const engine = this.createEngine({
+				projectId: project.id,
+				projectName: project.name,
+				name: `${input.template.name} · ${input.items.length} IP · ${input.batchId.slice(0, 8)}`,
+				targets: input.items.map((item) => ({ target: item.ip })),
+				doctrines: [input.template.id],
+				limits: { ...input.template.limits, concurrency: 1, maxRetries: 0 },
+				gateMode: "auto",
+			});
+			this.db
+				.prepare("INSERT INTO engine_intelligence VALUES (?,?,?)")
+				.run(engine.id, input.attemptId, JSON.stringify(input));
+			const alerts = input.items.map((item) => ({
+				ip: item.ip,
+				alertCount: item.alertCount,
+				alerts: item.alerts.slice(0, 3).map((alert) => ({
+					source: alert.sourceName,
+					eventId: alert.event_id,
+					occurredAt: alert.occurred_at,
+					severity: alert.severity,
+					category: alert.category,
+					evidenceSample: JSON.stringify(alert.evidence).slice(0, 512),
+				})),
+			}));
+			this.createTask({
+				engineId: engine.id,
+				title: "批次情报分析与关联报告",
+				target: null,
+				workspace: "intelligence",
+				roundLimit: input.template.limits.roundLimit,
+				attempt: 1,
+				objective: `查询以下全部 IP 并分析告警。告警仅展示最近三条样本，原始记录保留在威胁反制页。\n${JSON.stringify(alerts)}\n完成时在 goal_complete.summary 提交完整 Markdown 报告。`,
+				criteria: [
+					"全部 IP 已查询，逐 IP 标明事实、来源、时间与不确定性",
+					"给出告警关联、跨 IP 关联和防御建议，提交完整 Markdown 报告",
+				],
+			});
+			const saved = this.getEngine(engine.id);
+			if (!saved) throw new Error("分析工程保存失败");
+			this.db.exec("COMMIT");
+			return saved;
+		} catch (error) {
+			this.db.exec("ROLLBACK");
+			throw error;
+		}
 	}
 
 	listEngines(projectId?: string): SentinelEngine[] {

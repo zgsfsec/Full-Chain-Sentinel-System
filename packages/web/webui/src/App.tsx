@@ -36,6 +36,7 @@ import { PermissionsPanel } from "./components/PermissionsPanel.tsx";
 import { PluginPanel } from "./components/PluginPanel.tsx";
 import { PluginUiOverlay, type PluginUiCallResult, type PluginUiContext } from "./components/PluginUiOverlay.tsx";
 import { CodeIntelPage, type BranchProbe } from "./components/CodeIntelPage.tsx";
+import { ThreatIntelPage } from "./components/ThreatIntelPage.tsx";
 import { CodeActivityRequest } from "./code-activity-request.ts";
 import { PocPage } from "./components/PocPage.tsx";
 import { PocSourcesPanel } from "./components/PocSourcesPanel.tsx";
@@ -350,6 +351,7 @@ export function App() {
 	/** The one page the content area shows; navigation lives in the sider. */
 	const [page, setPage] = useState<SentinelPageId>("dashboard");
 	const [reportRefresh, setReportRefresh] = useState(0);
+	const [threatRefresh, setThreatRefresh] = useState(0);
 	const [webFuzzImport, setWebFuzzImport] = useState<{ projectId: string; flowId: string } | null>(null);
 	/**
 	 * Console authentication: the console renders only once the session is
@@ -2212,6 +2214,9 @@ export function App() {
 				send({ type: "list_code_monitors" });
 				send({ type: "list_engines" });
 				break;
+			case "threatintel":
+				setThreatRefresh((value) => value + 1);
+				break;
 			case "apimodels":
 				send({ type: "list_api_models" });
 				break;
@@ -3381,6 +3386,8 @@ export function App() {
 						<WebFuzzPage key={snapshot?.project?.id ?? "none"} project={snapshot?.project ?? null}
 							initialFlowId={webFuzzImport?.projectId === snapshot?.project?.id ? webFuzzImport?.flowId : undefined}
 							onImportConsumed={() => setWebFuzzImport(null)} />
+					) : page === "threatintel" ? (
+						<ThreatIntelPage project={snapshot?.project ?? null} refreshRevision={threatRefresh} onManageDoctrines={() => { send({ type: "list_doctrines" }); setEngineEntryId(null); openPage("engine"); }} onOpenEngine={(id) => { send({ type: "list_engines" }); openPage("engine"); setEngineEntryId(id); }} />
 					) : page === "codeintel" ? (
 						<CodeIntelPage
 							engines={engines}

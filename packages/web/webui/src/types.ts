@@ -33,6 +33,7 @@ export type SentinelPageId =
 	| "webfuzz"
 	| "pocs"
 	| "codeintel"
+	| "threatintel"
 	| "apimodels"
 	| "droid"
 	| "ios"
