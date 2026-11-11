@@ -32,7 +32,20 @@ mv ~/.sentinel/agent/auth.json ~/.sentinel/agent/auth.json.bak
 
 ## opencode 使用问题
 
-因为 opencode go 有特殊的请求方式，故请自行反代，如果需要反代脚本的，可以加作者进交流群获取。
+OpenCode Go 的请求格式和会话请求头有特殊要求，使用时需要自行部署反向代理。可使用仓库提供的 [OpenCode Go 反代脚本](../scripts/opencode_proxy.py)，脚本会补充 `x-opencode-session` 请求头，并转发流式响应。
+
+在仓库根目录运行：
+
+```bash
+python3 -m venv .venv-opencode
+.venv-opencode/bin/python -m pip install aiohttp
+export OPENCODE_API_KEY="你的 OpenCode Go API Key"
+.venv-opencode/bin/python scripts/opencode_proxy.py
+```
+
+脚本默认监听 `127.0.0.1:12581`，上游为 `https://opencode.ai/zen/go`。在全链哨兵的“设置 → 模型”中，将 Base URL 填为 `http://127.0.0.1:12581/v1`，API Key 填写 OpenCode Go 的密钥，模型 ID 填写对应的模型名称。
+
+如果全链哨兵运行在 Docker 中，启动脚本时加上 `--host 0.0.0.0`，并将 Base URL 中的 `127.0.0.1` 替换为容器可访问的宿主机地址；Docker Desktop 可使用 `host.docker.internal`。
 
 ## 阿里百炼模型使用问题
 
