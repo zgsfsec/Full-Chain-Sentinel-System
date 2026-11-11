@@ -27,6 +27,7 @@ import {
 import { ensureGateway, projectGatewayDir, withGatewayLock } from "./gateway.ts";
 import { t } from "./i18n.ts";
 import { installProjectMitmCa } from "./mitm-certificate.ts";
+import type { ProjectEgressIp } from "./project-egress-types.ts";
 import type { SentinelProxySettings } from "./protocol.ts";
 import {
 	AUTO_NODE_TAG,
@@ -65,6 +66,8 @@ export interface SentinelProject {
 	/** Host directory mounted at /work in the container. */
 	workDir: string;
 	createdAt: string;
+	/** Kept until the operator successfully tests this project's exit again. */
+	egressIp?: ProjectEgressIp;
 	/**
 	 * The operator stopped this project's container on purpose.
 	 *
@@ -116,6 +119,14 @@ function writeProjects(agentDir: string, file: ProjectsFile): void {
 
 export function listProjects(agentDir: string): ProjectsFile {
 	return readProjects(agentDir);
+}
+
+export function recordProjectEgressIp(agentDir: string, id: string, result: ProjectEgressIp): void {
+	const file = readProjects(agentDir);
+	const project = file.projects.find((entry) => entry.id === id);
+	if (!project) throw new Error(t("项目不存在"));
+	project.egressIp = result;
+	writeProjects(agentDir, file);
 }
 
 /**

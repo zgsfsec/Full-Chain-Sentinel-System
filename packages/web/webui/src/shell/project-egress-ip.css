@@ -1,0 +1,61 @@
+.project-egress-ip {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	line-height: 1.4;
+}
+
+.project-egress-ip__action {
+	display: inline-flex;
+	flex: none;
+}
+
+.project-egress-ip__refresh.ant-btn {
+	color: var(--ant-color-text-tertiary);
+}
+
+.project-egress-ip__placeholder {
+	color: var(--ant-color-text-tertiary);
+	font-size: 12px;
+	white-space: nowrap;
+}
+
+.project-egress-ip__value {
+	max-width: 46ch;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--ant-color-text-secondary);
+	font-size: 12px;
+}
+
+.project-egress-ip__address {
+	font-family: var(--ant-font-family-code);
+}
+
+.project-egress-ip__error {
+	flex: none;
+	color: var(--ant-color-warning);
+	font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+	.console-shell .console-header {
+		height: auto !important;
+		min-height: 56px;
+		flex-wrap: wrap;
+		padding-block: 8px !important;
+		row-gap: 8px;
+	}
+
+	.console-shell .console-header__left {
+		flex-wrap: wrap;
+		flex-basis: 520px;
+		row-gap: 8px;
+	}
+
+	.project-egress-ip {
+		max-width: 100%;
+	}
+}

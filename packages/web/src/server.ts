@@ -62,6 +62,7 @@ import {
 	savePreset,
 	setPresetEnabled,
 } from "./presets.ts";
+import { handleProjectEgressApi } from "./project-egress.ts";
 import {
 	addProject,
 	changeProjectProxy,
@@ -1459,6 +1460,10 @@ export async function startSentinelServer(
 					project: () => runtime.currentProject,
 					authorized: () => !authEnabled || hasValidSession(currentAuth(), request),
 				});
+				return;
+			}
+			if (path === "/api/projects/egress-ip") {
+				void handleProjectEgressApi(request, response, agentDir);
 				return;
 			}
 			if (path === "/api/models/remote") {

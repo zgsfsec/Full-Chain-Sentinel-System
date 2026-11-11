@@ -51,6 +51,7 @@ import {
 	type MenuEntry,
 	type PluginNavEntry,
 } from "./navigation.tsx";
+import { ProjectEgressIp } from "./ProjectEgressIp.tsx";
 import { ProjectSwitcher } from "./ProjectSwitcher.tsx";
 import "./sidebar.css";
 import "./console-design.css";
@@ -361,6 +362,9 @@ export function ConsoleShell({
 					{page.startsWith("plugin:") ? t("插件") : (PAGE_TITLES[page] ?? t("控制台"))}
 				</span>
 				{connected ? <Tag color={MODE_COLORS[mode]}>{SENTINEL_MODE_LABELS[mode]}</Tag> : null}
+				{activeProject ? (
+					<ProjectEgressIp key={activeProject.id} projectId={activeProject.id} connected={connected} />
+				) : null}
 			</div>
 			<div className="console-header__right">
 				<Badge
