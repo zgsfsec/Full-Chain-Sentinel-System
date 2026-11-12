@@ -110,7 +110,7 @@ test("file names are reduced to one safe segment", () => {
 	expect(suffixedName("noext", 2)).toBe("noext-2");
 	expect(uploadsDirFor("/work")).toBe("/work/uploads");
 	// The advertised cap is the one the route uses when no test cap is passed.
-	expect(UPLOAD_MAX_BYTES).toBe(64 * 1024 * 1024);
+	expect(UPLOAD_MAX_BYTES).toBe(1024 * 1024 * 1024);
 });
 
 test("an uploaded file lands in the project work dir, byte for byte", async () => {
@@ -161,7 +161,7 @@ test("uploads for a stale or missing project are rejected before writing files",
 });
 
 test("a body over the cap is refused and leaves nothing behind", async () => {
-	// The cap is a parameter, so proving the branch does not mean moving 64MB
+	// The cap is a parameter, so proving the branch does not mean moving 1024MB
 	// through the loopback socket.
 	const result = await storeUpload(workDir, "big.bin", chunks(Buffer.alloc(6), Buffer.alloc(6)), 8);
 	expect(result.ok).toBe(false);

@@ -69,11 +69,16 @@ test("images go to the vision path, other files are uploaded, refusals are kept"
 	const fake = (name: string, type: string, size: number) => ({ name, type, size }) as File;
 	const image = fake("shot.png", "image/png", 2048);
 	const doc = fake("report.pdf", "application/pdf", 4096);
+	const aboveOldLimit = fake("archive.zip", "application/zip", 64 * 1024 * 1024 + 1);
+	const atLimit = fake("limit.bin", "application/octet-stream", 1024 * 1024 * 1024);
 	const huge = fake("big.bin", "application/octet-stream", MAX_UPLOAD_BYTES + 1);
 
-	expect(planAttachments([image, doc], "p1")).toEqual([
+	expect(MAX_UPLOAD_BYTES).toBe(1024 * 1024 * 1024);
+	expect(planAttachments([image, doc, aboveOldLimit, atLimit], "p1")).toEqual([
 		{ kind: "image", file: image },
 		{ kind: "upload", file: doc, projectId: "p1" },
+		{ kind: "upload", file: aboveOldLimit, projectId: "p1" },
+		{ kind: "upload", file: atLimit, projectId: "p1" },
 	]);
 	// No project selected: an upload has nowhere to go, and the chip says why.
 	expect(planAttachments([doc], null)).toEqual([{ kind: "refused", file: doc, reason: "请先选择项目" }]);
@@ -81,7 +86,7 @@ test("images go to the vision path, other files are uploaded, refusals are kept"
 	// it is inlined into the message rather than uploaded.
 	const plans = planAttachments([huge, image], "p1");
 	expect(plans[0].kind).toBe("refused");
-	if (plans[0].kind === "refused") expect(plans[0].reason).toContain("64.0 MB");
+	if (plans[0].kind === "refused") expect(plans[0].reason).toContain("1024.0 MB");
 	expect(plans[1].kind).toBe("image");
 });
 

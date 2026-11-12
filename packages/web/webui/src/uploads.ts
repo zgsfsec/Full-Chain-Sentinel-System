@@ -13,7 +13,7 @@ import { t } from "./i18n.ts";
 import { formatSize } from "./transcript.ts";
 
 /** Largest single attachment; the server refuses anything larger. */
-export const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
 
 /** One stored attachment, as the upload route reports it. */
 export interface UploadedFile {

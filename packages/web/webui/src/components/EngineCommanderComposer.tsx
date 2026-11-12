@@ -4,7 +4,7 @@ import type { UploadFile } from "antd";
 import { useState } from "react";
 import { getLanguage, t } from "../i18n.ts";
 import type { SentinelEngine, SentinelProjectInfo } from "../types.ts";
-import { attachmentManifest, staleUploads, type UploadedFile } from "../uploads.ts";
+import { attachmentManifest, MAX_UPLOAD_BYTES, staleUploads, type UploadedFile } from "../uploads.ts";
 import { EngineTargetFiles } from "./EngineTargetFiles.tsx";
 
 /** File paths travel in the steering message and persist in the commander log. */
@@ -38,7 +38,7 @@ export function CommanderComposer({ status, project, onSubmit }: {
 		? (getLanguage() === "en" ? "Completed engagements support text debrief only." : "工程已完成，复盘对话仅支持文字。")
 		: status !== "running" ? (getLanguage() === "en" ? "Attachments are available while the engagement is running." : "工程运行中才可上传附件。")
 			: !project ? t("请先选择项目")
-			: (getLanguage() === "en" ? "Attach files for the commander to analyze; up to 64 MB each." : "上传附件交给指挥官分析，单文件不超过 64 MB。");
+			: (getLanguage() === "en" ? `Attach files for the commander to analyze; up to ${MAX_UPLOAD_BYTES / 1024 / 1024} MB each.` : `上传附件交给指挥官分析，单文件不超过 ${MAX_UPLOAD_BYTES / 1024 / 1024} MB。`);
 
 	return <div className="engine-commander__composer">
 		{files.length > 0 ? <ul className="engine-commander__attachments" aria-label={getLanguage() === "en" ? "Attachments" : "附件"}>

@@ -22,7 +22,7 @@ import { t } from "./i18n.ts";
 export const UPLOAD_DIR_NAME = "uploads";
 
 /** Largest single chat attachment. */
-export const UPLOAD_MAX_BYTES = 64 * 1024 * 1024;
+export const UPLOAD_MAX_BYTES = 1024 * 1024 * 1024;
 
 /** Where one project's chat attachments live. */
 export function uploadsDirFor(workDir: string): string {

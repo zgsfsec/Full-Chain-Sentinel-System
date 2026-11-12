@@ -66,8 +66,8 @@ export function EngineTargetFiles({ project, files, onChange, compact = false, d
 			</Upload>
 			{!compact ? <Typography.Text type="secondary" className="engine-target-files__hint">
 				{getLanguage() === "en"
-					? "Attach target lists, challenge files, images, or archives; up to 64 MB per file. The commander arranges analysis alongside your description."
-					: "可上传目标清单、题目附件、图片或压缩包，单文件不超过 64 MB。指挥官会结合文字描述安排分析。"}
+					? `Attach target lists, challenge files, images, or archives; up to ${MAX_UPLOAD_BYTES / 1024 / 1024} MB per file. The commander arranges analysis alongside your description.`
+					: `可上传目标清单、题目附件、图片或压缩包，单文件不超过 ${MAX_UPLOAD_BYTES / 1024 / 1024} MB。指挥官会结合文字描述安排分析。`}
 			</Typography.Text> : null}
 			{error ? <Alert type="error" showIcon title={error} /> : null}
 		</div>
