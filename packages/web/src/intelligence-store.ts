@@ -2,7 +2,13 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { listDoctrines, type SentinelDoctrine } from "./doctrines.ts";
-import { canonicalJson, IntelligenceError, textValue } from "./intelligence-input.ts";
+import {
+	canonicalJson,
+	IntelligenceError,
+	intelligenceAlertMetadata,
+	parseIntelligencePush,
+	textValue,
+} from "./intelligence-input.ts";
 import {
 	DEFAULT_INTELLIGENCE_POLICY,
 	type IntelligenceAlert,
@@ -106,13 +112,14 @@ const attemptView = (row: AttemptRow): IntelligenceAttempt => ({
 	error: row.error,
 	createdAt: row.created_at,
 });
-const alertView = (row: EventRow): IntelligenceAlert => ({
-	...JSON.parse(row.payload),
-	seq: row.seq,
-	sourceId: row.source_id,
-	sourceName: row.name,
-	receivedAt: row.received_at,
-});
+const alertView = (row: EventRow): IntelligenceAlert =>
+	intelligenceAlertMetadata({
+		...JSON.parse(row.payload),
+		seq: row.seq,
+		sourceId: row.source_id,
+		sourceName: row.name,
+		receivedAt: row.received_at,
+	});
 
 export class IntelligenceStore {
 	private readonly db: SqliteDatabase;
@@ -179,6 +186,7 @@ export class IntelligenceStore {
 	}
 
 	ingest(source: IntelligenceSource, input: IntelligencePush, now = Date.now()): IntelligenceReceipt {
+		input = parseIntelligencePush(input);
 		return this.transaction(() => {
 			const current = this.db
 				.prepare("SELECT enabled FROM intel_sources WHERE id=? AND project_id=?")
@@ -366,13 +374,7 @@ export class IntelligenceStore {
 					ip: candidate.ip,
 					throughSeq: candidate.through_seq,
 					alertCount: count,
-					alerts: rows.map((row) => {
-						const alert = alertView(row);
-						const evidence = JSON.stringify(alert.evidence);
-						return evidence.length > 2000
-							? { ...alert, evidence: { excerpt: evidence.slice(0, 2000), truncated: true } }
-							: alert;
-					}),
+					alerts: rows.map(alertView),
 				};
 			});
 			const id = randomUUID();
@@ -411,6 +413,12 @@ export class IntelligenceStore {
 			.get(projectId, id) as unknown as BatchRow | undefined;
 		if (!row) return undefined;
 		const snapshot = JSON.parse(row.snapshot) as Pick<IntelligenceBatch, "template" | "policy" | "items">;
+		snapshot.items = snapshot.items.map((item) => ({
+			ip: item.ip,
+			throughSeq: item.throughSeq,
+			alertCount: item.alertCount,
+			alerts: item.alerts.map(intelligenceAlertMetadata),
+		}));
 		const attempts = (
 			this.db
 				.prepare("SELECT * FROM intel_attempts WHERE batch_id=? ORDER BY number")
@@ -546,7 +554,7 @@ export class IntelligenceStore {
 			const events = (
 				this.db.prepare(`SELECT COUNT(*) n FROM intel_events e WHERE ${where}`).get(...params) as { n: number }
 			).n;
-			// Preserve evidence snapshots and the references needed by retries.
+			// Preserve metadata snapshots and the references needed by retries.
 			const blockedBatches = (
 				this.db
 					.prepare(`SELECT COUNT(DISTINCT b.id) n FROM intel_batches b

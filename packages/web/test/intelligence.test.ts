@@ -1,10 +1,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { deleteDoctrine, listDoctrines, saveDoctrine } from "../src/doctrines.ts";
 import { EngineStore } from "../src/engine-store.ts";
-import { type IntelligenceEngineBridge, IntelligenceManager } from "../src/intelligence.ts";
+import {
+	type IntelligenceEngineBridge,
+	IntelligenceManager,
+	intelligenceEngineSubmission,
+} from "../src/intelligence.ts";
 import { normalizeIntelligenceIp, parseIntelligencePolicy, parseIntelligencePush } from "../src/intelligence-input.ts";
 import { IntelligenceStore } from "../src/intelligence-store.ts";
 import {
@@ -13,6 +17,7 @@ import {
 	type IntelligenceEventInput,
 	type IntelligencePush,
 } from "../src/intelligence-types.ts";
+import { parseTargetLines } from "../src/worker.ts";
 
 let dir: string;
 let store: IntelligenceStore;
@@ -35,7 +40,6 @@ function event(id: string, ip = "1.1.1.1"): IntelligenceEventInput {
 		occurred_at: "2026-11-11T10:00:00Z",
 		category: "waf",
 		severity: "high",
-		evidence: { rule: "sqli" },
 	};
 }
 function push(id: string, ...events: IntelligenceEventInput[]): IntelligencePush {
@@ -66,9 +70,8 @@ test("JSON validation rejects the entire request and normalizes IPv6 / mapped IP
 	expect(() => push("x", event("a"), event("a"))).toThrow("不能重复");
 	expect(() => push("x", { ...event("a"), occurred_at: "2026-02-30T10:00:00Z" })).toThrow("ISO 8601");
 	expect(() => push("x", { ...event("a"), occurred_at: "2026-11-11T10:00:00" })).toThrow();
-	let nested: Record<string, unknown> = {};
-	for (let i = 0; i < 22; i++) nested = { nested };
-	expect(() => push("x", { ...event("a"), evidence: nested })).toThrow("20 层");
+	const privateEvent = { ...event("a"), evidence: { payload: "private" } };
+	expect(() => push("x", privateEvent)).toThrow("不允许上报");
 	expect(() => parseIntelligencePolicy({ ...DEFAULT_INTELLIGENCE_POLICY, threshold: 100, batchSize: 20 })).toThrow();
 });
 
@@ -102,7 +105,7 @@ test("idempotency is canonical and a conflicting event rolls back earlier valid 
 	const original = push("r", event("a"));
 	const receipt = store.ingest(source, original);
 	expect(store.ingest(source, structuredClone(original))).toEqual(receipt);
-	expect(store.ingest(source, push("s", { ...event("a"), evidence: { rule: "sqli" } }))).toMatchObject({
+	expect(store.ingest(source, push("s", event("a")))).toMatchObject({
 		accepted: 0,
 		duplicates: 1,
 	});
@@ -180,7 +183,7 @@ test("failure requires manual retry, preserves snapshot and cooldown, and stale 
 	expect(store.ingest(source, push("replay", event("a")))).toMatchObject({ accepted: 0, duplicates: 1 });
 });
 
-test("filtered cleanup preserves other source evidence; clear retains credentials and idempotency", () => {
+test("filtered cleanup preserves other source alerts; clear retains credentials and idempotency", () => {
 	const a = store.createSource("p", "WAF");
 	const b = store.createSource("p", "FW");
 	store.ingest(a.source, push("a", event("a")), 100);
@@ -197,8 +200,18 @@ test("filtered cleanup preserves other source evidence; clear retains credential
 
 function bridge(): IntelligenceEngineBridge {
 	return {
-		createIntelligenceEngine: (project, input) => engines.createIntelligenceEngine(project, input),
-		findIntelligenceEngine: (id) => engines.findIntelligenceEngine(id),
+		createEngine: async (project, input, submission) =>
+			engines.createEngine({
+				projectId: project.id,
+				projectName: project.name,
+				name: input.name,
+				targets: parseTargetLines(input.targets),
+				doctrines: input.doctrines,
+				limits: input.limits,
+				gateMode: "auto",
+				submission,
+			}),
+		findSubmittedEngine: (source, key) => engines.findSubmittedEngine(source, key),
 		getEngine: (id) => engines.getEngine(id),
 		pauseEngine: async (id) => {
 			engines.setEngineStatus(id, "paused", "manual", null);
@@ -219,8 +232,11 @@ test("scheduler recovers an engine committed before its batch reference, and suc
 	const batch = claim();
 	const attempt = batch.attempts[0];
 	const input = { attemptId: attempt.id, batchId: batch.id, template: batch.template, items: batch.items };
-	const engine = engines.createIntelligenceEngine({ id: "p", name: "P" }, input);
-	expect(engines.createIntelligenceEngine({ id: "p", name: "P" }, input).id).toBe(engine.id);
+	const request = intelligenceEngineSubmission(input);
+	const engine = await bridge().createEngine({ id: "p", name: "P", cwd: dir }, request.input, request.submission);
+	expect((await bridge().createEngine({ id: "p", name: "P", cwd: dir }, request.input, request.submission)).id).toBe(
+		engine.id,
+	);
 	engines.setEngineStatus(engine.id, "paused", "服务重启", null);
 	const manager = new IntelligenceManager(store, bridge(), () => ({ id: "p", name: "P", cwd: dir }));
 	manager.run();
@@ -236,31 +252,42 @@ test("scheduler recovers an engine committed before its batch reference, and suc
 	const nextId = retried?.attempts.at(-1)?.engineId;
 	if (!nextId) throw new Error("Missing retry engine");
 	expect(nextId).not.toBe(engine.id);
-	const task = engines.getEngine(nextId)?.tasks[0];
-	if (!task) throw new Error("Missing analysis task");
+	expect(engines.getEngine(nextId)?.tasks).toEqual([]);
+	const task = engines.createTask({
+		engineId: nextId,
+		title: "Analysis",
+		objective: "Analyze the batch",
+		target: null,
+		workspace: "analysis",
+		roundLimit: 5,
+		attempt: 1,
+	});
 	engines.updateTask(task.id, { status: "done", summary: "Full report" });
 	engines.setEngineReport(nextId, "Full report");
 	engines.setEngineStatus(nextId, "completed", null, 3000);
 	manager.run();
 	expect(store.batch("p", batch.id)?.status).toBe("succeeded");
+	manager.stop();
 });
 
-test("a create exception after engine commit is reconciled without permitting overlapping retry", () => {
+test("a create exception after engine commit is reconciled without permitting overlapping retry", async () => {
 	enable();
 	store.ingest(store.createSource("p", "WAF").source, push("a", event("a")));
 	const integration = bridge();
-	integration.createIntelligenceEngine = (project, input) => {
-		engines.createIntelligenceEngine(project, input);
+	const create = integration.createEngine;
+	integration.createEngine = async (project, input, submission) => {
+		await create(project, input, submission);
 		throw new Error("caller failed after commit");
 	};
 	const manager = new IntelligenceManager(store, integration, () => ({ id: "p", name: "P", cwd: dir }));
 	manager.run();
 	manager.run();
 	expect(engines.listEngines()).toHaveLength(1);
-	expect(store.batches("p").items[0].status).toBe("running");
+	await vi.waitFor(() => expect(store.batches("p").items[0].status).toBe("running"));
+	manager.stop();
 });
 
-test("analysis references engineering doctrines, snapshots the latest text and preserves it across retries", () => {
+test("analysis references engineering doctrines, snapshots the latest text and preserves it across retries", async () => {
 	expect(listDoctrines(dir).some((item) => item.id === "threat-ip-analysis")).toBe(true);
 	expect(store.policy("p").template.limits.tokenLimit).toBeNull();
 	const saved = saveDoctrine(dir, { name: "设备关联分析", text: "Version one" }).doctrine;
@@ -276,10 +303,13 @@ test("analysis references engineering doctrines, snapshots the latest text and p
 	store.ingest(store.createSource("p", "WAF").source, push("r", event("a")));
 	const batch = claim();
 	expect(batch.template.prompt).toBe("Version two");
-	const engine = engines.createIntelligenceEngine(
-		{ id: "p", name: "P" },
-		{ attemptId: batch.attempts[0].id, batchId: batch.id, template: batch.template, items: batch.items },
-	);
+	const request = intelligenceEngineSubmission({
+		attemptId: batch.attempts[0].id,
+		batchId: batch.id,
+		template: batch.template,
+		items: batch.items,
+	});
+	const engine = await bridge().createEngine({ id: "p", name: "P", cwd: dir }, request.input, request.submission);
 	expect(engine.doctrines).toEqual([saved.id]);
 	saveDoctrine(dir, { id: saved.id, name: saved.name, text: "Version three" });
 	store.setAttempt(batch, "failed", engine.id, "failure");
@@ -301,4 +331,122 @@ test("deleted engineering doctrine prevents new batches while an existing snapsh
 	expect(store.claim("p")).toBeUndefined();
 	expect(store.batches("p").total).toBe(0);
 	expect(() => store.savePolicy("p", policy)).toThrow("指挥思路不存在");
+});
+
+test("slow commander startup does not block parallel batches or duplicate submissions", async () => {
+	enable("p", 1, 1, 2);
+	store.ingest(store.createSource("p", "WAF").source, push("r", event("a"), event("b", "8.8.8.8")));
+	const integration = bridge();
+	const create = integration.createEngine;
+	const release: (() => void)[] = [];
+	integration.createEngine = vi.fn(async (project, input, submission) => {
+		const engine = await create(project, input, submission);
+		await new Promise<void>((resolve) => release.push(resolve));
+		return engine;
+	});
+	const manager = new IntelligenceManager(store, integration, () => ({ id: "p", name: "P", cwd: dir }));
+	try {
+		manager.run();
+		manager.run();
+		await vi.waitFor(() => expect(release).toHaveLength(2));
+		expect(integration.createEngine).toHaveBeenCalledTimes(2);
+		expect(engines.listEngines()).toHaveLength(2);
+		const batch = store.batches("p").items[0];
+		expect(batch.attempts[0].engineId).toBeTruthy();
+		await manager.action("p", batch.id, "abort");
+		expect(store.batch("p", batch.id)?.status).toBe("aborted");
+	} finally {
+		manager.stop();
+		for (const finish of release) finish();
+	}
+});
+
+test("submission failure before commit requires a manual retry", async () => {
+	enable();
+	store.ingest(store.createSource("p", "WAF").source, push("r", event("a")));
+	const integration = bridge();
+	integration.createEngine = vi.fn().mockRejectedValue(new Error("storage unavailable"));
+	const manager = new IntelligenceManager(store, integration, () => ({ id: "p", name: "P", cwd: dir }));
+	try {
+		manager.run();
+		await vi.waitFor(() => expect(store.batches("p").items[0].status).toBe("failed"));
+		manager.run();
+		expect(integration.createEngine).toHaveBeenCalledOnce();
+		expect(engines.listEngines()).toEqual([]);
+	} finally {
+		manager.stop();
+	}
+});
+
+test("completion requires all batch targets but permits recovered failed dispatches", async () => {
+	enable("p", 2, 2);
+	store.ingest(store.createSource("p", "WAF").source, push("r", event("a"), event("b", "8.8.8.8")));
+	const manager = new IntelligenceManager(store, bridge(), () => ({ id: "p", name: "P", cwd: dir }));
+	try {
+		manager.run();
+		const batch = store.batches("p").items[0];
+		const engineId = batch.attempts[0].engineId;
+		if (!engineId) throw new Error("Missing engine");
+		const addTask = (ip: string, status: "done" | "failed") => {
+			const task = engines.createTask({
+				engineId,
+				target: ip,
+				title: "Analyze",
+				objective: "Analyze",
+				workspace: "test",
+				roundLimit: 3,
+				attempt: 1,
+			});
+			engines.updateTask(task.id, { status, summary: status });
+		};
+		addTask("1.1.1.1", "failed");
+		addTask("1.1.1.1", "done");
+		engines.setEngineReport(engineId, "Report");
+		engines.setEngineStatus(engineId, "completed", null, 1000);
+		manager.run();
+		expect(store.batch("p", batch.id)?.status).toBe("failed");
+		await manager.action("p", batch.id, "retry");
+		const retryId = store.batch("p", batch.id)?.attempts.at(-1)?.engineId;
+		if (!retryId) throw new Error("Missing retry engine");
+		for (const [ip, status] of [
+			["1.1.1.1", "failed"],
+			["1.1.1.1", "done"],
+			["8.8.8.8", "done"],
+		] as const) {
+			const task = engines.createTask({
+				engineId: retryId,
+				target: ip,
+				title: "Analyze",
+				objective: "Analyze",
+				workspace: "test",
+				roundLimit: 3,
+				attempt: 1,
+			});
+			engines.updateTask(task.id, { status, summary: status });
+		}
+		engines.setEngineReport(retryId, "Full report");
+		engines.setEngineStatus(retryId, "completed", null, 2000);
+		manager.run();
+		expect(store.batch("p", batch.id)?.status).toBe("succeeded");
+	} finally {
+		manager.stop();
+	}
+});
+
+test("a deleted ordinary engine fails its batch instead of submitting again", () => {
+	enable();
+	store.ingest(store.createSource("p", "WAF").source, push("r", event("a")));
+	const manager = new IntelligenceManager(store, bridge(), () => ({ id: "p", name: "P", cwd: dir }));
+	try {
+		manager.run();
+		const batch = store.batches("p").items[0];
+		const engineId = batch.attempts[0].engineId;
+		if (!engineId) throw new Error("Missing engine");
+		engines.deleteEngine(engineId);
+		manager.run();
+		expect(store.batch("p", batch.id)?.status).toBe("failed");
+		expect(engines.listEngines()).toEqual([]);
+	} finally {
+		manager.stop();
+	}
 });

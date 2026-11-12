@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { type CodeReproductionResult, parseCodeReproductionResult } from "./code-reproduction.ts";
-import type { IntelligenceEngineInput } from "./intelligence-types.ts";
+import type { EngineSubmission } from "./engine-submission.ts";
 import type {
 	SentinelEngine,
 	SentinelEngineEvent,
@@ -86,8 +86,9 @@ CREATE TABLE IF NOT EXISTS engine_events (
 );
 CREATE INDEX IF NOT EXISTS idx_engine_tasks_engine ON engine_tasks(engine_id, seq ASC);
 CREATE INDEX IF NOT EXISTS idx_engine_events_owner ON engine_events(owner_id, seq ASC);
-CREATE TABLE IF NOT EXISTS engine_intelligence (
- engine_id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL UNIQUE, input TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS engine_submissions (
+ engine_id TEXT PRIMARY KEY, source TEXT NOT NULL, submission_key TEXT NOT NULL, input TEXT NOT NULL,
+ UNIQUE(source, submission_key)
 );
 `;
 
@@ -245,7 +246,15 @@ export class EngineStore {
 		status?: SentinelEngineStatus;
 		startedAt?: number | null;
 		schedule?: SentinelEngineSchedule | null;
+		submission?: EngineSubmission;
 	}): SentinelEngine {
+		if (input.submission) {
+			const existing = this.findSubmittedEngine(input.submission.source, input.submission.key);
+			if (existing) {
+				if (existing.projectId !== input.projectId) throw new Error("工程提交所属项目不匹配");
+				return existing;
+			}
+		}
 		const engine: SentinelEngine = {
 			id: `engine-${randomUUID()}`,
 			projectId: input.projectId,
@@ -267,27 +276,39 @@ export class EngineStore {
 			reproduction: null,
 			tasks: [],
 		};
-		this.db
-			.prepare(
-				`INSERT INTO engines (id, project_id, project_name, name, status, targets, doctrines, preset_ids, preset_optional, limits, gate_mode, schedule, created_at, started_at)
+		this.db.exec("BEGIN IMMEDIATE");
+		try {
+			this.db
+				.prepare(
+					`INSERT INTO engines (id, project_id, project_name, name, status, targets, doctrines, preset_ids, preset_optional, limits, gate_mode, schedule, created_at, started_at)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			)
-			.run(
-				engine.id,
-				engine.projectId,
-				engine.projectName,
-				engine.name,
-				engine.status,
-				JSON.stringify(engine.targets),
-				JSON.stringify(engine.doctrines),
-				JSON.stringify(engine.presetIds),
-				engine.presetOptional ? 1 : 0,
-				JSON.stringify(engine.limits),
-				engine.gateMode,
-				engine.schedule ? JSON.stringify(engine.schedule) : null,
-				engine.createdAt,
-				engine.startedAt,
-			);
+				)
+				.run(
+					engine.id,
+					engine.projectId,
+					engine.projectName,
+					engine.name,
+					engine.status,
+					JSON.stringify(engine.targets),
+					JSON.stringify(engine.doctrines),
+					JSON.stringify(engine.presetIds),
+					engine.presetOptional ? 1 : 0,
+					JSON.stringify(engine.limits),
+					engine.gateMode,
+					engine.schedule ? JSON.stringify(engine.schedule) : null,
+					engine.createdAt,
+					engine.startedAt,
+				);
+			if (input.submission) {
+				this.db
+					.prepare("INSERT INTO engine_submissions VALUES (?,?,?,?)")
+					.run(engine.id, input.submission.source, input.submission.key, JSON.stringify(input.submission));
+			}
+			this.db.exec("COMMIT");
+		} catch (error) {
+			this.db.exec("ROLLBACK");
+			throw error;
+		}
 		return engine;
 	}
 
@@ -300,75 +321,18 @@ export class EngineStore {
 		return engineFromRow(row, tasks.map(taskFromRow));
 	}
 
-	intelligenceInput(engineId: string): IntelligenceEngineInput | undefined {
-		const row = this.db.prepare("SELECT input FROM engine_intelligence WHERE engine_id=?").get(engineId) as
+	submission(engineId: string): EngineSubmission | undefined {
+		const row = this.db.prepare("SELECT input FROM engine_submissions WHERE engine_id=?").get(engineId) as
 			| { input: string }
 			| undefined;
-		return row ? (JSON.parse(row.input) as IntelligenceEngineInput) : undefined;
+		return row ? (JSON.parse(row.input) as EngineSubmission) : undefined;
 	}
 
-	findIntelligenceEngine(attemptId: string): SentinelEngine | undefined {
-		const row = this.db.prepare("SELECT engine_id FROM engine_intelligence WHERE attempt_id=?").get(attemptId) as
-			| { engine_id: string }
-			| undefined;
+	findSubmittedEngine(source: string, key: string): SentinelEngine | undefined {
+		const row = this.db
+			.prepare("SELECT engine_id FROM engine_submissions WHERE source=? AND submission_key=?")
+			.get(source, key) as { engine_id: string } | undefined;
 		return row ? this.getEngine(row.engine_id) : undefined;
-	}
-
-	/** Association and initial task commit together, before any model request. */
-	createIntelligenceEngine(project: { id: string; name: string }, input: IntelligenceEngineInput): SentinelEngine {
-		this.db.exec("BEGIN IMMEDIATE");
-		try {
-			const existing = this.findIntelligenceEngine(input.attemptId);
-			if (existing) {
-				if (existing.projectId !== project.id) throw new Error("分析批次项目不匹配");
-				this.db.exec("COMMIT");
-				return existing;
-			}
-			const engine = this.createEngine({
-				projectId: project.id,
-				projectName: project.name,
-				name: `${input.template.name} · ${input.items.length} IP · ${input.batchId.slice(0, 8)}`,
-				targets: input.items.map((item) => ({ target: item.ip })),
-				doctrines: [input.template.id],
-				limits: { ...input.template.limits, concurrency: 1, maxRetries: 0 },
-				gateMode: "auto",
-			});
-			this.db
-				.prepare("INSERT INTO engine_intelligence VALUES (?,?,?)")
-				.run(engine.id, input.attemptId, JSON.stringify(input));
-			const alerts = input.items.map((item) => ({
-				ip: item.ip,
-				alertCount: item.alertCount,
-				alerts: item.alerts.slice(0, 3).map((alert) => ({
-					source: alert.sourceName,
-					eventId: alert.event_id,
-					occurredAt: alert.occurred_at,
-					severity: alert.severity,
-					category: alert.category,
-					evidenceSample: JSON.stringify(alert.evidence).slice(0, 512),
-				})),
-			}));
-			this.createTask({
-				engineId: engine.id,
-				title: "批次情报分析与关联报告",
-				target: null,
-				workspace: "intelligence",
-				roundLimit: input.template.limits.roundLimit,
-				attempt: 1,
-				objective: `分析以下全部 IP 的设备告警和证据。告警仅展示最近三条样本，原始记录保留在威胁反制页。\n${JSON.stringify(alerts)}\n完成时在 goal_complete.summary 提交完整 Markdown 报告。`,
-				criteria: [
-					"已分析全部 IP 的告警，逐 IP 标明事实、来源、时间与不确定性",
-					"给出告警关联、跨 IP 关联和防御建议，提交完整 Markdown 报告",
-				],
-			});
-			const saved = this.getEngine(engine.id);
-			if (!saved) throw new Error("分析工程保存失败");
-			this.db.exec("COMMIT");
-			return saved;
-		} catch (error) {
-			this.db.exec("ROLLBACK");
-			throw error;
-		}
 	}
 
 	listEngines(projectId?: string): SentinelEngine[] {

@@ -72,7 +72,6 @@ test("device tokens bypass browser entry only for ingest; validation, isolation,
 					occurred_at: "2026-11-11T00:00:00Z",
 					category: "waf",
 					severity: "high",
-					evidence: {},
 				},
 			],
 		};
@@ -89,6 +88,15 @@ test("device tokens bypass browser entry only for ingest; validation, isolation,
 			events: [...push.events, { ...push.events[0], event_id: "bad", indicator: { type: "ip", value: "bad" } }],
 		};
 		expect((await ingest(invalid)).status).toBe(400);
+		const privateUpload = await ingest({
+			...push,
+			events: [
+				push.events[0],
+				{ ...push.events[0], event_id: "private", evidence: { request: "PRIVATE_CUSTOMER_DATA" } },
+			],
+		});
+		expect(privateUpload.status).toBe(400);
+		expect(await privateUpload.text()).not.toContain("PRIVATE_CUSTOMER_DATA");
 		const ips = async (id: string) =>
 			(await fetch(`${origin}/api/intelligence/ips?projectId=${id}`, { headers: { cookie } })).json() as Promise<{
 				total: number;

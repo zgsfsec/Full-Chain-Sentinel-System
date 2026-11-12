@@ -6,7 +6,6 @@ export interface IntelligenceEventInput {
 	occurred_at: string;
 	category: string;
 	severity: "info" | "low" | "medium" | "high" | "critical";
-	evidence: Record<string, unknown>;
 }
 
 export interface IntelligencePush {
@@ -68,7 +67,7 @@ export interface IntelligenceBatchItem {
 	ip: string;
 	throughSeq: number;
 	alertCount: number;
-	/** Latest evidence samples; the full log remains queryable in the project. */
+	/** Platform-only alert metadata; never included in engineering input. */
 	alerts: IntelligenceAlert[];
 }
 
@@ -119,7 +118,7 @@ export interface IntelligenceCleanup {
 	after?: number;
 }
 
-/** Persisted in the engine database as well as the source batch. */
+/** Internal batch context; only IPs are exported as engineering input. */
 export interface IntelligenceEngineInput {
 	attemptId: string;
 	batchId: string;
@@ -129,9 +128,9 @@ export interface IntelligenceEngineInput {
 
 export const DEFAULT_INTELLIGENCE_TEMPLATE: IntelligenceTemplate = {
 	id: "threat-ip-analysis",
-	name: "威胁 IP 分析",
+	name: "威胁溯源反制",
 	prompt:
-		"分析设备上报的威胁 IP 和告警证据。区分事实和推断，标明来源、时间及不确定性，输出逐 IP 摘要、跨 IP 关联和防御建议。",
+		"分析设备上报的威胁 IP 尝试溯源反制，主动尝试渗透测试反制攻击者 IP 和对攻击者 IP 进行查询，尽量多的获取攻击者信息。",
 	limits: { concurrency: 1, roundLimit: 5, tokenLimit: null, timeLimitMin: 30, maxRetries: 0 },
 };
 

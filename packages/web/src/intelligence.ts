@@ -1,16 +1,41 @@
 import type { EngineManager } from "./engine.ts";
+import type { EngineSubmission } from "./engine-submission.ts";
 import { IntelligenceError } from "./intelligence-input.ts";
 import type { IntelligenceStore } from "./intelligence-store.ts";
 import type { IntelligenceBatch, IntelligenceEngineInput } from "./intelligence-types.ts";
-import type { SentinelEngine, SentinelProjectInfo } from "./protocol.ts";
+import type { SentinelEngineCreateInput, SentinelProjectInfo } from "./protocol.ts";
 
 export interface IntelligenceEngineBridge {
-	createIntelligenceEngine(project: SentinelProjectInfo, input: IntelligenceEngineInput): SentinelEngine;
-	findIntelligenceEngine(attemptId: string): SentinelEngine | undefined;
-	getEngine(id: string): SentinelEngine | undefined;
+	createEngine: EngineManager["createEngine"];
+	findSubmittedEngine: EngineManager["findSubmittedEngine"];
+	getEngine: EngineManager["getEngine"];
 	pauseEngine: EngineManager["pauseEngine"];
 	resumeEngine: EngineManager["resumeEngine"];
 	abortEngine: EngineManager["abortEngine"];
+}
+
+export function intelligenceEngineSubmission(input: IntelligenceEngineInput): {
+	input: SentinelEngineCreateInput;
+	submission: EngineSubmission;
+} {
+	return {
+		input: {
+			name: `${input.template.name} · ${input.items.length} IP · ${input.batchId.slice(0, 8)}`,
+			targets: input.items.map((item) => item.ip).join("\n"),
+			doctrines: [input.template.id],
+			limits: input.template.limits,
+			gateMode: "auto",
+		},
+		submission: {
+			source: "intelligence",
+			key: input.attemptId,
+			doctrines: [{ id: input.template.id, name: input.template.name, text: input.template.prompt, builtin: false }],
+			brief: "工程输入仅包含待分析的威胁 IP 列表（ips），不提供设备信息或告警元数据。仅围绕列表中的 IP 进行只读溯源、公开情报查询、已有资产测绘与关联分析，提供防御建议。不得执行攻击、自动下发处置或将上报设备作为目标。IP 归属或地理位置不能直接证明攻击者身份，不得编造告警或攻击过程。报告逐 IP 标明公开查询来源、查询时间、不确定性与查询失败原因。",
+			data: {
+				ips: input.items.map((item) => item.ip),
+			},
+		},
+	};
 }
 
 /** Trigger evaluation is independent of transport and of the concrete engine runner. */
@@ -19,6 +44,8 @@ export class IntelligenceManager {
 	private readonly engines: IntelligenceEngineBridge;
 	private readonly project: (id: string) => SentinelProjectInfo | undefined;
 	private timer: NodeJS.Timeout | undefined;
+	private readonly creating = new Set<string>();
+	private stopped = false;
 	private readonly ingestionWindows = new Map<string, { start: number; count: number; active: number }>();
 	private ingestionActive = 0;
 	private ingestionPrunedAt = 0;
@@ -33,11 +60,13 @@ export class IntelligenceManager {
 	}
 	start(): void {
 		if (this.timer) return;
+		this.stopped = false;
 		this.run();
 		this.timer = setInterval(() => this.run(), 5000);
 		this.timer.unref();
 	}
 	stop(): void {
+		this.stopped = true;
 		if (this.timer) clearInterval(this.timer);
 		this.timer = undefined;
 	}
@@ -92,38 +121,59 @@ export class IntelligenceManager {
 		try {
 			let engine = attempt.engineId
 				? this.engines.getEngine(attempt.engineId)
-				: this.engines.findIntelligenceEngine(attempt.id);
+				: this.engines.findSubmittedEngine("intelligence", attempt.id);
 			if (!engine && (attempt.engineId || batch.status === "running" || batch.status === "paused"))
 				throw new Error("关联工程已被删除，请手动重试批次");
 			if (!engine) {
+				if (this.creating.has(attempt.id)) return;
 				const project = this.project(batch.projectId);
 				if (!project) throw new Error("批次所属项目已不存在");
 				this.store.setAttempt(batch, "creating", null, null);
-				try {
-					engine = this.engines.createIntelligenceEngine(project, {
-						attemptId: attempt.id,
-						batchId: batch.id,
-						template: batch.template,
-						items: batch.items,
+				const request = intelligenceEngineSubmission({
+					attemptId: attempt.id,
+					batchId: batch.id,
+					template: batch.template,
+					items: batch.items,
+				});
+				this.creating.add(attempt.id);
+				// Opening a commander can take a model round-trip. Keep other batches
+				// and operator actions responsive while the ordinary engine starts.
+				void this.engines
+					.createEngine(project, request.input, request.submission)
+					.catch((error: unknown) => {
+						if (this.stopped) return;
+						// Creation may have committed before a caller or startup failed.
+						if (!this.engines.findSubmittedEngine("intelligence", attempt.id))
+							this.store.setAttempt(
+								batch,
+								"failed",
+								null,
+								error instanceof Error ? error.message : String(error),
+							);
+					})
+					.finally(() => {
+						this.creating.delete(attempt.id);
+						if (!this.stopped) this.run();
 					});
-				} catch (error) {
-					// A caller can fail after the engine committed. Recover its stable
-					// association before declaring failure or allowing a new attempt.
-					engine = this.engines.findIntelligenceEngine(attempt.id);
-					if (!engine) throw error;
-				}
+				// The normal creation entry persists its association before awaiting
+				// startup. Publish it now so pause/abort works during the first turn.
+				engine = this.engines.findSubmittedEngine("intelligence", attempt.id);
+				if (!engine) return;
 			}
 			const status =
 				engine.status === "completed"
 					? engine.report?.trim() &&
-						engine.tasks.length > 0 &&
-						engine.tasks.every((task) => task.status === "done")
+						batch.items.every((item) =>
+							engine.tasks.some(
+								(task) => task.status === "done" && (task.target === null || task.target === item.ip),
+							),
+						)
 						? "succeeded"
 						: "failed"
 					: engine.status === "paused"
 						? "paused"
 						: engine.status === "stopped"
-							? engine.pauseNote === "操作员终止"
+							? ["操作员终止", "Aborted by operator"].includes(engine.pauseNote ?? "")
 								? "aborted"
 								: "failed"
 							: "running";

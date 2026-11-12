@@ -1,6 +1,7 @@
 import { isIP } from "node:net";
 import {
 	DEFAULT_INTELLIGENCE_TEMPLATE,
+	type IntelligenceAlert,
 	type IntelligenceEventInput,
 	type IntelligencePolicy,
 	type IntelligencePush,
@@ -43,7 +44,7 @@ export function normalizeIntelligenceIp(value: unknown): string {
 
 function onlyKeys(value: Record<string, unknown>, keys: string[], path: string): void {
 	for (const key of Object.keys(value))
-		if (!keys.includes(key)) throw new IntelligenceError(`${path}.${key} 未定义，请将扩展字段放入 evidence`);
+		if (!keys.includes(key)) throw new IntelligenceError(`${path}.${key} 不允许上报，仅接受协议定义的告警元数据`);
 }
 
 export function parseIntelligencePush(value: unknown): IntelligencePush {
@@ -57,7 +58,7 @@ export function parseIntelligencePush(value: unknown): IntelligencePush {
 	const events = body.events.map((raw, index): IntelligenceEventInput => {
 		try {
 			const event = objectValue(raw);
-			onlyKeys(event, ["event_id", "indicator", "occurred_at", "category", "severity", "evidence"], "event");
+			onlyKeys(event, ["event_id", "indicator", "occurred_at", "category", "severity"], "event");
 			const indicator = objectValue(event.indicator, "indicator");
 			onlyKeys(indicator, ["type", "value"], "indicator");
 			if (indicator.type !== "ip") throw new IntelligenceError("indicator.type 首版只支持 ip");
@@ -89,28 +90,33 @@ export function parseIntelligencePush(value: unknown): IntelligencePush {
 			) {
 				throw new IntelligenceError("severity 必须是 info/low/medium/high/critical");
 			}
-			const evidence = objectValue(event.evidence, "evidence");
-			const stack: { value: unknown; depth: number }[] = [{ value: evidence, depth: 0 }];
-			while (stack.length) {
-				const item = stack.pop();
-				if (!item || item.value === null || typeof item.value !== "object") continue;
-				if (item.depth > 20) throw new IntelligenceError("evidence 嵌套超过 20 层");
-				for (const value of Object.values(item.value)) stack.push({ value, depth: item.depth + 1 });
-			}
-			if (JSON.stringify(evidence).length > 16000) throw new IntelligenceError("evidence 超过 16000 字符");
 			return {
 				event_id: id,
 				indicator: { type: "ip" as const, value: normalizeIntelligenceIp(indicator.value) },
 				occurred_at: new Date(occurred).toISOString(),
 				category: textValue(event.category, "category"),
 				severity,
-				evidence,
 			};
 		} catch (error) {
 			throw new IntelligenceError(`events[${index}]: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	});
 	return { schema_version: 1, request_id: textValue(body.request_id, "request_id"), events };
+}
+
+/** Select fields explicitly so historical payloads cannot reintroduce customer data. */
+export function intelligenceAlertMetadata(alert: IntelligenceAlert): IntelligenceAlert {
+	return {
+		event_id: alert.event_id,
+		indicator: { type: "ip", value: alert.indicator.value },
+		occurred_at: alert.occurred_at,
+		category: alert.category,
+		severity: alert.severity,
+		seq: alert.seq,
+		sourceId: alert.sourceId,
+		sourceName: alert.sourceName,
+		receivedAt: alert.receivedAt,
+	};
 }
 
 function int(value: unknown, field: string, min: number, max: number): number {

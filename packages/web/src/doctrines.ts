@@ -25,12 +25,9 @@ export interface SentinelDoctrine {
 const BUILTIN_DOCTRINES: SentinelDoctrine[] = [
 	{
 		id: "threat-ip-analysis",
-		name: "威胁 IP 分析",
+		name: "威胁溯源反制",
 		text: [
-			"分析设备上报的威胁 IP 和告警证据，整理告警来源、时间、规则、级别及行为特征。",
-			"逐 IP 总结设备记录及证据，识别时间、规则、行为特征等关联，区分事实和推断。",
-			"缺少信息时如实说明，不编造外部查询结果。IP 归属或地理位置不能直接证明攻击者身份。",
-			"报告包含逐 IP 摘要、跨 IP 关联、不确定性、采样限制和防御建议，不自动下发处置。",
+			"威胁溯源反制：对目标威胁 IP 进行反制，尽可能的尝试去反攻攻击者 IP，并且给所有的 IP 做好资产测绘和反向溯源，尝试找到攻击者的信息。",
 		].join("\n"),
 		builtin: true,
 	},
