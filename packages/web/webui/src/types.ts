@@ -1782,7 +1782,7 @@ export type SentinelClientMessage =
 	| { type: "list_code_monitor_logs"; projectId: string }
 	| { type: "get_environment" }
 	| { type: "check_environment" }
-	| { type: "build_image" }
+	| { type: "build_image"; sources?: SentinelSources }
 	| { type: "abort_image_build" }
 	| { type: "set_sources"; sources: SentinelSources }
 	| { type: "set_container_network"; network: SentinelContainerNetwork }
@@ -2093,13 +2093,14 @@ export type SentinelServerMessage =
 			error?: string;
 			detail?: string;
 	  }
-	| { type: "environment"; report: SentinelEnvReport; building: boolean }
+	| { type: "environment"; report: SentinelEnvReport; building: boolean; proxyPull?: { pulling: boolean; log: string[] } }
 	| { type: "image_build_log"; line: string }
 	| { type: "image_build_result"; ok: boolean; error?: string }
 	| { type: "sources_saved"; sources: SentinelSources; error?: string }
 	| { type: "container_network_saved"; network: SentinelContainerNetwork; error?: string }
 	| { type: "proxy_config"; config: SentinelProxyConfigView; error?: string; push?: boolean }
 	| { type: "singbox_pull_started" }
+	| { type: "singbox_pull_log"; line: string }
 	| { type: "singbox_pull_result"; ok: boolean; error?: string }
 	| { type: "project_proxy_saved"; projectId: string; error?: string; applied?: boolean }
 	| { type: "asset_config"; config: SentinelAssetConfigView }

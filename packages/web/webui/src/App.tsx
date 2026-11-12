@@ -405,6 +405,7 @@ export function App() {
 	const proxyView = proxyConfig ?? envReport?.proxies ?? EMPTY_PROXY_CONFIG;
 	/** A `docker pull` of the sing-box image is in flight. */
 	const [pullingSingboxImage, setPullingSingboxImage] = useState(false);
+	const [proxyPullLog, setProxyPullLog] = useState<string[]>([]);
 	/** Messages sent from this console, shown optimistically until the snapshot absorbs them. */
 	const [optimisticUserMessages, setOptimisticUserMessages] = useState<
 		{ text: string; imageCount: number; userCountAtSend: number }[]
@@ -1032,7 +1033,10 @@ export function App() {
 				case "environment": {
 					setEnvReport(message.report);
 					setImageBuilding(message.building);
-					if (message.building) setBuildLog([]);
+					if (message.proxyPull) {
+						setPullingSingboxImage(message.proxyPull.pulling);
+						setProxyPullLog(message.proxyPull.log);
+					}
 					return;
 				}
 				case "proxy_config": {
@@ -1066,7 +1070,11 @@ export function App() {
 				}
 
 				case "singbox_pull_started":
+					setProxyPullLog([]);
 					setPullingSingboxImage(true);
+					return;
+				case "singbox_pull_log":
+					setProxyPullLog((previous) => [...previous.slice(-499), message.line]);
 					return;
 				case "singbox_pull_result": {
 					setPullingSingboxImage(false);
@@ -3796,17 +3804,19 @@ export function App() {
 									}
 								}}
 								onRefresh={() => send({ type: "check_environment" })}
-								onBuild={() => {
+								onBuild={(sources) => {
 									setBuildLog([]);
 									setImageBuilding(true);
-									send({ type: "build_image" });
+									send({ type: "build_image", sources });
 								}}
 								onAbortBuild={() => send({ type: "abort_image_build" })}
 								proxyConfig={proxyView}
 								pullingImage={pullingSingboxImage}
-								onPullProxyImage={() => {
+								proxyPullLog={proxyPullLog}
+								onPullProxyImage={(image) => {
 									setPullingSingboxImage(true);
-									send({ type: "pull_singbox_image" });
+									setProxyPullLog([]);
+									send(image === proxyView.image ? { type: "pull_singbox_image" } : { type: "set_proxy_image", image });
 								}}
 							/>
 						</SettingsPage>

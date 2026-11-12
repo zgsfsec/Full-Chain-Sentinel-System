@@ -1,15 +1,20 @@
 import { CheckOutlined, PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Button, Popconfirm, Space, Tabs, Typography } from "antd";
+import { Button, Space, Tabs, Typography } from "antd";
 import { t } from "../i18n.ts";
 import type { SentinelEnvItem, SentinelEnvReport } from "../types.ts";
 import { SettingsSection } from "../ui/Settings.tsx";
 import "./environment-setup.css";
 
-const STEP_IDS = [["docker-cli", "docker-daemon"], ["image-present"], ["container-run", "gateway-runtime"]];
-const STEP_TITLES = ["准备 Docker", "构建工具镜像", "验证容器与网关", "检查本机目录"];
+const STEP_IDS = [
+	["docker-cli", "docker-daemon"],
+	["image-present"],
+	["proxy-image"],
+	["container-run", "gateway-runtime"],
+];
+const STEP_TITLES = ["准备 Docker", "构建工具镜像", "拉取网络与代理镜像", "验证容器与网关", "检查本机目录"];
 
 /** Only successful checks prove readiness; skipped checks still need a recheck. */
-export function environmentSetup(report: SentinelEnvReport) {
+export function environmentSetup(report: SentinelEnvReport, proxyReady = report.proxies.imagePresent) {
 	const steps = STEP_TITLES.map((title, index) => {
 		const items = report.items.filter((item) =>
 			index < STEP_IDS.length ? STEP_IDS[index].includes(item.id) : item.blocking && !STEP_IDS.flat().includes(item.id),
@@ -18,9 +23,11 @@ export function environmentSetup(report: SentinelEnvReport) {
 			index === 0
 				? items.some((item) => item.id === "docker-daemon" && item.status === "ok") &&
 					items.every((item) => item.status === "ok")
-				: index < STEP_IDS.length
-					? STEP_IDS[index].every((id) => items.some((item) => item.id === id && item.status === "ok"))
-					: items.every((item) => item.status === "ok");
+				: index === 2
+					? proxyReady
+					: index < STEP_IDS.length
+						? STEP_IDS[index].every((id) => items.some((item) => item.id === id && item.status === "ok"))
+						: items.every((item) => item.status === "ok");
 		return { title, items, complete };
 	});
 	const current = steps.findIndex((step) => !step.complete);
@@ -37,22 +44,14 @@ export function EnvironmentBuildButton({
 	onBuild: () => void;
 }) {
 	return (
-		<Popconfirm
-			title={t("构建工具镜像")}
-			description={t("用内置的 Dockerfile 构建 sentinel:latest，首次约 5–15 分钟。")}
-			okText={t("确认构建")}
-			cancelText={t("取消")}
+		<Button
 			disabled={disabled}
-			onConfirm={onBuild}
+			type={primary ? "primary" : "default"}
+			icon={<PlayCircleOutlined aria-hidden="true" />}
+			onClick={onBuild}
 		>
-			<Button
-				disabled={disabled}
-				type={primary ? "primary" : "default"}
-				icon={<PlayCircleOutlined aria-hidden="true" />}
-			>
-				{t("构建镜像")}
-			</Button>
-		</Popconfirm>
+			{t("构建镜像")}
+		</Button>
 	);
 }
 
@@ -80,6 +79,9 @@ export function EnvironmentSetupGuide({
 	onShowSources,
 	onShowChecks,
 	onShowBuildLog,
+	proxyReady,
+	pulling,
+	onShowNetwork,
 }: {
 	report: SentinelEnvReport;
 	building: boolean;
@@ -89,11 +91,15 @@ export function EnvironmentSetupGuide({
 	onShowSources: () => void;
 	onShowChecks: () => void;
 	onShowBuildLog: () => void;
+	proxyReady: boolean;
+	pulling: boolean;
+	onShowNetwork: () => void;
 }) {
-	const { steps, current, dockerReady } = environmentSetup(report);
-	const active = building ? 1 : current;
+	const { steps, current, dockerReady } = environmentSetup(report, proxyReady);
+	const allComplete = steps.every((step) => step.complete) && !building && !pulling;
+	const active = building ? 1 : pulling ? 2 : current;
 	const issues = steps[active].items.filter((item) => item.status !== "ok");
-	const awaitingChecks = !building && issues.length === 0;
+	const awaitingChecks = !building && active !== 2 && issues.length === 0 && !allComplete;
 	const cliMissing = issues.some((item) => item.id === "docker-cli");
 	const permissionDenied = issues.some((item) => /permission denied/i.test(item.detail));
 	const gatewayFailed = issues.some((item) => item.id === "gateway-runtime");
@@ -102,25 +108,36 @@ export function EnvironmentSetupGuide({
 		<SettingsSection
 			className="settings-panel envsetup"
 			title={t("环境准备引导")}
-			description={t("按顺序完成以下步骤；复检通过后即可使用工具。")}
+			description={t("Docker 就绪后，先构建工具镜像，再拉取网络与代理镜像，最后复检。")}
 		>
 			<ol className="envsetup-steps" aria-label={t("环境准备步骤")}>
 				{steps.map((step, index) => {
-					const complete = step.complete && !(building && index >= 1);
-					const state = index === active ? "active" : complete ? "complete" : "waiting";
+					if (index === 0) return null;
+					const complete = step.complete && !(building && index >= 1) && !(pulling && index >= 2);
+					const state = complete ? "complete" : index === active ? "active" : "waiting";
 					return (
 						<li
 							key={step.title}
 							className={`envsetup-step is-${state}`}
-							aria-current={index === active ? "step" : undefined}
+							aria-current={index === active && !allComplete ? "step" : undefined}
 						>
 							<span className="envsetup-step__number" aria-hidden="true">
-								{complete ? <CheckOutlined /> : index + 1}
+								{complete ? <CheckOutlined /> : index}
 							</span>
 							<div>
 								<strong>{t(step.title)}</strong>
 								<span>
-									{t(index === active ? (building ? "构建中" : "当前步骤") : complete ? "已通过" : "等待前置步骤")}
+									{t(
+										complete
+											? "已通过"
+											: index === active
+												? building
+													? "构建中"
+													: pulling
+														? "拉取中…"
+														: "当前步骤"
+												: "等待前置步骤",
+									)}
 								</span>
 							</div>
 						</li>
@@ -130,19 +147,24 @@ export function EnvironmentSetupGuide({
 			<div className="envsetup-task" aria-live="polite">
 				<h3>
 					{t(
-						building
-							? "正在构建工具镜像"
-							: awaitingChecks
-								? "完成本步骤环境检查"
-								: [
-										cliMissing ? "先在服务端安装 Docker" : "让 Docker 服务正常运行",
-										"创建工具运行所需的镜像",
-										gatewayFailed ? "修复网关运行环境" : "确认工具容器能够启动",
-										"修复本机目录与其他阻断项",
-									][active],
+						allComplete
+							? "环境准备完成"
+							: building
+								? "正在构建工具镜像"
+								: awaitingChecks
+									? "完成本步骤环境检查"
+									: [
+											cliMissing ? "先在服务端安装 Docker" : "让 Docker 服务正常运行",
+											"创建工具运行所需的镜像",
+											"拉取容器网络与代理所需的镜像",
+											gatewayFailed ? "修复网关运行环境" : "确认工具容器能够启动",
+											"修复本机目录与其他阻断项",
+										][active],
 					)}
 				</h3>
-				{awaitingChecks ? (
+				{allComplete ? (
+					<p>{t("工具镜像和网络与代理镜像已就绪，可开始使用；需要更新时可重新构建或拉取。")}</p>
+				) : awaitingChecks ? (
 					<p>{t("检测结果尚不完整，请点击「复检环境」，验证当前步骤后继续。")}</p>
 				) : active === 0 ? (
 					<>
@@ -222,7 +244,7 @@ export function EnvironmentSetupGuide({
 							{t(
 								building
 									? "构建可能需要 5–15 分钟。输出会持续更新，请等待构建结束，系统随后会重新检查环境。"
-									: "点击「构建镜像」使用内置 Dockerfile 创建 sentinel:latest。首次构建约 5–15 分钟，需要访问镜像仓库和软件源。",
+									: "点击「构建镜像」，先选择是否使用国内源，再确认配置并构建 sentinel:latest。首次约 5–15 分钟。",
 							)}
 						</p>
 						<p>
@@ -232,6 +254,14 @@ export function EnvironmentSetupGuide({
 						</p>
 					</>
 				) : active === 2 ? (
+					<p>
+						{t(
+							pulling
+								? "镜像拉取中，实时进度与错误显示在「容器网络与代理」的拉取日志中。"
+								: "工具镜像已就绪。进入「容器网络与代理」，确认 sing-box 镜像地址后拉取；下载失败可更换可达的镜像地址后重试。",
+						)}
+					</p>
+				) : active === 3 ? (
 					<>
 						<p>
 							{t(
@@ -271,11 +301,16 @@ export function EnvironmentSetupGuide({
 					{building ? (
 						<Button onClick={onShowBuildLog}>{t("查看构建输出")}</Button>
 					) : active === 1 ? (
-						<EnvironmentBuildButton disabled={!dockerReady || checking} primary onBuild={onBuild} />
+						<EnvironmentBuildButton disabled={!dockerReady || checking || pulling} primary onBuild={onBuild} />
 					) : null}
 					{active === 1 ? (
 						<Button disabled={building} onClick={onShowSources}>
 							{t("配置构建源")}
+						</Button>
+					) : null}
+					{active === 2 ? (
+						<Button type="primary" onClick={onShowNetwork}>
+							{t(pulling ? "查看拉取日志" : "配置并拉取代理镜像")}
 						</Button>
 					) : null}
 					<Button

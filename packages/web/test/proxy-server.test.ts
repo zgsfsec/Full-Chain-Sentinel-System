@@ -30,6 +30,7 @@ import {
 	setProxyImage,
 } from "../src/proxy.ts";
 import { startSentinelServer } from "../src/server.ts";
+import { CHINA_SOURCES, readSources } from "../src/sources.ts";
 import { type FakeDocker, installFakeDocker } from "./fake-docker.ts";
 
 let tempRoot = "";
@@ -202,6 +203,7 @@ beforeAll(async () => {
 		case "$*" in *sing-box*) [ -f "$state_dir/.proxy-image-missing" ] && exit 1 ;; esac
 		exit 0 ;;
 	pull)
+		echo "Downloading proxy layer 42%"
 		if [ -f "$state_dir/.proxy-pull-error" ]; then echo "registry unavailable" >&2; exit 1; fi
 		rm -f "$state_dir/.proxy-image-missing"
 		exit 0 ;;
@@ -599,11 +601,21 @@ test("saving installs a missing image before validation and does not pull an exi
 	writeFileSync(join(tempRoot, "docker.log"), "");
 	drain("singbox_pull_started");
 	drain("singbox_pull_result");
+	drain("singbox_pull_log");
+	drain("image_build_log");
 	const saved = await save(input({ name: "自动安装镜像" }));
 	expect(saved.error).toBeUndefined();
 	expect(saved.imagePresent).toBe(true);
 	await waitFor((entry) => entry.type === "singbox_pull_started");
 	await waitFor((entry) => entry.type === "singbox_pull_result" && entry.ok);
+	await waitFor((entry) => entry.type === "singbox_pull_log" && entry.line.includes("Downloading proxy layer 42%"));
+	expect(incoming.some((entry) => entry.type === "image_build_log")).toBe(false);
+	drain("environment");
+	send({ type: "get_environment" });
+	const snapshot = await waitFor((entry) => entry.type === "environment");
+	if (snapshot.type !== "environment") throw new Error("Missing environment snapshot");
+	expect(snapshot.proxyPull?.pulling).toBe(false);
+	expect(snapshot.proxyPull?.log.join("\n")).toContain("Downloading proxy layer 42%");
 	const log = readFileSync(join(tempRoot, "docker.log"), "utf-8");
 	expect(log).toContain(`pull ${saved.image}`);
 	expect(log.indexOf(`pull ${saved.image}`)).toBeLessThan(log.indexOf(" check -C "));
@@ -622,6 +634,7 @@ test("image pull failure is returned on save and does not validate or apply a ga
 		const saved = await save(input({ name: "镜像拉取失败" }));
 		expect(saved.error).toContain("registry unavailable");
 		expect(saved.imagePresent).toBe(false);
+		await waitFor((entry) => entry.type === "singbox_pull_log" && entry.line.includes("registry unavailable"));
 		const log = readFileSync(join(tempRoot, "docker.log"), "utf-8");
 		expect(log).toContain(`pull ${saved.image}`);
 		expect(log).not.toContain(" check -C ");
@@ -630,6 +643,19 @@ test("image pull failure is returned on save and does not validate or apply a ga
 		rmSync(join(fakeDocker.stateDir, ".proxy-pull-error"), { force: true });
 		rmSync(join(fakeDocker.stateDir, ".proxy-image-missing"), { force: true });
 	}
+});
+
+test("a build saves and uses the sources chosen in the build wizard", async () => {
+	drain("image_build_result");
+	drain("sources_saved");
+	writeFileSync(join(tempRoot, "docker.log"), "");
+	send({ type: "build_image", sources: CHINA_SOURCES });
+	await waitFor((entry) => entry.type === "sources_saved");
+	await waitFor((entry) => entry.type === "image_build_result" && entry.ok);
+	expect(readSources(agentDir)).toEqual(CHINA_SOURCES);
+	const log = readFileSync(join(tempRoot, "docker.log"), "utf-8");
+	expect(log).toContain(`BASE_IMAGE=${CHINA_SOURCES.baseImage}`);
+	expect(log).toContain(`APT_MIRROR=${CHINA_SOURCES.aptMirror}`);
 });
 
 test("saving the environment image installs it even when its name has not changed", async () => {

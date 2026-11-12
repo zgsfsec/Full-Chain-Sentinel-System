@@ -538,6 +538,7 @@ export async function startSentinelServer(
 	let envReport: SentinelEnvReport | undefined;
 	let envCheck: Promise<SentinelEnvReport> | undefined;
 	let imageBuild: AbortController | undefined;
+	const proxyPullState = { pulling: false, log: [] as string[] };
 
 	/**
 	 * Engineering mode. One manager owns every engine across projects; the
@@ -739,7 +740,12 @@ export async function startSentinelServer(
 
 	function broadcastEnvironment(): void {
 		if (!envReport) return;
-		broadcast({ type: "environment", report: envReport, building: imageBuild !== undefined });
+		broadcast({
+			type: "environment",
+			report: envReport,
+			building: imageBuild !== undefined,
+			proxyPull: proxyPullState,
+		});
 	}
 
 	/** Why a run cannot start, phrased for the operator. */
@@ -943,10 +949,17 @@ export async function startSentinelServer(
 		const pending = proxyImagePulls.get(image);
 		if (pending) return pending;
 		const pull = (async () => {
+			proxyPullState.pulling = true;
+			proxyPullState.log = [`docker pull ${image}`];
 			broadcast({ type: "singbox_pull_started" });
+			broadcast({ type: "singbox_pull_log", line: `docker pull ${image}` });
 			try {
 				return await pullSingboxImage(image, {
-					onOutput: (chunk) => broadcast({ type: "image_build_log", line: chunk.trimEnd() }),
+					onOutput: (chunk) => {
+						const line = chunk.trimEnd();
+						proxyPullState.log = [...proxyPullState.log.slice(-499), line];
+						broadcast({ type: "singbox_pull_log", line });
+					},
 				});
 			} catch (error) {
 				return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -955,6 +968,12 @@ export async function startSentinelServer(
 		proxyImagePulls.set(image, pull);
 		try {
 			const result = await pull;
+			const line = result.ok
+				? t("代理镜像已就绪")
+				: t("代理镜像拉取失败：{error}", { error: result.error ?? t("未知错误") });
+			proxyPullState.log = [...proxyPullState.log.slice(-499), line];
+			proxyPullState.pulling = proxyImagePulls.size > 1;
+			broadcast({ type: "singbox_pull_log", line });
 			broadcast({ type: "singbox_pull_result", ...result });
 			broadcast({ type: "proxy_config", config: await proxyView(), push: true });
 			return result;
@@ -1997,17 +2016,42 @@ export async function startSentinelServer(
 						type: "environment",
 						report: await ensureEnvironment(),
 						building: imageBuild !== undefined,
+						proxyPull: proxyPullState,
 					});
 					return;
 				case "check_environment": {
 					const report = await ensureEnvironment(true);
-					broadcast({ type: "environment", report, building: imageBuild !== undefined });
+					broadcast({
+						type: "environment",
+						report,
+						building: imageBuild !== undefined,
+						proxyPull: proxyPullState,
+					});
 					return;
 				}
 				case "build_image": {
 					if (imageBuild) {
 						sendError(socket, t("镜像构建已在进行中"));
 						return;
+					}
+					const sources = message.sources
+						? normalizeSources(message.sources)
+						: agentDir
+							? readSources(agentDir)
+							: { ...EMPTY_SOURCES };
+					if (message.sources) {
+						try {
+							if (!agentDir) throw new Error(t("未配置配置目录，无法保存构建源"));
+							writeSources(agentDir, sources);
+							sendTo(socket, { type: "sources_saved", sources });
+						} catch (error) {
+							sendTo(socket, {
+								type: "image_build_result",
+								ok: false,
+								error: error instanceof Error ? error.message : String(error),
+							});
+							return;
+						}
 					}
 					const controller = new AbortController();
 					imageBuild = controller;
@@ -2018,7 +2062,7 @@ export async function startSentinelServer(
 							onLog: (line) => broadcast({ type: "image_build_log", line }),
 							signal: controller.signal,
 						},
-						agentDir ? readSources(agentDir) : { ...EMPTY_SOURCES },
+						sources,
 					);
 					imageBuild = undefined;
 					broadcast({

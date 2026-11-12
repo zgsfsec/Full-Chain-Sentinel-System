@@ -23,25 +23,9 @@ import type {
 	SentinelSources,
 } from "../types.ts";
 import { EnvironmentBuildButton, EnvironmentSetupGuide, environmentSetup } from "./EnvironmentSetupGuide.tsx";
+import { CHINA_SOURCES, EMPTY_SOURCES, EnvironmentBuildWizard } from "./EnvironmentBuildWizard.tsx";
 
 const { Text } = Typography;
-
-/** One-click Chinese mirrors; the server normalizes whatever is saved. */
-const CHINA_SOURCES: SentinelSources = {
-	baseImage: "docker.m.daocloud.io/kalilinux/kali-rolling:latest",
-	aptMirror: "http://mirrors.tuna.tsinghua.edu.cn/kali",
-	pipIndex: "https://pypi.tuna.tsinghua.edu.cn/simple",
-	npmRegistry: "https://registry.npmmirror.com",
-	goProxy: "https://goproxy.cn,direct",
-};
-
-const EMPTY_SOURCES: SentinelSources = {
-	baseImage: "",
-	aptMirror: "",
-	pipIndex: "",
-	npmRegistry: "",
-	goProxy: "",
-};
 
 const SOURCE_FIELDS: Array<{ key: keyof SentinelSources; label: string; placeholder: string }> = [
 	{
@@ -164,6 +148,7 @@ function NetworkAndProxyForm({
 	config,
 	busy,
 	pulling,
+	pullLog,
 	onSave,
 	onPull,
 }: {
@@ -172,14 +157,19 @@ function NetworkAndProxyForm({
 	config: SentinelProxyConfigView;
 	busy: boolean;
 	pulling: boolean;
+	pullLog: string[];
 	onSave: (network: SentinelContainerNetwork, defaultId: string | null, image: string) => void;
-	onPull: () => void;
+	onPull: (image: string) => void;
 }) {
 	const [network, setNetwork] = useState<SentinelContainerNetwork>(initial);
 	const [defaultId, setDefaultId] = useState<string | null>(config?.defaultId ?? null);
 	const [image, setImage] = useState(config?.image ?? "");
 	const list = Array.isArray(config?.proxies) ? config.proxies : [];
 	const dirty = network !== initial || defaultId !== (config?.defaultId ?? null) || image !== (config?.image ?? "");
+	const logRef = useRef<HTMLPreElement>(null);
+	useEffect(() => {
+		if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+	}, [pullLog]);
 
 	return (
 		<SettingsSection
@@ -253,12 +243,20 @@ function NetworkAndProxyForm({
 					</div>
 				</Col>
 				<Col xs={24} md={4}>
-					<Button block loading={pulling} disabled={busy || pulling} onClick={onPull}>
+					<Button block loading={pulling} disabled={busy || pulling || !image.trim()} onClick={() => onPull(image)}>
 						{pulling ? t("拉取中…") : t("拉取镜像")}
 					</Button>
 				</Col>
 			</Row>
 			<SettingsNote>{t("保存时自动拉取本地缺失的代理镜像；拉取失败可更换可达的镜像源后重试。")}</SettingsNote>
+			{pulling || pullLog.length > 0 ? (
+				<>
+					<Text strong>{t(pulling ? "正在拉取网络与代理镜像…" : "网络与代理镜像拉取日志")}</Text>
+					<pre ref={logRef} className="envhub-buildlog" aria-label={t("代理镜像拉取输出")}>
+						{pullLog.length ? pullLog.join("\n") : t("等待 docker pull 输出…")}
+					</pre>
+				</>
+			) : null}
 		</SettingsSection>
 	);
 }
@@ -310,6 +308,7 @@ export function EnvironmentPanel({
 	networkSavedAt,
 	proxyConfig,
 	pullingImage,
+	proxyPullLog,
 	onSaveNetworkAndProxy,
 	onPullProxyImage,
 }: {
@@ -317,7 +316,7 @@ export function EnvironmentPanel({
 	building: boolean;
 	buildLog: string[];
 	onRefresh: () => void;
-	onBuild: () => void;
+	onBuild: (sources: SentinelSources) => void;
 	onAbortBuild: () => void;
 	onSaveSources: (sources: SentinelSources) => void;
 	sourcesSavedAt: number | null;
@@ -326,10 +325,12 @@ export function EnvironmentPanel({
 	/** Profiles and the sidecar image, which the same card edits. */
 	proxyConfig: SentinelProxyConfigView;
 	pullingImage: boolean;
+	proxyPullLog: string[];
 	onSaveNetworkAndProxy: (network: SentinelContainerNetwork, defaultId: string | null, image: string) => void;
-	onPullProxyImage: () => void;
+	onPullProxyImage: (image: string) => void;
 }) {
 	const [copyNote, setCopyNote] = useState<string | null>(null);
+	const [buildWizard, setBuildWizard] = useState(false);
 	const [fallback, setFallback] = useState<string | null>(null);
 	const [checkingReport, setCheckingReport] = useState<SentinelEnvReport | null>(null);
 	const [delayedReport, setDelayedReport] = useState<SentinelEnvReport | null>(null);
@@ -337,6 +338,7 @@ export function EnvironmentPanel({
 	const logRef = useRef<HTMLPreElement | null>(null);
 	const sourcesRef = useRef<HTMLDivElement | null>(null);
 	const checksRef = useRef<HTMLDivElement | null>(null);
+	const networkRef = useRef<HTMLDivElement | null>(null);
 	const showSection = (node: HTMLElement | null) => {
 		node?.focus({ preventScroll: true });
 		node?.scrollIntoView({ block: "start" });
@@ -424,7 +426,11 @@ export function EnvironmentPanel({
 								{t("中止构建")}
 							</Button>
 						) : (
-							<EnvironmentBuildButton disabled={!dockerReady || checking} primary={report.ok} onBuild={onBuild} />
+							<EnvironmentBuildButton
+								disabled={!dockerReady || checking || pullingImage}
+								primary={report.ok}
+								onBuild={() => setBuildWizard(true)}
+							/>
 						)}
 					</>
 				}
@@ -437,25 +443,37 @@ export function EnvironmentPanel({
 				/>
 			) : null}
 
-			{report.ok && !building ? (
+			{report.ok && proxyConfig.imagePresent && !building ? (
 				<Alert
 					type="success"
 					showIcon
 					className="ui-page__alert"
 					title={t("Docker 环境正常，工具调用会在项目容器内执行。镜像更新、切换机器或修改 Dockerfile 后回来复检即可。")}
 				/>
-			) : (
-				<EnvironmentSetupGuide
-					report={report}
-					building={building}
-					checking={checking}
-					onBuild={onBuild}
-					onRefresh={refresh}
-					onShowSources={() => showSection(sourcesRef.current)}
-					onShowChecks={() => showSection(checksRef.current)}
-					onShowBuildLog={() => showSection(logRef.current)}
+			) : null}
+			<EnvironmentSetupGuide
+				report={report}
+				building={building}
+				checking={checking}
+				proxyReady={proxyConfig.imagePresent}
+				pulling={pullingImage}
+				onShowNetwork={() => showSection(networkRef.current)}
+				onBuild={() => setBuildWizard(true)}
+				onRefresh={refresh}
+				onShowSources={() => showSection(sourcesRef.current)}
+				onShowChecks={() => showSection(checksRef.current)}
+				onShowBuildLog={() => showSection(logRef.current)}
+			/>
+			{buildWizard ? (
+				<EnvironmentBuildWizard
+					initial={report.sources}
+					onCancel={() => setBuildWizard(false)}
+					onBuild={(sources) => {
+						setBuildWizard(false);
+						onBuild(sources);
+					}}
 				/>
-			)}
+			) : null}
 
 			{building || buildLog.length > 0 ? (
 				<SettingsSection className="settings-panel" title={building ? t("正在构建工具镜像…") : t("上次构建输出")}>
@@ -475,16 +493,23 @@ export function EnvironmentPanel({
 				/>
 			</div>
 
-			<NetworkAndProxyForm
-				key={`${report.containerNetwork}|${proxyConfig?.defaultId ?? ""}|${proxyConfig?.image ?? ""}`}
-				initial={report.containerNetwork}
-				savedAt={networkSavedAt}
-				config={proxyConfig}
-				busy={building}
-				pulling={pullingImage}
-				onSave={onSaveNetworkAndProxy}
-				onPull={onPullProxyImage}
-			/>
+			<div ref={networkRef} tabIndex={-1} className="envsetup-target" role="group" aria-label={t("网络与代理镜像配置")}>
+				<NetworkAndProxyForm
+					key={`${report.containerNetwork}|${proxyConfig?.defaultId ?? ""}|${proxyConfig?.image ?? ""}`}
+					initial={report.containerNetwork}
+					savedAt={networkSavedAt}
+					config={proxyConfig}
+					busy={
+						building ||
+						!dockerReady ||
+						!report.items.some((item) => item.id === "image-present" && item.status === "ok")
+					}
+					pulling={pullingImage}
+					pullLog={proxyPullLog}
+					onSave={onSaveNetworkAndProxy}
+					onPull={onPullProxyImage}
+				/>
+			</div>
 
 			<div ref={checksRef} tabIndex={-1} className="envsetup-target" role="group" aria-label={t("检查结果")}>
 				<SettingsSection
