@@ -35,11 +35,10 @@
 
 以下命令均从仓库根目录执行，单测命令除外。
 
-以下命令均从仓库根目录执行，单测命令除外。
-
 ```bash
 ./test.sh                   # 全部非 e2e 测试
 npm run check               # biome + 依赖/导入/入口图检查 + tsc + webui + 浏览器冒烟
+npm run build               # 全量构建，使用版本库内的模型快照
 npm run build:offline       # 全量构建，不联网、不重生成模型目录
 ```
 
@@ -51,7 +50,7 @@ npm run build:offline       # 全量构建，不联网、不重生成模型目�
 node "$(git rev-parse --show-toplevel)/node_modules/vitest/dist/cli.js" --run test/<name>.test.ts
 ```
 
-`packages/ai/src/providers/data/` 是 `generate-models` 的产物，已固定在版本库里：模型 id 的类型联合体直接由它推导，固定它之后 `tsc` 和测试不会随厂商轮换模型而漂移（全新克隆也能离线做类型检查）。要更新目录时跑 `npm run generate:models`（需联网）并提交改动——刷新会改到 `.manifest.json` 的 `generatedAt` 时间戳，属正常。发布流程仍会实时刷新，发布产物里的目录是最新的。
+`packages/ai/src/providers/data/` 是 `generate-models` 的产物，已固定在版本库里：模型 id 的类型联合体直接由它推导，固定它之后 `tsc` 和测试不会随厂商轮换模型而漂移（全新克隆也能离线做类型检查）。普通 `npm run build`、Web 二进制构建及 `build:offline` 都使用已提交快照，不再自动刷新此目录。要更新目录时显式跑 `npm run generate:models`（需联网），检查模型变更和相关测试后提交——刷新会改到 `.manifest.json` 的 `generatedAt` 时间戳，属正常。独立的 release/local-release 脚本仍显式刷新模型。
 
 作业容器（镜像里带 Chromium 与中文字体，供发包截图使用）：
 
