@@ -20,7 +20,7 @@ import {
 	Typography,
 } from "antd";
 import { useEffect, useRef, useState } from "react";
-import { t } from "../i18n.ts";
+import { getLanguage, t } from "../i18n.ts";
 import { SettingsEmpty, SettingsNote, SettingsSection } from "../ui/Settings.tsx";
 
 const { Text } = Typography;
@@ -36,6 +36,7 @@ import type {
 	SentinelModelRoleName,
 	SentinelResolvedModelView,
 	SentinelTestResult,
+	SentinelThinkingLevel,
 } from "../types.ts";
 import { ModelRolePicker } from "./ModelRolePicker.tsx";
 import { GatekeeperPanel } from "./GatekeeperPanel.tsx";
@@ -68,6 +69,8 @@ interface Draft {
 	contextWindow: string;
 	maxTokens: string;
 	reasoning: boolean;
+	defaultThinkingLevel: SentinelThinkingLevel;
+	availableThinkingLevels: SentinelThinkingLevel[];
 	imageInput: boolean;
 	costInput: string;
 	costOutput: string;
@@ -87,6 +90,8 @@ const EMPTY_DRAFT: Draft = {
 	contextWindow: "",
 	maxTokens: "",
 	reasoning: false,
+	defaultThinkingLevel: "medium",
+	availableThinkingLevels: ["off", "minimal", "low", "medium", "high"],
 	imageInput: true,
 	costInput: "",
 	costOutput: "",
@@ -108,6 +113,10 @@ function draftOf(entry: SentinelModelEntryView): Draft {
 		contextWindow: entry.contextWindow === null ? "" : String(entry.contextWindow),
 		maxTokens: entry.maxTokens === null ? "" : String(entry.maxTokens),
 		reasoning: entry.reasoning,
+		defaultThinkingLevel: entry.reasoning ? (entry.defaultThinkingLevel ?? "medium") : "medium",
+		availableThinkingLevels: entry.reasoning
+			? (entry.availableThinkingLevels ?? EMPTY_DRAFT.availableThinkingLevels)
+			: EMPTY_DRAFT.availableThinkingLevels,
 		imageInput: entry.input.includes("image"),
 		costInput: entry.cost === null ? "" : rateText(entry.cost.input),
 		costOutput: entry.cost === null ? "" : rateText(entry.cost.output),
@@ -125,6 +134,8 @@ function applyDefaults(draft: Draft, defaults: SentinelBuiltinModelDefaults): Dr
 		contextWindow: String(defaults.contextWindow),
 		maxTokens: String(defaults.maxTokens),
 		reasoning: defaults.reasoning,
+		defaultThinkingLevel: "medium",
+		availableThinkingLevels: EMPTY_DRAFT.availableThinkingLevels,
 		imageInput: defaults.input.includes("image"),
 		costInput: rateText(defaults.cost.input),
 		costOutput: rateText(defaults.cost.output),
@@ -172,6 +183,8 @@ function clearCapabilities(draft: Draft): Draft {
 		contextWindow: "",
 		maxTokens: "",
 		reasoning: false,
+		defaultThinkingLevel: "medium",
+		availableThinkingLevels: EMPTY_DRAFT.availableThinkingLevels,
 		imageInput: true,
 		costInput: "",
 		costOutput: "",
@@ -237,6 +250,7 @@ function capabilitiesOf(draft: Draft): { capabilities: SentinelModelCapabilities
 			...(context.value !== undefined ? { contextWindow: context.value } : {}),
 			...(output.value !== undefined ? { maxTokens: output.value } : {}),
 			reasoning: draft.reasoning,
+			...(draft.reasoning ? { defaultThinkingLevel: draft.defaultThinkingLevel } : {}),
 			input: draft.imageInput ? ["text", "image"] : ["text"],
 			...(cost ? { cost } : {}),
 			...(promptCache ? { promptCache } : {}),
@@ -1445,9 +1459,22 @@ export function SettingsPanel({
 											>
 												{t("支持思考 / 推理")}
 											</Checkbox>
-											<div>
-												<Text type="secondary">{t("开启后默认 medium 强度，会话里仍可调整")}</Text>
-											</div>
+											{draft.reasoning ? (
+												<Form.Item
+													label={getLanguage() === "en" ? "Default thinking level" : "默认思考强度"}
+													extra={getLanguage() === "en" ? "Applies to new sessions; adjustable within each session." : "用于新会话，会话中仍可单独调整。"}
+												>
+													<Select<SentinelThinkingLevel>
+														aria-label={getLanguage() === "en" ? "Default thinking level" : "默认思考强度"}
+														value={draft.defaultThinkingLevel}
+														onChange={(level) => setDraft({ ...draft, defaultThinkingLevel: level })}
+														options={draft.availableThinkingLevels.map((level) => ({
+															value: level,
+															label: `${t({ off: "关闭", minimal: "最低", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最大" }[level])} (${level})`,
+														}))}
+													/>
+												</Form.Item>
+											) : null}
 											<Checkbox
 												checked={draft.imageInput}
 												onChange={(event) => setDraft({ ...draft, imageInput: event.target.checked })}

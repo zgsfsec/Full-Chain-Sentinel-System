@@ -47,7 +47,7 @@ export function ReportCenterPage({ projectId, refreshToken = 0 }: {
 	projectId: string | null; refreshToken?: number;
 }) {
 	return <Page title={tx("报告中心", "Reports")}
-		description={tx("按当前项目归档任务报告与证据图片，容器停止后仍可查阅。", "Task reports and evidence for the current project, retained after containers stop.")}>
+		description={tx("按当前项目归档报告、截图、漏洞报文和脚本，容器停止后仍可查阅。", "Reports, screenshots, vulnerability packets and scripts for the current project, retained after containers stop.")}>
 		{projectId ? <ProjectReports key={projectId} projectId={projectId} refreshToken={refreshToken} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tx("请先在全局选择项目，再查看报告。", "Select a project in the global navigation to view reports.")} />}
 	</Page>;
 }
@@ -90,14 +90,14 @@ function ProjectReports({ projectId, refreshToken }: { projectId: string; refres
 		return () => { controller.abort(); window.clearInterval(timer); };
 	}, [projectId, page, search, source, revision, refreshToken]);
 
-	const download = async (report: ReportSummary) => {
+	const download = async (report: ReportSummary, format: "zip" | "md" = "zip") => {
 		setDownloading(report.id);
 		try {
-			const response = await reportResponse(reportUrl(projectId, report.id, "/download"));
+			const response = await reportResponse(`${reportUrl(projectId, report.id, "/download")}&format=${format}`);
 			const url = URL.createObjectURL(await response.blob());
 			const anchor = document.createElement("a");
 			anchor.href = url;
-			anchor.download = `${report.title.replace(/[\\/:*?"<>|]/g, "_")}.${report.imageCount ? "zip" : "md"}`;
+			anchor.download = `${report.title.replace(/[\\/:*?"<>|]/g, "_")}.${format}`;
 			document.body.appendChild(anchor);
 			anchor.click();
 			anchor.remove();
@@ -108,7 +108,7 @@ function ProjectReports({ projectId, refreshToken }: { projectId: string; refres
 
 	const remove = (report: ReportSummary) => modal.confirm({
 		title: tx("删除报告？", "Delete report?"),
-		content: tx(`将永久删除「${report.title}」及其归档图片。`, `Permanently delete “${report.title}” and its archived images.`),
+		content: tx(`将永久删除「${report.title}」及其归档图片和附件。`, `Permanently delete “${report.title}” and its archived images and attachments.`),
 		okText: tx("删除", "Delete"), cancelText: tx("取消", "Cancel"), okButtonProps: { danger: true },
 		onOk: async () => {
 			try {
@@ -131,7 +131,7 @@ function ProjectReports({ projectId, refreshToken }: { projectId: string; refres
 		{ title: tx("提交时间", "Submitted"), dataIndex: "createdAt", width: 175, render: (_, report) => new Date(report.createdAt).toLocaleString(getLanguage() === "en" ? "en-US" : "zh-CN", { hour12: false }) },
 		{ title: tx("操作", "Actions"), valueType: "option", width: 150, fixed: "right", render: (_, report) => <Space size={4}>
 			<Button type="link" size="small" onClick={() => setOpenId(report.id)}>{tx("查看", "View")}</Button>
-			<Button type="text" size="small" icon={<DownloadOutlined />} aria-label={tx("下载报告", "Download report")} loading={downloading === report.id} disabled={downloading !== null} onClick={() => void download(report)} />
+			<Button type="text" size="small" icon={<DownloadOutlined />} title={tx("下载完整报告包（ZIP）", "Download complete report bundle (ZIP)")} aria-label={tx("下载完整报告包（ZIP）", "Download complete report bundle (ZIP)")} loading={downloading === report.id} disabled={downloading !== null} onClick={() => void download(report)} />
 			<Button type="text" size="small" danger icon={<DeleteOutlined />} aria-label={tx("删除报告", "Delete report")} onClick={() => remove(report)} />
 		</Space> },
 	];
@@ -175,7 +175,7 @@ export function ReportEditor({ report, onTitleChange, onMarkdownChange, disabled
 
 function ReportReader({ projectId, id, refreshToken, onBack, onSaved, onDownload, onDelete, downloading }: {
 	projectId: string; id: string; refreshToken: number; onBack: () => void; onSaved: () => void;
-	onDownload: (report: ReportSummary) => Promise<void>; onDelete: (report: ReportSummary) => void; downloading: boolean;
+	onDownload: (report: ReportSummary, format?: "zip" | "md") => Promise<void>; onDelete: (report: ReportSummary) => void; downloading: boolean;
 }) {
 	const { modal, message } = App.useApp();
 	const [report, setReport] = useState<ReportDetail | null>(null);
@@ -260,7 +260,8 @@ function ReportReader({ projectId, id, refreshToken, onBack, onSaved, onDownload
 			</Space> : <Space wrap>
 				<Segmented value={mode} onChange={setMode} options={[{ label: tx("预览", "Preview"), value: "preview" }, { label: tx("源文", "Markdown"), value: "source" }]} />
 				<Button icon={<EditOutlined />} onClick={() => { setDraft(report); setSaveError(null); }}>{tx("编辑", "Edit")}</Button>
-				<Button icon={<DownloadOutlined />} loading={downloading} onClick={() => void onDownload(report)}>{tx(report.imageCount ? "下载报告和图片" : "下载 Markdown", report.imageCount ? "Download report & images" : "Download Markdown")}</Button>
+				<Button icon={<DownloadOutlined />} loading={downloading} onClick={() => void onDownload(report)}>{tx("下载完整报告包", "Download complete bundle")}</Button>
+				<Button type="text" disabled={downloading} onClick={() => void onDownload(report, "md")}>{tx("仅 Markdown", "Markdown only")}</Button>
 				<Button danger icon={<DeleteOutlined />} onClick={() => onDelete(report)}>{tx("删除", "Delete")}</Button>
 			</Space> : null}
 		</Flex>

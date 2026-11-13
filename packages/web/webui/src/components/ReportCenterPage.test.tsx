@@ -8,6 +8,7 @@ const report: ReportDetail = {
 	id: "report1", title: "测试报告", projectId: "p1", projectName: "项目", source: "goal", sessionName: "评估会话",
 	createdAt: "2026-11-06T00:00:00Z", size: 100, imageCount: 1, revision: "original",
 	images: [{ id: "image1", source: "/work/proof.png", filename: "image1.png", mimeType: "image/png", size: 1 }],
+	attachments: [],
 	markdown: "# 结果\n\n| 目标 | 结论 |\n| --- | --- |\n| 靶场 | 无确认漏洞 |\n\n```html\n<script>alert(1)</script>\n```\n\n![截图](/work/proof.png)\n\n![外链](https://tracker.example/a.png)\n\n[危险](javascript:alert)\n\n<script>alert(2)</script>",
 };
 

@@ -22,12 +22,14 @@ import {
 	DEFAULT_MODEL_API,
 	NO_AUTH_PLACEHOLDER_KEY,
 	readProviderModelConfig,
+	readProviderThinkingSettings,
 	removeProviderModelConfig,
 	SENTINEL_COMMANDER_PROVIDER_ID,
 	SENTINEL_JUDGE_PROVIDER_ID,
 	SENTINEL_PROVIDER_ID,
 	writeProviderModelConfig,
 } from "./model-config.ts";
+import { isModelThinkingLevel } from "./model-thinking.ts";
 import type {
 	SentinelModelCapabilities,
 	SentinelModelConfig,
@@ -337,6 +339,9 @@ export function libraryView(agentDir: string): SentinelModelLibraryView {
 			contextWindow: capabilities?.contextWindow ?? null,
 			maxTokens: capabilities?.maxTokens ?? null,
 			reasoning: capabilities?.reasoning === true,
+			...(config
+				? readProviderThinkingSettings(agentDir, entry.id)
+				: { defaultThinkingLevel: "off" as const, availableThinkingLevels: ["off" as const] }),
 			input: capabilities?.input ?? ["text"],
 			cost: capabilities?.cost ?? null,
 			promptCache: capabilities?.promptCache ?? null,
@@ -395,6 +400,9 @@ function positiveInteger(value: number | undefined, label: string): number | und
  */
 function cleanCapabilities(raw: SentinelModelCapabilities | undefined): SentinelModelCapabilities | undefined {
 	if (!raw) return undefined;
+	if (raw.defaultThinkingLevel !== undefined && !isModelThinkingLevel(raw.defaultThinkingLevel)) {
+		throw new Error("Invalid default thinking level");
+	}
 	const api = raw.api?.trim() || DEFAULT_MODEL_API;
 	if (!(MODEL_APIS as readonly string[]).includes(api))
 		throw new Error(t("不支持的协议：{api}", { api: String(raw.api) }));
@@ -431,6 +439,9 @@ function cleanCapabilities(raw: SentinelModelCapabilities | undefined): Sentinel
 		...(contextWindow !== undefined ? { contextWindow } : {}),
 		...(maxTokens !== undefined ? { maxTokens } : {}),
 		reasoning: raw.reasoning === true,
+		...(raw.reasoning === true && raw.defaultThinkingLevel !== undefined
+			? { defaultThinkingLevel: raw.defaultThinkingLevel }
+			: {}),
 		input: Array.isArray(raw.input) && raw.input.includes("image") ? ["text", "image"] : ["text"],
 		...(cost ? { cost } : {}),
 		...(promptCache ? { promptCache } : {}),

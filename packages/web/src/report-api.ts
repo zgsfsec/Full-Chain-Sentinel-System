@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { portableReportMarkdown, reportZip, validateReportEdit } from "./report-content.ts";
+import { buildReportBundle } from "./report-bundle.ts";
+import { portableReportMarkdown, validateReportEdit } from "./report-content.ts";
 import type { ReportSource } from "./report-types.ts";
 import type { ReportStore } from "./reports.ts";
 
@@ -148,14 +149,14 @@ export async function handleReportApi(
 		}
 		if (parts.length === 2 && parts[1] === "download") {
 			const filename = report.title.replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").slice(0, 100) || "report";
-			const files = [{ name: "report.md", data: Buffer.from(portableReportMarkdown(report), "utf8") }];
-			for (const image of report.images) {
-				const saved = store.image(projectId, id, image.id);
-				if (!saved) throw new Error("报告图片缺失，无法下载完整报告。");
-				files.push({ name: `images/${image.filename}`, data: Buffer.from(saved.data) });
+			const zipped = url.searchParams.get("format") !== "md";
+			const body = zipped
+				? await buildReportBundle(store, report)
+				: Buffer.from(portableReportMarkdown(report), "utf8");
+			if (!authorized() || !projectExists(projectId)) {
+				json(response, { error: "登录、授权或项目已失效，请刷新页面。" }, 409);
+				return;
 			}
-			const zipped = report.imageCount > 0;
-			const body = zipped ? reportZip(files) : files[0].data;
 			response.writeHead(200, {
 				"content-type": zipped ? "application/zip" : "text/markdown; charset=utf-8",
 				"content-length": body.length,

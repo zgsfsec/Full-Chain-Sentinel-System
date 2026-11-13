@@ -157,6 +157,7 @@ export interface SentinelModelCapabilities {
 	contextWindow?: number;
 	maxTokens?: number;
 	reasoning?: boolean;
+	defaultThinkingLevel?: SentinelThinkingLevel;
 	input?: Array<"text" | "image">;
 	cost?: SentinelModelCostRates;
 	promptCache?: SentinelModelPromptCache;
@@ -185,6 +186,8 @@ export interface SentinelModelEntryView {
 	contextWindow: number | null;
 	maxTokens: number | null;
 	reasoning: boolean;
+	defaultThinkingLevel?: SentinelThinkingLevel;
+	availableThinkingLevels?: SentinelThinkingLevel[];
 	input: Array<"text" | "image">;
 	cost: SentinelModelCostRates | null;
 	promptCache: SentinelModelPromptCache | null;

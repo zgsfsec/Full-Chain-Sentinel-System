@@ -17,6 +17,9 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { clampThinkingLevel, getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-coding-agent";
+import { isModelThinkingLevel, readModelThinkingLevel, writeModelThinkingLevel } from "./model-thinking.ts";
 import type {
 	SentinelModelCapabilities,
 	SentinelModelConfig,
@@ -152,11 +155,43 @@ export function readProviderModelConfig(agentDir: string, providerId: string): S
 	const model = provider?.models?.[0];
 	if (!provider?.baseUrl || !model || typeof model.id !== "string") return null;
 	const capabilities = readCapabilities(provider, model);
+	const defaultThinkingLevel = readModelThinkingLevel(agentDir, providerId, model.id);
+	if (capabilities?.reasoning && defaultThinkingLevel !== undefined) {
+		capabilities.defaultThinkingLevel = defaultThinkingLevel;
+	}
 	return {
 		baseUrl: provider.baseUrl,
 		apiKey: provider.apiKey ?? "",
 		modelId: model.id,
 		...(capabilities ? { capabilities } : {}),
+	};
+}
+
+/** The SDK clamps defaults to this list when a session starts. */
+export function readProviderThinkingSettings(
+	agentDir: string,
+	providerId: string,
+): { defaultThinkingLevel: ThinkingLevel; availableThinkingLevels: ThinkingLevel[] } {
+	const parsed = JSON.parse(readFileSync(modelsJsonPath(agentDir), "utf-8")) as ModelsJson;
+	const model = parsed.providers?.[providerId]?.models?.[0];
+	const thinkingModel: Model<"openai-completions"> = {
+		id: "",
+		name: "",
+		provider: providerId,
+		api: "openai-completions",
+		baseUrl: "",
+		reasoning: model?.reasoning === true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 128000,
+		maxTokens: 16384,
+		thinkingLevelMap: model?.thinkingLevelMap as Model<"openai-completions">["thinkingLevelMap"],
+	};
+	const requested =
+		typeof model?.id === "string" ? readModelThinkingLevel(agentDir, providerId, model.id, true) : undefined;
+	return {
+		defaultThinkingLevel: clampThinkingLevel(thinkingModel, requested ?? "medium"),
+		availableThinkingLevels: getSupportedThinkingLevels(thinkingModel),
 	};
 }
 
@@ -187,6 +222,11 @@ export function writeProviderModelConfig(
 	const nextModel: Record<string, unknown> = { ...previousModel, id: config.modelId, name: config.modelId };
 	delete nextModel.api;
 	const capabilities = config.capabilities;
+	const previousThinkingLevel =
+		typeof previousModel.id === "string" ? readModelThinkingLevel(agentDir, providerId, previousModel.id) : undefined;
+	if (capabilities?.defaultThinkingLevel !== undefined && !isModelThinkingLevel(capabilities.defaultThinkingLevel)) {
+		throw new Error("Invalid default thinking level");
+	}
 	if (capabilities) {
 		const contextWindow = positiveNumber(capabilities.contextWindow);
 		if (contextWindow !== undefined) nextModel.contextWindow = contextWindow;
@@ -218,6 +258,12 @@ export function writeProviderModelConfig(
 		models: [nextModel],
 	};
 	mkdirSync(dirname(path), { recursive: true });
+	writeModelThinkingLevel(
+		agentDir,
+		providerId,
+		config.modelId,
+		nextModel.reasoning === true ? (capabilities?.defaultThinkingLevel ?? previousThinkingLevel) : undefined,
+	);
 	writeFileSync(path, `${JSON.stringify(parsed, null, "\t")}\n`, { mode: 0o600 });
 	try {
 		chmodSync(path, 0o600);
@@ -230,6 +276,7 @@ export function writeProviderModelConfig(
 export function removeProviderModelConfig(agentDir: string, providerId: string): void {
 	const path = modelsJsonPath(agentDir);
 	if (!existsSync(path)) return;
+	writeModelThinkingLevel(agentDir, providerId, null);
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf-8")) as ModelsJson;
 		if (parsed.providers) delete parsed.providers[providerId];

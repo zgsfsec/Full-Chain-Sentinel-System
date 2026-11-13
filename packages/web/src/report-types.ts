@@ -22,6 +22,15 @@ export interface ReportImage {
 	size: number;
 }
 
+export interface ReportAttachment {
+	id: string;
+	/** Original Markdown reference or evidence path. */
+	source: string;
+	/** Relative path inside the downloaded ZIP. */
+	filename: string;
+	size: number;
+}
+
 export interface ReportSummary extends ReportProvenance {
 	id: string;
 	title: string;
@@ -33,6 +42,7 @@ export interface ReportSummary extends ReportProvenance {
 export interface ReportDetail extends ReportSummary {
 	markdown: string;
 	images: ReportImage[];
+	attachments: ReportAttachment[];
 	revision: string;
 }
 

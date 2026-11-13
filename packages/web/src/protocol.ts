@@ -176,6 +176,8 @@ export interface SentinelModelCapabilities {
 	contextWindow?: number;
 	maxTokens?: number;
 	reasoning?: boolean;
+	/** New sessions use this model-specific default, stored in SDK settings. */
+	defaultThinkingLevel?: ThinkingLevel;
 	input?: Array<"text" | "image">;
 	cost?: SentinelModelCostRates;
 	promptCache?: SentinelModelPromptCache;
@@ -209,6 +211,8 @@ export interface SentinelModelEntryView {
 	contextWindow: number | null;
 	maxTokens: number | null;
 	reasoning: boolean;
+	defaultThinkingLevel?: ThinkingLevel;
+	availableThinkingLevels?: ThinkingLevel[];
 	input: Array<"text" | "image">;
 	cost: SentinelModelCostRates | null;
 	promptCache: SentinelModelPromptCache | null;

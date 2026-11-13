@@ -1,12 +1,17 @@
 /** Parse image references once, snapshot project files, and build portable downloads. */
 import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import { open, realpath } from "node:fs/promises";
-import { isAbsolute, posix, relative, resolve, sep } from "node:path";
+import { posix } from "node:path";
 import { crc32 } from "node:zlib";
 import { fromMarkdown } from "mdast-util-from-markdown";
-import { downloadFile, toContainerWorkPath } from "./files.ts";
-import type { ReportDetail, ReportProvenance } from "./report-types.ts";
+import { toContainerWorkPath } from "./files.ts";
+import {
+	collectReportAttachments,
+	portableAttachmentLinks,
+	REPORT_BUNDLE_MAX_BYTES,
+	validateAttachmentLinks,
+} from "./report-attachments.ts";
+import { readProjectFile } from "./report-files.ts";
+import type { ReportAttachment, ReportDetail, ReportProvenance } from "./report-types.ts";
 import type { ArchivedReportImage, ReportStore } from "./reports.ts";
 
 const MAX_MARKDOWN_BYTES = 1024 * 1024;
@@ -73,47 +78,6 @@ function imageType(data: Buffer): { extension: string; mimeType: string } {
 	throw new Error("图片格式不支持，请使用 PNG、JPEG、GIF、WebP、BMP 或 SVG 文件。");
 }
 
-/** Resolve symlinks before reading: reports cannot snapshot another project's or host's files. */
-async function readProjectFile(
-	input: string,
-	workDir: string,
-	container: string | undefined,
-	maxBytes: number,
-): Promise<Buffer> {
-	const containerPath = toContainerWorkPath(input, workDir);
-	if (!containerPath || containerPath === "/work") throw new Error(`文件路径不在项目工作目录内：${input}`);
-	const root = await realpath(workDir);
-	const path = await realpath(resolve(root, containerPath.slice("/work/".length)));
-	const rel = relative(root, path);
-	if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
-		throw new Error(`文件路径不在项目工作目录内：${input}`);
-	try {
-		const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-		try {
-			const stat = await handle.stat();
-			if (!stat.isFile()) throw new Error(`不是普通文件：${input}`);
-			if (stat.size > maxBytes) throw new Error(`文件超过 ${maxBytes / 1024 / 1024} MB 上限：${input}`);
-			const bytes = Buffer.alloc(Math.min(stat.size + 1, maxBytes + 1));
-			let read = 0;
-			while (read < bytes.length) {
-				const result = await handle.read(bytes, read, bytes.length - read, read);
-				if (!result.bytesRead) break;
-				read += result.bytesRead;
-			}
-			if (read !== stat.size) throw new Error(`文件正在变化，请生成完成后重新提交：${input}`);
-			return bytes.subarray(0, read);
-		} finally {
-			await handle.close();
-		}
-	} catch (error) {
-		// Container-created files can be root-owned on a native Linux host.
-		if (!container || !(error instanceof Error) || !("code" in error) || error.code !== "EACCES") throw error;
-		const downloaded = await downloadFile(container, `/work/${rel.split(sep).join("/")}`);
-		if (downloaded.size > maxBytes) throw new Error(`文件超过 ${maxBytes / 1024 / 1024} MB 上限：${input}`);
-		return Buffer.from(downloaded.data, "base64");
-	}
-}
-
 export async function submitReport(options: {
 	store: ReportStore;
 	provenance: ReportProvenance;
@@ -121,6 +85,7 @@ export async function submitReport(options: {
 	title: string;
 	markdown?: string;
 	path?: string;
+	attachments?: string[];
 	workDir: string;
 	container?: string;
 }): Promise<ReportDetail> {
@@ -181,7 +146,24 @@ export async function submitReport(options: {
 			data,
 		});
 	}
-	return options.store.save({ provenance: options.provenance, key: options.key, title, markdown, images });
+	const attachments = await collectReportAttachments({
+		agentDir: options.store.agentDir,
+		provenance: options.provenance,
+		markdown,
+		base,
+		workDir: options.workDir,
+		container: options.container,
+		paths: options.attachments,
+		reservedBytes: total,
+	});
+	return options.store.save({
+		provenance: options.provenance,
+		key: options.key,
+		title,
+		markdown,
+		images,
+		attachments,
+	});
 }
 
 /** Editing reuses archived evidence and never needs a running container or the original files. */
@@ -192,6 +174,14 @@ export function validateReportEdit(report: ReportDetail, title: string, markdown
 	if (Buffer.byteLength(markdown) > MAX_MARKDOWN_BYTES) throw new Error("报告正文超过 1 MB 上限。");
 	if (Buffer.byteLength(markdown) + report.images.reduce((sum, image) => sum + image.size, 0) > MAX_TOTAL_BYTES)
 		throw new Error("报告和图片合计超过 32 MB 上限。");
+	if (
+		Buffer.byteLength(markdown) +
+			report.images.reduce((sum, image) => sum + image.size, 0) +
+			report.attachments.reduce((sum, file) => sum + file.size, 0) >
+		REPORT_BUNDLE_MAX_BYTES
+	)
+		throw new Error("报告、图片和附件合计超过 128 MB 上限。");
+	validateAttachmentLinks(markdown, report.markdown, report.attachments);
 	const archived = new Set(report.images.map((image) => image.source));
 	for (const image of imageReferences(markdown)) {
 		if (!archived.has(image.source))
@@ -200,7 +190,10 @@ export function validateReportEdit(report: ReportDetail, title: string, markdown
 }
 
 /** Replaces actual Markdown image nodes, including reference-style images, without touching code examples. */
-export function portableReportMarkdown(report: ReportDetail): string {
+export function portableReportMarkdown(
+	report: ReportDetail,
+	attachments: ReportAttachment[] = report.attachments,
+): string {
 	const images = new Map(report.images.map((image) => [image.source, image.filename]));
 	let markdown = report.markdown;
 	for (const reference of imageReferences(markdown).reverse()) {
@@ -210,7 +203,7 @@ export function portableReportMarkdown(report: ReportDetail): string {
 		const title = reference.title ? ` "${reference.title.replace(/[\\"]/g, "\\$&")}"` : "";
 		markdown = `${markdown.slice(0, reference.start)}![${alt}](images/${filename}${title})${markdown.slice(reference.end)}`;
 	}
-	return markdown;
+	return portableAttachmentLinks(markdown, attachments);
 }
 
 /** ZIP's stored format needs no external archiver and preserves exact Markdown/image bytes. */
@@ -220,7 +213,7 @@ export function reportZip(files: { name: string; data: Uint8Array }[]): Buffer {
 	let offset = 0;
 	for (const file of files) {
 		const name = Buffer.from(file.name, "utf8");
-		const data = Buffer.from(file.data);
+		const data = Buffer.isBuffer(file.data) ? file.data : Buffer.from(file.data);
 		const checksum = crc32(data);
 		const header = Buffer.alloc(30);
 		header.writeUInt32LE(0x04034b50, 0);

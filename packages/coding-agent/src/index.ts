@@ -317,6 +317,7 @@ export {
 	type CompactionModelOverride,
 	type CompactionSettings,
 	type DefaultProjectTrust,
+	FileSettingsStorage,
 	type FullscreenExitOutput,
 	type ImageSettings,
 	type PackageSource,

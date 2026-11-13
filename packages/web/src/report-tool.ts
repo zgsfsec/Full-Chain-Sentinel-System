@@ -14,13 +14,14 @@ export function createReportTool(options: {
 		name: "report_submit",
 		label: "Submit report",
 		description:
-			"Archive a completed Markdown report in the current session's project report center, together with every referenced local image. Provide either markdown (relative images use /work) or path (relative images use the Markdown file's directory). Accepts /work paths or host paths inside this project. Returns a report id only after all images are saved. Does not terminate the task.",
+			"Archive a completed Markdown report with local images, linked files, and the associated session/task vulnerability evidence for ZIP download. Provide either markdown (relative files use /work) or path (relative files use the Markdown file's directory). Use attachments for additional scripts, raw requests/responses and evidence files. Accepts only project-local paths. Does not terminate the task.",
 		promptSnippet: "Submit the completed task's Markdown report and images to the project's report center",
 		promptGuidelines: [
 			"Before ending a substantive assessment or autonomous goal, proactively submit a Markdown report with report_submit. Ordinary questions and short explanations do not need reports; do not submit a report for every intermediate round.",
 			"Report the actual scope, methods, evidence, outcomes, vulnerability hub references, limitations and recommendations. Zero confirmed findings is a valid outcome; never invent evidence or convert unfinished work into a success.",
 			"Submit validated findings to the vulnerability hub first. Then submit the final report before goal_complete or the final answer. Report submission does not itself end a goal or task.",
 			"Use standard Markdown image syntax for evidence images. Local files and base64 data images are archived. Download remote images into the project first; do not include external image URLs. Correct missing images and retry if submission fails.",
+			"Save raw requests and responses verbatim and include reproduction scripts as local Markdown links or attachments. Associated vulnerability hub packets, command outputs and evidence files are collected automatically. Missing attachments are listed in manifest.json; never invent missing responses.",
 		],
 		parameters: Type.Object({
 			title: Type.String({
@@ -39,6 +40,13 @@ export function createReportTool(options: {
 					minLength: 1,
 					description:
 						"Existing Markdown file in this project's work directory, e.g. /work/reports/final.md. Exclusive with markdown.",
+				}),
+			),
+			attachments: Type.Optional(
+				Type.Array(Type.String({ minLength: 1 }), {
+					maxItems: 256,
+					description:
+						"Additional project-local evidence/script/request/response files to snapshot in the report ZIP. Relative paths follow the Markdown file's directory, or /work when using markdown.",
 				}),
 			),
 		}),

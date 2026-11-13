@@ -18,6 +18,7 @@
 
 ### Added
 
+- Exported `FileSettingsStorage` so embedded hosts can update SDK settings using the same file lock as sessions.
 - Added `baseToolsOverride` to `createAgentSession()` options so custom runtimes can replace built-in base tools (used by the Full Chain Sentinel web console to wrap the bash tool with an approval gate)
 - Added `customState` to `SessionInfo`: the latest `custom` entry's data per `customType`, read in the same pass that already computes `name` and `firstMessage`. A host that keeps per-session operator state in `custom` entries (the console's persistent goal and manual session status) can show it in a session list without opening every file a second time
 - Exported the `ThinkingLevel` and `ImageContent` types, which hosts need to call `setThinkingLevel()` and to pass `images` to `prompt()`

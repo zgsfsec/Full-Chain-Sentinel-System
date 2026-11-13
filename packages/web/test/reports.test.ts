@@ -250,7 +250,9 @@ test("editing preserves evidence and provenance without the workspace and refuse
 		images: original.images,
 	});
 	expect(updated?.revision).not.toBe(original.revision);
-	expect(updated?.size).toBe(Buffer.byteLength(markdown) + png.length);
+	expect(updated?.size).toBe(
+		Buffer.byteLength(markdown) + png.length + original.attachments.reduce((total, file) => total + file.size, 0),
+	);
 	expect(store.updateText("p1", original.id, original.revision, "过期覆盖", "stale")).toBeUndefined();
 	store.close();
 	store = new ReportStore(join(root, "reports.db"));
@@ -328,5 +330,8 @@ test("PUT validates edits, retains a failed draft's saved version, and downloads
 	expect(saved.status).toBe(200);
 	expect(await saved.json()).toMatchObject({ title: edit.title, markdown: edit.markdown });
 	expect((await put({ ...edit, markdown: "stale" })).status).toBe(409);
-	expect(await (await fetch(`${base}/download?projectId=p1`)).text()).toBe(edit.markdown);
+	const bundle = await fetch(`${base}/download?projectId=p1`);
+	expect(bundle.headers.get("content-type")).toBe("application/zip");
+	expect(Buffer.from(await bundle.arrayBuffer()).includes(Buffer.from(edit.markdown))).toBe(true);
+	expect(await (await fetch(`${base}/download?projectId=p1&format=md`)).text()).toBe(edit.markdown);
 });

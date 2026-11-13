@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
+	ReportAttachment,
 	ReportDetail,
 	ReportImage,
 	ReportPage,
@@ -13,6 +14,10 @@ import type {
 import { openSqliteDatabase, type SqliteDatabase, type SqliteValue } from "./sqlite.ts";
 
 export interface ArchivedReportImage extends ReportImage {
+	data: Uint8Array;
+}
+
+export interface ArchivedReportAttachment extends ReportAttachment {
 	data: Uint8Array;
 }
 
@@ -64,8 +69,11 @@ export function reportsDbPath(agentDir: string): string {
 
 export class ReportStore {
 	private readonly db: SqliteDatabase;
+	/** Report exports resolve the project's registry and vulnerability hub in this configuration directory. */
+	readonly agentDir: string;
 
 	constructor(path: string) {
+		this.agentDir = dirname(path);
 		mkdirSync(dirname(path), { recursive: true });
 		this.db = openSqliteDatabase(path);
 		this.db.exec(`
@@ -83,6 +91,11 @@ export class ReportStore {
 				source TEXT NOT NULL, filename TEXT NOT NULL, mime_type TEXT NOT NULL,
 				size INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY(report_id, id)
 			);
+			CREATE TABLE IF NOT EXISTS report_attachments (
+				id TEXT NOT NULL, report_id TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+				source TEXT NOT NULL, filename TEXT NOT NULL, size INTEGER NOT NULL, data BLOB NOT NULL,
+				PRIMARY KEY(report_id, id)
+			);
 		`);
 	}
 
@@ -99,12 +112,17 @@ export class ReportStore {
 		title: string;
 		markdown: string;
 		images: ArchivedReportImage[];
+		attachments?: ArchivedReportAttachment[];
 	}): ReportDetail {
 		const prior = this.findSubmission(input.provenance.projectId, input.key);
 		if (prior) return prior;
 		const id = randomUUID();
 		const createdAt = new Date().toISOString();
-		const size = Buffer.byteLength(input.markdown) + input.images.reduce((total, image) => total + image.size, 0);
+		const attachments = input.attachments ?? [];
+		const size =
+			Buffer.byteLength(input.markdown) +
+			input.images.reduce((total, image) => total + image.size, 0) +
+			attachments.reduce((total, file) => total + file.size, 0);
 		this.db.exec("BEGIN IMMEDIATE");
 		try {
 			this.db
@@ -128,6 +146,11 @@ export class ReportStore {
 			);
 			for (const image of input.images)
 				insertImage.run(image.id, id, image.source, image.filename, image.mimeType, image.size, image.data);
+			const insertAttachment = this.db.prepare(
+				"INSERT INTO report_attachments (id, report_id, source, filename, size, data) VALUES (?, ?, ?, ?, ?, ?)",
+			);
+			for (const file of attachments)
+				insertAttachment.run(file.id, id, file.source, file.filename, file.size, file.data);
 			this.db.exec("COMMIT");
 		} catch (error) {
 			this.db.exec("ROLLBACK");
@@ -139,6 +162,7 @@ export class ReportStore {
 			title: input.title,
 			markdown: input.markdown,
 			images: input.images.map(({ data: _data, ...image }) => image),
+			attachments: attachments.map(({ data: _data, ...file }) => file),
 			createdAt,
 			imageCount: input.images.length,
 			size,
@@ -183,7 +207,16 @@ export class ReportStore {
 			.prepare("SELECT id, source, filename, mime_type, size FROM report_images WHERE report_id = ? ORDER BY rowid")
 			.all(id) as ImageRow[];
 		const markdown = row.markdown ?? "";
-		return { ...summary(row), markdown, images: images.map(imageInfo), revision: revision(row.title, markdown) };
+		const attachments = this.db
+			.prepare("SELECT id, source, filename, size FROM report_attachments WHERE report_id = ? ORDER BY rowid")
+			.all(id) as ReportAttachment[];
+		return {
+			...summary(row),
+			markdown,
+			images: images.map(imageInfo),
+			attachments,
+			revision: revision(row.title, markdown),
+		};
 	}
 
 	/** Compare-and-swap protects edits made in another browser while the editor was open. */
@@ -196,7 +229,10 @@ export class ReportStore {
 	): ReportDetail | undefined {
 		const current = this.get(projectId, id);
 		if (!current || current.revision !== expectedRevision) return undefined;
-		const size = Buffer.byteLength(markdown) + current.images.reduce((total, image) => total + image.size, 0);
+		const size =
+			Buffer.byteLength(markdown) +
+			current.images.reduce((total, image) => total + image.size, 0) +
+			current.attachments.reduce((total, file) => total + file.size, 0);
 		const result = this.db
 			.prepare(
 				"UPDATE reports SET title = ?, markdown = ?, size = ? WHERE project_id = ? AND id = ? AND title = ? AND markdown = ?",
@@ -212,6 +248,15 @@ export class ReportStore {
 			)
 			.get(projectId, reportId, id) as ImageRow | undefined;
 		return row?.data ? { ...imageInfo(row), data: row.data } : undefined;
+	}
+
+	attachment(projectId: string, reportId: string, id: string): ArchivedReportAttachment | undefined {
+		const row = this.db
+			.prepare(
+				"SELECT a.id, a.source, a.filename, a.size, a.data FROM report_attachments a JOIN reports r ON r.id = a.report_id WHERE r.project_id = ? AND r.id = ? AND a.id = ?",
+			)
+			.get(projectId, reportId, id) as ArchivedReportAttachment | undefined;
+		return row;
 	}
 
 	delete(projectId: string, id: string): boolean {
