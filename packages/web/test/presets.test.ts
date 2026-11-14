@@ -398,3 +398,44 @@ test("the recon preset is seeded and hard-requires asset-library reporting", () 
 	// Same rule as every preset: context only, no capability promises.
 	expect(body).not.toMatch(/你可以使用|授权你调用/);
 });
+
+test("source audit is available by default with an upload hint and evidence-based reporting", () => {
+	const dir = freshAgentDir();
+	ensureBuiltinPresets(dir);
+	const audit = presetViews(dir).find((preset) => preset.id === "source-code-audit");
+	expect(audit?.name).toBe("源代码审计 Agent");
+	expect(listEnabledPresets(dir).some((preset) => preset.id === audit?.id)).toBe(true);
+	expect(audit?.placeholder).toBe(
+		"上传源代码文件或压缩包，即可开始审计；代码包较大时，可先剔除图片、音视频等静态资源，保留源码、配置及依赖清单。",
+	);
+	expect(audit?.placeholder.length).toBeLessThanOrEqual(MAX_PRESET_PLACEHOLDER_CHARS);
+	expect(audit?.textMissing).toBe(false);
+	expect(audit?.text).toContain("优先挖掘可能导致远程代码执行（RCE）");
+	expect(audit?.text).toContain("其次审计 OWASP Top 10");
+	expect(audit?.text).toContain("跨文件、跨函数追踪数据流");
+	expect(audit?.text).toContain("待确认的问题单独列为待核实项");
+	expect(audit?.text).toContain("不得编造发现");
+});
+
+test("an existing console gains the audit preset once and retains the operator's edits", () => {
+	const dir = freshAgentDir();
+	savePreset(dir, { name: "已有自定义预设", text: "保留原内容" });
+	ensureBuiltinPresets(dir);
+	const result = savePreset(dir, {
+		id: "source-code-audit",
+		name: "源代码审计 Agent",
+		placeholder: "自定义提示",
+		text: "自定义审计要求",
+		enabled: false,
+	});
+	expect(result.error).toBeUndefined();
+	ensureBuiltinPresets(dir);
+	const presets = presetViews(dir);
+	expect(presets.filter((preset) => preset.id === "source-code-audit")).toHaveLength(1);
+	expect(presets.find((preset) => preset.id === "source-code-audit")).toMatchObject({
+		placeholder: "自定义提示",
+		text: "自定义审计要求\n",
+		enabled: false,
+	});
+	expect(presets.find((preset) => preset.name === "已有自定义预设")?.text).toBe("保留原内容\n");
+});
