@@ -15,6 +15,7 @@ import type { IosDevice, IosToken } from "./ios.ts";
 import type { SentinelNotifyConfig, SentinelNotifyStatus, SentinelNotifyTarget } from "./notify-types.ts";
 import type { SentinelPermissionPreset, SentinelPermissionSet, SentinelPermissionsConfig } from "./permissions.ts";
 import type { SentinelPluginManifest } from "./plugin-manifest.ts";
+import type { ProjectStorageUsage } from "./project-storage-types.ts";
 import type { SentinelSessionListEntry, SentinelSessionStatus } from "./session-status.ts";
 
 /**
@@ -502,6 +503,8 @@ export interface SentinelProjectInfo {
 	id: string;
 	name: string;
 	cwd: string;
+	/** Cached project disk usage; absent while the first scan is running. */
+	storage?: ProjectStorageUsage;
 	/** Docker container executing this project's tools. */
 	container?: string | null;
 	/** Sessions recorded for this project, counted from the session directory. */

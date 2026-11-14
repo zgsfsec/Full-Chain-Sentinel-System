@@ -4,6 +4,7 @@ import type { CodeVulnTag } from "../../src/code-vuln-tags.ts";
 import type { CodeReproductionResult } from "../../src/code-reproduction.ts";
 import type { UiLanguage } from "../../src/i18n-messages.ts";
 import type { SentinelNotifyConfig, SentinelNotifyStatus, SentinelNotifyTarget } from "../../src/notify-types.ts";
+import type { ProjectStorageUsage } from "../../src/project-storage-types.ts";
 import { t } from "./i18n.ts";
 
 export type SentinelMode = "review" | "ai" | "auto";
@@ -352,6 +353,8 @@ export interface SentinelProjectInfo {
 	id: string;
 	name: string;
 	cwd: string;
+	/** Cached project disk usage; absent while the first scan is running. */
+	storage?: ProjectStorageUsage;
 	/** Docker container executing this project's tools. */
 	container?: string | null;
 	/** Sessions recorded for this project, counted from the session directory. */

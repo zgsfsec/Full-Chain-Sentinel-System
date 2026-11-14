@@ -59,6 +59,17 @@ test("the table is 项目 / 会话 / 漏洞 / 操作 with the counts from the se
 	expect(html).toContain(">12</span>");
 });
 
+test("storage displays readable capacities, pending scans and partial results", () => {
+	const storage = { bytes: 1.5 * 1024 ** 3, hostBytes: 1024 ** 3, containerBytes: 0.5 * 1024 ** 3, partial: false, measuredAt: 1 };
+	const html = render([project({ storage })]);
+	expect(html).toContain("存储占用");
+	expect(html).toContain("1.5 GB");
+	expect(render([project()])).toContain("统计中…");
+	expect(render([project({ storage: { ...storage, bytes: 0 } })])).toContain("0 B");
+	expect(render([project({ storage: { ...storage, bytes: 0, partial: true } })])).toContain("部分统计");
+	expect(render([project({ storage: { ...storage, bytes: 1024 ** 2, partial: true } })])).toContain("1.0 MB · 部分统计");
+});
+
 test("a running container offers stop, a stopped or missing one offers start", () => {
 	const running = render([project({ id: "p1", name: "运行中项目", state: "running" })]);
 	expect(running).toContain("停止");

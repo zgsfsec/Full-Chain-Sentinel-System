@@ -26,7 +26,7 @@ import type { ProColumns } from "@ant-design/pro-components";
 import { Alert, App, Badge, Button, Dropdown, Form, Input, Modal, Radio, Space, Tag, Tooltip, Typography } from "antd";
 
 import { useState } from "react";
-import { t } from "../i18n.ts";
+import { getLanguage, t } from "../i18n.ts";
 import type { SentinelProjectInfo, SentinelProxyConfigView } from "../types.ts";
 import { Page } from "../ui/Page.tsx";
 import { deleteConfirmMatches, PROJECT_REMOVE_OPTIONS } from "./ProjectDeleteDialog.tsx";
@@ -250,6 +250,42 @@ export function ProjectsPage({
 			render: (_, project) => <span className="project-num">{project.vulnCount ?? 0}</span>,
 		},
 		{
+			title: getLanguage() === "en" ? "Storage" : "存储占用",
+			key: "storage",
+			width: 150,
+			align: "right",
+			sorter: (a, b) => (a.storage?.bytes ?? -1) - (b.storage?.bytes ?? -1),
+			render: (_, project) => {
+				const usage = project.storage;
+				if (!usage) return <Text type="secondary">{getLanguage() === "en" ? "Calculating…" : "统计中…"}</Text>;
+				const units = ["B", "KB", "MB", "GB", "TB"];
+				const unit = Math.min(4, Math.max(0, Math.floor(Math.log2(usage.bytes || 1) / 10)));
+				const size = `${(usage.bytes / 1024 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+				const partial = getLanguage() === "en" ? "Partial" : "部分统计";
+				return (
+					<Tooltip
+						title={
+							<>
+								<div>
+									{getLanguage() === "en"
+										? "Estimated usage: project files, sessions, captures, gateway files and container writable layers. Shared images, shared databases and Docker logs are excluded. Cached for 30 seconds."
+										: "估算项目文件、会话、抓包、网关文件及容器可写层的占用；不含共享镜像、公共数据库及 Docker 日志。结果缓存 30 秒。"}
+								</div>
+								{usage.partial ? (
+									<div>{getLanguage() === "en" ? "Some files or containers could not be measured." : "部分文件或容器无法读取，当前数值仅为已统计部分。"}</div>
+								) : null}
+								<div>{new Date(usage.measuredAt).toLocaleString(getLanguage() === "en" ? "en-US" : "zh-CN")}</div>
+							</>
+						}
+					>
+						<Text className="project-num" type={usage.partial ? "warning" : undefined}>
+							{usage.partial && usage.bytes === 0 ? partial : `${size}${usage.partial ? ` · ${partial}` : ""}`}
+						</Text>
+					</Tooltip>
+				);
+			},
+		},
+		{
 			title: t("操作"),
 			key: "actions",
 			width: 128,
@@ -373,6 +409,7 @@ export function ProjectsPage({
 				search={false}
 				options={false}
 				pagination={false}
+				scroll={{ x: 1062 }}
 				toolbar={{
 					title: (
 						<Space size={6}>

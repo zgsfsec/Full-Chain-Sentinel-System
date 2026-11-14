@@ -6,7 +6,7 @@
  * A white entry surface with a contained brand illustration and a focused form.
  */
 import { GithubOutlined } from "@ant-design/icons";
-import { Alert, Button, Checkbox, ConfigProvider, Form, Input, Typography } from "antd";
+import { Alert, Button, Checkbox, ConfigProvider, Form, Input, Popover, Typography } from "antd";
 import { useId, useState } from "react";
 import {
 	CONSOLE_VERSION,
@@ -146,9 +146,27 @@ export function AuthGate({ mode, onDone }: { mode: "setup" | "login"; onDone: ()
 									</Form.Item>
 								) : (
 									<Form.Item>
-										<Checkbox checked={remember} onChange={(event) => setRemember(event.target.checked)}>
-											{t("记住登录 30 天")}
-										</Checkbox>
+										<div className="auth-screen__login-options">
+											<Checkbox checked={remember} onChange={(event) => setRemember(event.target.checked)}>
+												{t("记住登录 30 天")}
+											</Checkbox>
+											<Popover
+												trigger="click"
+												placement="bottomRight"
+												title={getLanguage() === "en" ? "Reset administrator account" : "重置管理员账号"}
+												content={
+													<div className="auth-screen__password-help">
+														<p>{getLanguage() === "en" ? "On the server host, rename or delete the administrator credentials file:" : "请在服务所在主机上，自行重命名或删除管理员凭据文件："}</p>
+														<code>~/.sentinel/agent/auth.json</code>
+														<p>{getLanguage() === "en" ? "Then refresh this page to return to initial setup and create a new administrator username and password. If you use a custom data directory, use its auth.json file." : "操作后刷新页面，即可恢复首次设置状态，重新创建管理员用户名和密码。若使用自定义数据目录，请操作对应目录下的 auth.json。"}</p>
+													</div>
+												}
+											>
+												<Button type="link" size="small" className="auth-screen__forgot-password">
+													{getLanguage() === "en" ? "Forgot password?" : "忘记密码？"}
+												</Button>
+											</Popover>
+										</div>
 									</Form.Item>
 								)}
 

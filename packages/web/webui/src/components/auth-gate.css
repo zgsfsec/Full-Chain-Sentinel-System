@@ -170,6 +170,32 @@
 	overflow-wrap: anywhere;
 }
 
+.auth-screen__login-options {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.auth-screen__login-options .auth-screen__forgot-password {
+	padding-inline: 0;
+	font-size: 12px;
+}
+
+.auth-screen__password-help {
+	max-width: min(320px, calc(100vw - 48px));
+	overflow-wrap: anywhere;
+}
+
+.auth-screen__password-help p {
+	margin: 0 0 8px;
+}
+
+.auth-screen__password-help p:last-child {
+	margin: 8px 0 0;
+}
+
 .auth-screen .auth-screen__note {
 	display: block;
 	margin-top: 20px;

@@ -66,6 +66,7 @@ import {
 	setPresetEnabled,
 } from "./presets.ts";
 import { handleProjectEgressApi } from "./project-egress.ts";
+import { ProjectStorageCache } from "./project-storage.ts";
 import {
 	addProject,
 	changeProjectProxy,
@@ -450,6 +451,18 @@ export async function startSentinelServer(
 	const proxyChecksInFlight = new Set<string>();
 	const proxyImagePulls = new Map<string, Promise<{ ok: boolean; error?: string }>>();
 	const agentDir = options.agentDir;
+	let storageUpdateTimer: ReturnType<typeof setTimeout> | undefined;
+	const projectStorage = agentDir
+		? new ProjectStorageCache(agentDir, () => {
+				if (storageUpdateTimer) return;
+				storageUpdateTimer = setTimeout(() => {
+					storageUpdateTimer = undefined;
+					void broadcastProjects(false).catch((error: unknown) => {
+						console.error("[sentinel-server] 项目存储统计更新失败:", error);
+					});
+				}, 250);
+			})
+		: undefined;
 	if (agentDir) setServerLanguage(readUiConfig(agentDir).language);
 	// The gate follows authentication by default: a console with no password to
 	// protect (the automated tests) is not the deployment this guards, and one that
@@ -849,11 +862,13 @@ export async function startSentinelServer(
 	 *
 	 * The state comes from one `docker ps -a`, not one inspect per project.
 	 */
-	async function projectInfos(): Promise<SentinelProjectInfo[]> {
+	async function projectInfos(refreshStorage = true): Promise<SentinelProjectInfo[]> {
 		if (!agentDir) return [];
 		const states = await containerStates();
 		const proxies = readProxies(agentDir);
-		return listProjects(agentDir).projects.map(({ id, name, workDir, container, manualStop, proxyId, proxyNode }) => {
+		const projects = listProjects(agentDir).projects;
+		projectStorage?.retain(new Set(projects.map((project) => project.id)));
+		return projects.map(({ id, name, workDir, container, manualStop, proxyId, proxyNode }) => {
 			const wanted = proxyId === undefined ? proxies.defaultId : proxyId;
 			const profile = proxies.proxies.find((entry) => entry.id === wanted);
 			// The node the row shows is the one that will actually be used: a pinned
@@ -867,6 +882,7 @@ export async function startSentinelServer(
 				name,
 				cwd: workDir,
 				container,
+				storage: projectStorage?.get({ id, workDir, container }, refreshStorage),
 				state: states.get(container) ?? "missing",
 				manualStop: manualStop === true,
 				sessionCount: runtime.countProjectSessions(workDir),
@@ -1017,11 +1033,11 @@ export async function startSentinelServer(
 		broadcastEnvironment();
 	}
 
-	async function broadcastProjects(): Promise<void> {
+	async function broadcastProjects(refreshStorage = true): Promise<void> {
 		const registry = agentDir ? listProjects(agentDir) : { projects: [] };
 		broadcast({
 			type: "projects",
-			projects: await projectInfos(),
+			projects: await projectInfos(refreshStorage),
 			activeProjectId: runtime.currentProject?.id ?? registry.lastActiveProjectId ?? null,
 		});
 	}
@@ -4357,6 +4373,8 @@ export async function startSentinelServer(
 				url: consoleUrl(),
 				environment,
 				close: () => {
+					projectStorage?.dispose();
+					if (storageUpdateTimer) clearTimeout(storageUpdateTimer);
 					intelligence?.stop();
 					intelligenceStore?.close();
 					subscriptionScheduler?.stop();
