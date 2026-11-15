@@ -208,7 +208,7 @@ import { PocSubscriptions } from "./poc-subscriptions.ts";
 import { createPocTools } from "./poc-tool.ts";
 import { LIST_CAP, type PocImportOptions, PocStore, pocsDbPath } from "./pocs.ts";
 import { ensureBuiltinPresets, findPreset, readPresetText } from "./presets.ts";
-import { ensureProjectReady, listProjects, type SentinelProject } from "./projects.ts";
+import { ensureProjectReady, listProjects, renameProject, type SentinelProject } from "./projects.ts";
 import type {
 	SentinelApiModel,
 	SentinelApiModelEvent,
@@ -748,6 +748,19 @@ export class SentinelRuntime {
 	/** Activate a container project: sessions live on the host under its workDir, tools exec in the container. */
 	async switchProject(project: { id: string; name: string; container?: string; cwd: string }): Promise<void> {
 		await this.applyProject(project.id, project.name, project.cwd, project.container);
+	}
+
+	/** Renaming must not switch projects or replace a live conversation. */
+	async renameProject(id: string, name: string): Promise<{ project?: SentinelProject; error?: string }> {
+		const result = await renameProject(this.agentDir, id, name);
+		if (result.project) {
+			if (this.activeProjectId === id) this.activeProjectName = result.project.name;
+			for (const managed of this.sessions.values()) {
+				if (managed.projectId === id) managed.projectName = result.project.name;
+			}
+			this.hooks.onStateChange();
+		}
+		return result;
 	}
 
 	private async applyProject(

@@ -121,6 +121,27 @@ export function listProjects(agentDir: string): ProjectsFile {
 	return readProjects(agentDir);
 }
 
+/** Change the display name while keeping the project's directory and container. */
+export function renameProject(
+	agentDir: string,
+	id: string,
+	input: string,
+): Promise<{ project?: SentinelProject; error?: string }> {
+	return withGatewayLock(`${agentDir}:${id}`, async () => {
+		const file = readProjects(agentDir);
+		const project = file.projects.find((entry) => entry.id === id);
+		if (!project) return { error: t("项目不存在") };
+		const name = input.trim();
+		if (!name) return { error: t("项目名称不能为空") };
+		if (file.projects.some((entry) => entry.id !== id && entry.name === name)) {
+			return { error: t("已存在同名项目") };
+		}
+		project.name = name;
+		writeProjects(agentDir, file);
+		return { project };
+	});
+}
+
 export function recordProjectEgressIp(agentDir: string, id: string, result: ProjectEgressIp): void {
 	const file = readProjects(agentDir);
 	const project = file.projects.find((entry) => entry.id === id);
@@ -303,7 +324,13 @@ export async function addProject(
 	}
 	const id = randomUUID();
 	const container = containerNameFor(id);
-	const workDir = projectWorkDir(name);
+	// A renamed project keeps its original directory. Reusing its old name must
+	// create an independent directory rather than mount the first project's data.
+	const preferredDir = projectWorkDir(name);
+	const workDir = readProjects(agentDir).projects.some((entry) => entry.workDir === preferredDir)
+		? `${preferredDir}-${id}`
+		: preferredDir;
+	mkdirSync(workDir, { recursive: true });
 	const project: SentinelProject = {
 		id,
 		name,

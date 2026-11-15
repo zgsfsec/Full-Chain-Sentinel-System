@@ -45,6 +45,7 @@ import { EngineManager, engineHasWorkInFlight } from "./engine.ts";
 import { checkEnvironment } from "./env-check.ts";
 import { guessMimeType } from "./files.ts";
 import { FolderArchiveManager, folderArchiveContentDisposition } from "./folder-archive.ts";
+import { handleGateAuditExport } from "./gate-audit-export.ts";
 import { getServerLanguage, setServerLanguage, t } from "./i18n.ts";
 import { IntelligenceManager } from "./intelligence.ts";
 import { handleIntelligenceApi, handleIntelligenceIngest } from "./intelligence-api.ts";
@@ -1067,6 +1068,44 @@ export async function startSentinelServer(
 		});
 	}
 
+	async function handleProjectRename(request: IncomingMessage, response: ServerResponse): Promise<void> {
+		if (request.method !== "POST") {
+			response.setHeader("allow", "POST");
+			sendJson(response, { error: "Method not allowed" }, 405);
+			return;
+		}
+		try {
+			const body = await readJsonBody(request);
+			if (authEnabled && !hasValidSession(currentAuth(), request)) {
+				sendJson(response, { error: t("未登录") }, 401);
+				return;
+			}
+			if (consentFor(currentAuth()?.username ?? null).required) {
+				sendJson(response, { error: "consent_required" }, 403);
+				return;
+			}
+			if (!body || typeof body.id !== "string" || typeof body.name !== "string") {
+				sendJson(response, { error: t("请填写项目名称") }, 400);
+				return;
+			}
+			if (!agentDir) {
+				sendJson(response, { error: t("项目不存在") }, 503);
+				return;
+			}
+			const result = await runtime.renameProject(body.id, body.name);
+			if (!result.project) {
+				sendJson(response, { error: result.error }, 400);
+				return;
+			}
+			await broadcastProjects(false);
+			sendJson(response, { id: result.project.id, name: result.project.name });
+		} catch (error) {
+			if (!response.destroyed) {
+				sendJson(response, { error: error instanceof Error ? error.message : String(error) }, 500);
+			}
+		}
+	}
+
 	// --- Console authentication -------------------------------------------
 	// Static files carry no secrets and stay open; everything under /api and the
 	// WebSocket needs the session cookie. The credential file is created by the
@@ -1546,6 +1585,12 @@ export async function startSentinelServer(
 				);
 				return;
 			}
+			if (path === "/api/gate-audit/export") {
+				handleGateAuditExport(request, response, (filter, page, pageSize) =>
+					runtime.listGateDecisions(filter, page, pageSize),
+				);
+				return;
+			}
 			if (path === "/api/mitm" || path.startsWith("/api/mitm/")) {
 				void handleMitmApi(request, response, mitm, {
 					project: () => runtime.currentProject,
@@ -1555,6 +1600,10 @@ export async function startSentinelServer(
 			}
 			if (path === "/api/projects/egress-ip") {
 				void handleProjectEgressApi(request, response, agentDir);
+				return;
+			}
+			if (path === "/api/projects/rename") {
+				void handleProjectRename(request, response);
 				return;
 			}
 			if (path === "/api/models/remote") {

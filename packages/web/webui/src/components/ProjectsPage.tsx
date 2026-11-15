@@ -14,6 +14,7 @@
 
 import {
 	DeleteOutlined,
+	EditOutlined,
 	EllipsisOutlined,
 	GlobalOutlined,
 	PlayCircleOutlined,
@@ -27,6 +28,7 @@ import { Alert, App, Badge, Button, Dropdown, Form, Input, Modal, Radio, Space, 
 
 import { useState } from "react";
 import { getLanguage, t } from "../i18n.ts";
+import { renameProject } from "../project-rename.ts";
 import type { SentinelProjectInfo, SentinelProxyConfigView } from "../types.ts";
 import { Page } from "../ui/Page.tsx";
 import { deleteConfirmMatches, PROJECT_REMOVE_OPTIONS } from "./ProjectDeleteDialog.tsx";
@@ -102,6 +104,29 @@ export function ProjectsPage({
 	const [scope, setScope] = useState<"container" | "data">("container");
 	const [deleteFor, setDeleteFor] = useState<SentinelProjectInfo | null>(null);
 	const [proxyFor, setProxyFor] = useState<SentinelProjectInfo | null>(null);
+	const [renameFor, setRenameFor] = useState<SentinelProjectInfo | null>(null);
+	const [renameName, setRenameName] = useState("");
+	const [renameError, setRenameError] = useState<string | null>(null);
+	const [renaming, setRenaming] = useState(false);
+	const renameTitle = getLanguage() === "en" ? "Rename project" : "修改项目名称";
+
+	const confirmRename = async () => {
+		if (!renameFor || renaming) return;
+		if (!renameName.trim()) {
+			setRenameError(t("项目名称不能为空"));
+			return;
+		}
+		setRenaming(true);
+		setRenameError(null);
+		const failure = await renameProject(renameFor.id, renameName);
+		setRenaming(false);
+		if (failure) {
+			setRenameError(failure);
+			return;
+		}
+		setRenameFor(null);
+		message.success(getLanguage() === "en" ? "Project renamed" : "项目名称已修改");
+	};
 
 	const run = async (work: () => Promise<string | null>): Promise<boolean> => {
 		setActionBusy(true);
@@ -288,12 +313,26 @@ export function ProjectsPage({
 		{
 			title: t("操作"),
 			key: "actions",
-			width: 128,
+			width: 220,
 			align: "right",
 			render: (_, project) => {
 				const running = project.state === "running";
 				return (
 					<Space size={4} wrap={false}>
+						<Button
+							size="small"
+							type="text"
+							icon={<EditOutlined />}
+							disabled={actionBusy || renaming}
+							title={renameTitle}
+							onClick={() => {
+								setRenameFor(project);
+								setRenameName(project.name);
+								setRenameError(null);
+							}}
+						>
+							{getLanguage() === "en" ? "Rename" : "修改名称"}
+						</Button>
 						{running ? (
 							<Button
 								size="small"
@@ -409,7 +448,7 @@ export function ProjectsPage({
 				search={false}
 				options={false}
 				pagination={false}
-				scroll={{ x: 1062 }}
+				scroll={{ x: 1154 }}
 				toolbar={{
 					title: (
 						<Space size={6}>
@@ -455,11 +494,38 @@ export function ProjectsPage({
 						name="name"
 						label={t("项目名称")}
 						rules={[{ required: true, message: t("请填写项目名称") }]}
-						extra={t("项目名会用作容器和目录名，创建后不可修改。")}
+						extra={getLanguage() === "en" ? "You can rename the project later; its working directory stays the same." : "创建后可修改项目名称，工作目录保持不变。"}
 					>
 						<Input autoFocus placeholder={t("例如：客户内网")} onPressEnter={() => void create()} />
 					</Form.Item>
 					<ProjectProxyFields config={proxyConfig} choice={createProxy} disabled={actionBusy} onChange={setCreateProxy} />
+				</Form>
+			</Modal>
+
+			<Modal
+				title={renameTitle}
+				open={renameFor !== null}
+				okText={t("保存")}
+				cancelText={t("取消")}
+				confirmLoading={renaming}
+				okButtonProps={{ disabled: !renameName.trim() || renaming }}
+				cancelButtonProps={{ disabled: renaming }}
+				closable={!renaming}
+				onOk={() => void confirmRename()}
+				onCancel={() => { if (!renaming) setRenameFor(null); }}
+				destroyOnHidden
+			>
+				<Form layout="vertical">
+					<Form.Item label={t("项目名称")} htmlFor="project-rename-name" validateStatus={renameError ? "error" : undefined} help={renameError}>
+						<Input
+							id="project-rename-name"
+							autoFocus
+							value={renameName}
+							disabled={renaming}
+							onChange={(event) => { setRenameName(event.target.value); setRenameError(null); }}
+							onPressEnter={() => void confirmRename()}
+						/>
+					</Form.Item>
 				</Form>
 			</Modal>
 

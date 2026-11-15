@@ -10,7 +10,7 @@
 import { DownOutlined, PlusOutlined, SettingOutlined } from "@ant-design/icons";
 import { App, Badge, Button, Dropdown, Form, Input, Modal, Typography } from "antd";
 import { useState } from "react";
-import { t } from "../i18n.ts";
+import { getLanguage, t } from "../i18n.ts";
 import type { SentinelProjectInfo, SentinelProxyConfigView } from "../types.ts";
 import { type ProjectProxyChoice, projectProxyId, projectProxyNode } from "../components/ProjectProxyDialog.tsx";
 import { ProjectProxyFields } from "../components/ProjectProxyFields.tsx";
@@ -132,7 +132,7 @@ export function ProjectSwitcher({
 						name="name"
 						label={t("项目名称")}
 						rules={[{ required: true, message: t("请填写项目名称") }]}
-						extra={t("项目名会用作容器和目录名，创建后不可修改。")}
+						extra={getLanguage() === "en" ? "You can rename the project later; its working directory stays the same." : "创建后可修改项目名称，工作目录保持不变。"}
 					>
 						<Input autoFocus placeholder={t("例如：客户内网")} onPressEnter={() => void submit()} />
 					</Form.Item>

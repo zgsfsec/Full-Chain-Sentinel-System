@@ -101,6 +101,12 @@ test("the active project is marked in its row", () => {
 	expect(html).toContain("当前");
 });
 
+test("each project offers rename even when its container is stopped or missing", () => {
+	for (const state of ["running", "stopped", "missing"] as const) {
+		expect(render([project({ state })])).toContain("修改名称");
+	}
+});
+
 test("only the exact project name unlocks the delete actions", () => {
 	expect(deleteConfirmMatches("靶场", "靶场")).toBe(true);
 	expect(deleteConfirmMatches("靶", "靶场")).toBe(false);

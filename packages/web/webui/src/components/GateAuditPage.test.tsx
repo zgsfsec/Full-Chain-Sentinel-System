@@ -115,6 +115,8 @@ describe("GateAuditPage", () => {
 
 	test("the toolbar offers the project, session and time filters", () => {
 		const html = render({});
+		expect(html).toContain("一键导出");
+		expect(html).toContain("导出当前标签及筛选条件下的全部记录（CSV）");
 		expect(html).toContain("全部项目");
 		expect(html).toContain("全部会话");
 		expect(html).toContain("全部来源");

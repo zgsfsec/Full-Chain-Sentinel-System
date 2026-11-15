@@ -11,11 +11,12 @@
  * honest — it re-queries with the same filter instead of losing the split.
  */
 
-import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { DownloadOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { ProTable } from "@ant-design/pro-components";
 import type { ProColumns } from "@ant-design/pro-components";
 import { Alert, Button, Drawer, Empty, Input, Select, Space, Tabs, Tag, Typography } from "antd";
 import { useMemo, useState } from "react";
+import { downloadGateAudit } from "../gate-audit-export.ts";
 import { getLanguage, t } from "../i18n.ts";
 import type {
 	SentinelGateApproval,
@@ -134,6 +135,8 @@ export function GateAuditPage({
 	const [search, setSearch] = useState(filter.search ?? "");
 	const [windowIndex, setWindowIndex] = useState(0);
 	const [expanded, setExpanded] = useState<string | null>(null);
+	const [exporting, setExporting] = useState(false);
+	const [exportError, setExportError] = useState<string | null>(null);
 	const detailItem = items.find((item) => item.id === expanded) ?? null;
 
 	/**
@@ -146,6 +149,19 @@ export function GateAuditPage({
 
 	const apply = (patch: Partial<SentinelGateFilter>, nextPage = 1) => {
 		onQuery({ ...filter, ...patch }, nextPage);
+	};
+
+	const exportRecords = async () => {
+		if (exporting) return;
+		setExporting(true);
+		setExportError(null);
+		try {
+			await downloadGateAudit(filter);
+		} catch (error) {
+			setExportError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setExporting(false);
+		}
 	};
 
 	// The verdict filter means different things on the two tabs: `failed` only
@@ -331,9 +347,22 @@ export function GateAuditPage({
 				</>
 			}
 			extra={
-				<Button icon={<ReloadOutlined />} onClick={onRefresh}>
-					{t("刷新")}
-				</Button>
+				<Space>
+					<Button
+						icon={<DownloadOutlined />}
+						loading={exporting}
+						disabled={total === 0}
+						onClick={() => void exportRecords()}
+						title={getLanguage() === "en"
+							? "Export all records matching the current tab and filters as CSV"
+							: "导出当前标签及筛选条件下的全部记录（CSV）"}
+					>
+						{getLanguage() === "en" ? "Export CSV" : "一键导出"}
+					</Button>
+					<Button icon={<ReloadOutlined />} onClick={onRefresh}>
+						{t("刷新")}
+					</Button>
+				</Space>
 			}
 		>
 			<Tabs
@@ -362,6 +391,10 @@ export function GateAuditPage({
 			/>
 
 			<MetricStrip items={statItems} note={tab === "auto" ? t("这些调用不经过判定，只留痕") : undefined} />
+
+			{exportError ? (
+				<Alert type="error" showIcon className="ui-page__alert" title={exportError} closable onClose={() => setExportError(null)} />
+			) : null}
 
 			{stats?.lastError ? (
 				<Alert
