@@ -29,6 +29,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { parseCodeReproductionResult } from "./code-reproduction.ts";
 import { type CommanderPort, createCommanderTools, formatTaskBoard, retryDecision } from "./commander-tools.ts";
+import type { CredentialStore } from "./credential-store.ts";
+import { createCredentialTools, SessionCredentialAccess } from "./credential-tool.ts";
 import { containerWorkPath, dockerBashOperations } from "./docker.ts";
 import { listDoctrines, resolveDoctrines, type SentinelDoctrine } from "./doctrines.ts";
 import {
@@ -116,6 +118,7 @@ const COMMANDER_BASH_DENYLIST: RegExp[] = [
 ];
 
 export interface EngineHooks {
+	credentialStore?(): CredentialStore;
 	/** Delivery results appear alongside chat and open-source notifications. */
 	onNotifyStatus?(status: SentinelNotifyStatus): void;
 	/** Save the final report and images before marking the engineering run complete. */
@@ -389,6 +392,10 @@ export class EngineManager {
 	findSubmittedEngine(source: string, key: string): SentinelEngine | undefined {
 		if (this.disposed) return undefined;
 		return this.store.findSubmittedEngine(source, key);
+	}
+
+	getSubmission(engineId: string): EngineSubmission | undefined {
+		return this.disposed ? undefined : this.store.submission(engineId);
 	}
 
 	/** Operator pause: stop dispatching, abort running tasks, keep everything for resume. */
@@ -1305,7 +1312,21 @@ export class EngineManager {
 					: {}),
 				...(commanderPermissions.read ? { read: createReadTool(project.cwd) } : {}),
 			},
-			customTools: createCommanderTools(this.commanderPort(entry)),
+			customTools: [
+				...createCommanderTools(this.commanderPort(entry)),
+				...(submission?.credentials?.scope === "project" && this.hooks.credentialStore
+					? createCredentialTools(
+							new SessionCredentialAccess({
+								enabled: () => !this.disposed && entry.engine.status === "running",
+								projectId: project.id,
+								sessionId: () => entry.engine.id,
+								store: this.hooks.credentialStore,
+							}),
+						)
+							.filter((tool) => tool.name === "credential_list")
+							.map((tool) => ({ ...tool, defaultActive: true }))
+					: []),
+			],
 		});
 		if (this.disposed || this.live.get(entry.engine.id) !== entry || entry.engine.status !== "running") {
 			created.session.dispose();
@@ -1535,6 +1556,7 @@ export class EngineManager {
 				// paused applies to the tasks started after it resumes.
 				gateMode: entry.engine.gateMode,
 				...input,
+				credentials: submission?.credentials,
 				// The hub counter is persisted here, not in the worker: a finding is
 				// already in the hub when this fires, and the board reads the task row.
 				onFinding: () => {
@@ -1750,6 +1772,7 @@ export class EngineManager {
 	/** Each daily recurrence is a fresh engine row so completed runs remain reviewable. */
 	private scheduleNextDailyRun(engine: SentinelEngine, prior: NonNullable<SentinelEngine["schedule"]>): void {
 		const nextStart = nextDailyOccurrence(prior, Date.now());
+		const submission = this.store.submission(engine.id);
 		const schedule = normalizeSchedule(
 			{
 				timezone: prior.timezone,
@@ -1774,6 +1797,7 @@ export class EngineManager {
 			status: "scheduled",
 			startedAt: null,
 			schedule,
+			submission: submission ? { ...submission, key: `daily:${engine.id}:${nextStart}` } : undefined,
 		});
 		this.live.set(stored.id, this.emptyLive(stored));
 		this.hooks.onChange(stored);

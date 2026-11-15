@@ -1492,6 +1492,7 @@ export interface SentinelEngineTask {
 /** An engineering run: a commander plus its targets, tasks, and report. */
 export interface SentinelEngine {
 	id: string;
+	submissionSource?: string;
 	projectId: string;
 	projectName: string;
 	name: string;

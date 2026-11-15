@@ -39,6 +39,11 @@ import {
 } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { UploadFile } from "antd";
+import type { CredentialView } from "../../../src/credential-types.ts";
+import type { SecurityCheckRuleSummary } from "../../../src/security-check-types.ts";
+import { securityCheckRequest } from "../security-check-api.ts";
+import { EngineTabs, SecurityCheckRules } from "./SecurityChecksPage.tsx";
+import { SecurityCheckCredentials } from "./SecurityCheckCredentials.tsx";
 import { engineTargetText } from "../engine-targets.ts";
 import { getLanguage, t } from "../i18n.ts";
 import type { UploadedFile } from "../uploads.ts";
@@ -310,20 +315,24 @@ export interface EnginePageProps {
 	judgeAvailable: boolean;
 }
 
-type View = "list" | "board" | "create" | "doctrines";
+type View = "list" | "board" | "create" | "doctrines" | "rules";
 
 export function EnginePage(props: EnginePageProps) {
 	const [view, setView] = useState<View>(props.initialBoardId ? "board" : "list");
+	const [listTab, setListTab] = useState("list");
+	const [securityCheck, setSecurityCheck] = useState(false);
 	const [boardId, setBoardId] = useState<string | null>(props.initialBoardId ?? null);
 	const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 	const [report, setReport] = useState<{ markdown: string; filename: string } | null>(null);
 	const [editingSchedule, setEditingSchedule] = useState(false);
 	const [page, setPage] = useState(1);
 	const [pageSize, setPageSize] = useState(20);
-	const lastPage = Math.max(1, Math.ceil(props.engines.length / pageSize));
+	const checksList = listTab === "checks";
+	const listedEngines = checksList ? props.engines.filter((engine) => engine.submissionSource === "security-check") : props.engines;
+	const lastPage = Math.max(1, Math.ceil(listedEngines.length / pageSize));
 	useEffect(() => {
 		setPage(1);
-	}, [props.project?.id]);
+	}, [props.project?.id, listTab]);
 	useEffect(() => {
 		setPage((current) => Math.min(current, lastPage));
 	}, [lastPage]);
@@ -353,6 +362,7 @@ export function EnginePage(props: EnginePageProps) {
 	}, [view, boardId]);
 
 	const send = props.onSend;
+	if (view === "rules") return <Page title="检查规则" description="管理安全检查使用的规则及同步来源。" extra={<Button onClick={() => setView("list")}>返回检查列表</Button>}><SecurityCheckRules /></Page>;
 
 	if (view === "create") {
 		return (
@@ -364,6 +374,8 @@ export function EnginePage(props: EnginePageProps) {
 					hasProject={props.hasProject}
 					project={props.project}
 					judgeAvailable={props.judgeAvailable}
+					securityCheck={securityCheck}
+					onSecurityCreated={openBoard}
 					onCancel={() => setView("list")}
 					onSubmit={(input) => {
 						send({ type: "engine_create", input });
@@ -403,7 +415,7 @@ export function EnginePage(props: EnginePageProps) {
 				className="engine-workspace"
 				title={
 					<Space size={8} wrap>
-						<Button size="small" onClick={() => setView("list")}>
+						<Button size="small" onClick={() => { if (board.submissionSource === "security-check") setListTab("checks"); setView("list"); }}>
 							{t("← 返回")}
 						</Button>
 						{board.name}
@@ -508,6 +520,7 @@ export function EnginePage(props: EnginePageProps) {
 								cancelText={t("返回")}
 								onConfirm={() => {
 									send({ type: "engine_delete", id: board.id });
+									if (board.submissionSource === "security-check") setListTab("checks");
 									setView("list");
 								}}
 							>
@@ -594,6 +607,12 @@ export function EnginePage(props: EnginePageProps) {
 	// list view
 	const columns: ProColumns<SentinelEngine>[] = [
 		{
+			title: "来源", dataIndex: "submissionSource", width: 110,
+			filters: [{ text: "安全检查", value: "security-check" }, { text: "手动创建", value: "manual" }, { text: "情报", value: "intelligence" }],
+			onFilter: (value, engine) => (engine.submissionSource ?? "manual") === value,
+			render: (_, engine) => engine.submissionSource === "security-check" ? <Tag>安全检查</Tag> : engine.submissionSource === "intelligence" ? "情报" : "手动创建",
+		},
+		{
 			title: t("工程"),
 			dataIndex: "name",
 			key: "name",
@@ -663,30 +682,33 @@ export function EnginePage(props: EnginePageProps) {
 		<Page
 			className="engine-list"
 			title={t("工程")}
+			tabs={<EngineTabs active={listTab} onChange={setListTab} />}
 			description={
 				props.hasProject
-					? t("{project} · {count} 个工程", {
+					? checksList ? `${props.project?.name ?? ""} · ${listedEngines.length} 个检查任务` : t("{project} · {count} 个工程", {
 							project: props.project?.name ?? "",
-							count: props.engines.length,
+							count: listedEngines.length,
 						})
 					: t("请先选择项目")
 			}
 			extra={
-				<Space size={8}>
-					<Button icon={<ReadOutlined />} onClick={() => setView("doctrines")}>
+				<Space size={8} wrap>
+					{checksList && <Button icon={<SettingOutlined />} onClick={() => setView("rules")}>检查规则</Button>}
+					{!checksList && <Button icon={<ReadOutlined />} onClick={() => setView("doctrines")}>
 						{t("指挥思路")}
-					</Button>
-					<Button type="primary" icon={<PlusOutlined />} disabled={!props.hasProject} onClick={() => setView("create")}>
-						{t("新建工程")}
+					</Button>}
+					<Button type="primary" icon={<PlusOutlined />} disabled={!props.hasProject} onClick={() => { setSecurityCheck(checksList); setView("create"); }}>
+						{checksList ? "新建检查" : t("新建工程")}
 					</Button>
 				</Space>
 			}
 		>
 			<ProTable<SentinelEngine>
+				key={listTab}
 				rowKey="id"
 				size="small"
-				columns={columns}
-				dataSource={props.engines}
+				columns={checksList ? columns.filter((column) => column.dataIndex !== "submissionSource").map((column) => column.key === "name" ? { ...column, title: "检查任务" } : column) : columns}
+				dataSource={listedEngines}
 				search={false}
 				options={false}
 				pagination={{
@@ -707,7 +729,7 @@ export function EnginePage(props: EnginePageProps) {
 				})}
 				locale={{
 					emptyText: props.hasProject
-						? t("还没有工程。点「新建工程」，贴入目标清单并选择指挥思路即可开始。")
+						? checksList ? "还没有检查任务。点击「新建检查」，选择规则并设置检查目标。" : t("还没有工程。点「新建工程」，贴入目标清单并选择指挥思路即可开始。")
 						: t("工程属于项目：请先在侧栏顶部选择或创建一个项目。"),
 				}}
 			/>
@@ -1263,6 +1285,8 @@ function ScheduleModal({
 }
 
 function CreateEngineForm(props: {
+	securityCheck: boolean;
+	onSecurityCreated(id: string): void;
 	doctrines: SentinelDoctrineView[];
 	presets: SentinelPresetView[];
 	hasProject: boolean;
@@ -1281,12 +1305,22 @@ function CreateEngineForm(props: {
 		schedule?: SentinelEngineScheduleInput;
 	}): void;
 }) {
-	type WizardStep = 1 | 2 | 3;
+	type WizardStep = 1 | 2 | 3 | 4;
 	const [step, setStep] = useState<WizardStep>(1);
-	const [name, setName] = useState("");
+	const [name, setName] = useState(props.securityCheck ? "安全检查" : "");
+	const [securityRules, setSecurityRules] = useState<SecurityCheckRuleSummary[]>([]);
+	const [rulesValid, setRulesValid] = useState(true);
+	const [credentialsValid, setCredentialsValid] = useState(true);
+	const settingsStep = props.securityCheck ? 4 : 3;
+	const [credentialTargets, setCredentialTargets] = useState<CredentialView[]>([]);
+	const [requirements, setRequirements] = useState("");
+	const [submitting, setSubmitting] = useState(false);
+	const request = useRef({ content: "", id: crypto.randomUUID() });
+	const submissionLife = useRef(new AbortController());
+	useEffect(() => { submissionLife.current = new AbortController(); return () => submissionLife.current.abort(); }, []);
 	const [targets, setTargets] = useState("");
 	const [files, setFiles] = useState<UploadFile<UploadedFile>[]>([]);
-	const [selectedDoctrineId, setSelectedDoctrineId] = useState<string | null>(props.doctrines.some((doctrine) => doctrine.id === "attack-defense-web") ? "attack-defense-web" : null);
+	const [selectedDoctrineId, setSelectedDoctrineId] = useState<string | null>(props.securityCheck ? "security-check" : props.doctrines.some((doctrine) => doctrine.id === "attack-defense-web") ? "attack-defense-web" : null);
 	const selectedDoctrine = props.doctrines.find((doctrine) => doctrine.id === selectedDoctrineId);
 	/** Preset whitelist; empty means "no restriction" and is the default. */
 	const [selectedPresets, setSelectedPresets] = useState<string[]>([]);
@@ -1311,7 +1345,12 @@ function CreateEngineForm(props: {
 	const uploading = files.some((file) => file.status === "uploading");
 	const failedUploads = files.some((file) => file.status !== "uploading" && (file.status !== "done" || !file.response));
 	const attachments = files.flatMap((file) => file.status === "done" && file.response ? [file.response] : []);
-	const stepMeta = [
+	const stepMeta = props.securityCheck ? [
+		{ step: 1 as const, title: "选择规则", hint: "检查内容" },
+		{ step: 2 as const, title: "输入目标", hint: "范围与名称" },
+		{ step: 3 as const, title: "关联凭据中心", hint: "可选的凭据目标" },
+		{ step: 4 as const, title: "执行配置", hint: "Agent、时间与上限" },
+	] : [
 		{ step: 1 as const, title: t("指挥思路"), hint: t("思路与 Agent") },
 		{ step: 2 as const, title: t("目标"), hint: t("范围与名称") },
 		{ step: 3 as const, title: getLanguage() === "en" ? "Run settings" : "执行配置", hint: t("时间与上限") },
@@ -1323,19 +1362,26 @@ function CreateEngineForm(props: {
 
 	/** Validation is per step so "下一步" never skips a blocking field. */
 	function validateStep(target: WizardStep): string | null {
+		if (target === 1 && props.securityCheck) return !securityRules.length ? "请至少选择一条检查规则" : !rulesValid ? "请确认已选规则的当前版本后继续" : null;
 		if (target === 1) {
 			if (!selectedDoctrine) return getLanguage() === "en" ? "Choose one command doctrine." : "请选择一个指挥思路";
 			return null;
 		}
 		if (target === 2) {
-			if (!name.trim()) return t("请填写工程名称");
+			if (!name.trim()) return props.securityCheck ? "请填写检查名称" : t("请填写工程名称");
 			if (!props.project) return t("请先选择项目");
 			if (uploading) return getLanguage() === "en" ? "Wait for uploads to finish." : "请等待文件上传完成。";
 			if (failedUploads) return getLanguage() === "en" ? "Remove or upload failed files again." : "请移除上传失败的文件，或重新上传。";
 			if (attachments.some((file) => file.projectId !== props.project?.id)) return getLanguage() === "en" ? "Project changed; upload the files again." : "项目已切换，请重新上传文件。";
-			if (targets.trim() === "" && attachments.length === 0) return getLanguage() === "en" ? "Describe the targets or attach a file." : "请填写目标描述或上传附件。";
+			if (!props.securityCheck && targets.trim() === "" && attachments.length === 0) return getLanguage() === "en" ? "Describe the targets or attach a file." : "请填写目标描述或上传附件。";
 			return null;
 		}
+		if (props.securityCheck && target === 3) {
+			if (!credentialsValid) return "请确认已选凭据的当前版本后继续";
+			return targets.trim() || attachments.length || credentialTargets.length || requirements.trim()
+				? null : "请关联凭据目标，或返回上一步输入目标或检查要求。";
+		}
+		if (!props.securityCheck && !selectedDoctrine) return "请选择一个指挥思路";
 		if (startMode === "scheduled") {
 			const parsed = parseScheduleDraft(scheduleDraft);
 			return parsed.schedule ? null : (parsed.error ?? t("定时计划无效"));
@@ -1359,7 +1405,8 @@ function CreateEngineForm(props: {
 	}
 
 	function submit(): void {
-		for (const current of [1, 2, 3] as const) {
+		if (submitting) return;
+		for (const { step: current } of stepMeta) {
 			const error = validateStep(current);
 			if (error) {
 				setStep(current);
@@ -1373,11 +1420,11 @@ function CreateEngineForm(props: {
 			return;
 		}
 		setFormError(null);
-		if (!selectedDoctrine) return;
-		props.onSubmit({
+		if (!props.securityCheck && !selectedDoctrine) return;
+		const input = {
 			name: name.trim(),
 			targets: engineTargetText(targets, attachments, props.project?.id ?? ""),
-			doctrines: [selectedDoctrine.id],
+			doctrines: props.securityCheck ? ["security-check"] : selectedDoctrine ? [selectedDoctrine.id] : [],
 			presetIds: selectedPresets,
 			presetOptional,
 			limits: {
@@ -1389,7 +1436,18 @@ function CreateEngineForm(props: {
 			},
 			gateMode,
 			schedule: parsed.schedule,
-		});
+		};
+		if (!props.securityCheck) { props.onSubmit(input); return; }
+		const body = { projectId: props.project?.id, input, requirements,
+			rules: securityRules.map(({ id, version }) => ({ id, version })),
+			credentials: credentialTargets.map(({ id, revision }) => ({ id, revision })) };
+		const content = JSON.stringify(body);
+		if (request.current.content !== content) request.current = { content, id: crypto.randomUUID() };
+		setSubmitting(true);
+		void securityCheckRequest<{ engineId: string }>("/submit", { ...body, requestId: request.current.id }, submissionLife.current.signal)
+			.then((result) => { if (!submissionLife.current.signal.aborted) props.onSecurityCreated(result.engineId); })
+			.catch((e: unknown) => { if (!submissionLife.current.signal.aborted) setFormError(e instanceof Error ? e.message : "提交失败"); })
+			.finally(() => { if (!submissionLife.current.signal.aborted) setSubmitting(false); });
 	}
 
 	function next(): void {
@@ -1398,7 +1456,7 @@ function CreateEngineForm(props: {
 			setFormError(error);
 			return;
 		}
-		if (step < 3) {
+		if (step < settingsStep) {
 			setStep((step + 1) as WizardStep);
 			setFormError(null);
 			return;
@@ -1406,27 +1464,39 @@ function CreateEngineForm(props: {
 		submit();
 	}
 
-	const nextLabel =
-		step === 1
-			? (getLanguage() === "en" ? "Next: targets →" : "下一步：目标 →")
-			: step === 2
-				? t("下一步：执行配置 →")
-				: startMode === "scheduled"
-					? t("保存计划")
-					: t("启动工程 →");
+	const nextLabel = step < settingsStep
+		? props.securityCheck ? `下一步：${stepMeta[step]?.title ?? ""}` : step === 1
+			? (getLanguage() === "en" ? "Next: targets →" : "下一步：目标 →") : t("下一步：执行配置 →")
+		: startMode === "scheduled" ? t("保存计划") : props.securityCheck ? "提交检查" : t("启动工程 →");
+
+	const agentSettings = (
+		<div className="enginewiz-agent-entry">
+			<div className="enginewiz-agent-entry__summary">
+				<Text>{t("Agent 白名单")}</Text>
+				<Text type="secondary">
+					{selectedPresetLabel} · {presetOptional
+						? (getLanguage() === "en" ? "Default agent allowed" : "允许默认 Agent")
+						: (getLanguage() === "en" ? "Preset required" : "必须指定预设")}
+				</Text>
+			</div>
+			<Button size="small" type="link" icon={<SettingOutlined />} onClick={() => setPresetsOpen(true)}>
+				{t("配置")}
+			</Button>
+		</div>
+	);
 
 	return (
 		<div className="enginewiz">
 			<div className="enginewiz-head">
 				<div>
 					<Title level={4} className="enginewiz-title">
-						{t("新建工程")}
+						{props.securityCheck ? "新建检查" : t("新建工程")}
 					</Title>
 					<Text type="secondary">
-						{getLanguage() === "en" ? "Choose one command doctrine, add targets, then configure execution." : "先选择一个指挥思路，再添加目标，最后配置执行。"}
+						{props.securityCheck ? "选择检查规则，输入目标，按需关联凭据中心，最后配置执行。" : getLanguage() === "en" ? "Choose one command doctrine, add targets, then configure execution." : "先选择一个指挥思路，再添加目标，最后配置执行。"}
 					</Text>
 				</div>
-				<Button onClick={props.onCancel}>{t("取消")}</Button>
+				<Button disabled={submitting} onClick={props.onCancel}>{t("取消")}</Button>
 			</div>
 
 			<div className="enginewiz-progress">
@@ -1437,25 +1507,20 @@ function CreateEngineForm(props: {
 					items={stepMeta.map((item) => ({ title: item.title }))}
 				/>
 				<Text type="secondary" className="enginewiz-step-hint">
-					{t("第 {step} 步 / 共 3 步 · {hint}", { step, hint: stepMeta[step - 1]?.hint ?? "" })}
+					{getLanguage() === "en" && !props.securityCheck ? `Step ${step} / ${stepMeta.length} · ${stepMeta[step - 1]?.hint ?? ""}` : `第 ${step} 步 / 共 ${stepMeta.length} 步 · ${stepMeta[step - 1]?.hint ?? ""}`}
 				</Text>
 			</div>
 
 			<Row gutter={[16, 16]}>
-				<Col xs={24} lg={16}>
+				<Col xs={24} lg={props.securityCheck && (step === 1 || step === 3) ? 24 : 16}>
 					<Card
 						size="small"
-						title={
-							step === 1
-								? (getLanguage() === "en" ? "Step 1 · Command doctrines" : "第 1 步 · 指挥思路")
-								: step === 2
-									? (getLanguage() === "en" ? "Step 2 · Targets" : "第 2 步 · 目标")
-									: (getLanguage() === "en" ? "Step 3 · Run settings" : "第 3 步 · 执行配置")
-						}
+						title={getLanguage() === "en" && !props.securityCheck ? `Step ${step} · ${stepMeta[step - 1]?.title ?? ""}` : `第 ${step} 步 · ${stepMeta[step - 1]?.title ?? ""}`}
 					>
 						{formError ? <Alert type="error" showIcon className="ui-page__alert" title={formError} /> : null}
 
-						{step === 1 ? (
+						{props.securityCheck && step === 1 && <SecurityCheckRules selectedRules={securityRules} onChange={setSecurityRules} onValidityChange={setRulesValid} />}
+						{!props.securityCheck && step === 1 ? (
 							<>
 								{props.doctrines.length === 0 ? (
 									<Alert
@@ -1494,25 +1559,14 @@ function CreateEngineForm(props: {
 									</Radio.Group>
 								)}
 
-								<div className="enginewiz-agent-entry">
-									<div className="enginewiz-agent-entry__summary">
-										<Text>{t("Agent 白名单")}</Text>
-										<Text type="secondary">
-											{selectedPresetLabel} · {presetOptional
-												? (getLanguage() === "en" ? "Default agent allowed" : "允许默认 Agent")
-												: (getLanguage() === "en" ? "Preset required" : "必须指定预设")}
-										</Text>
-									</div>
-									<Button size="small" type="link" icon={<SettingOutlined />} onClick={() => setPresetsOpen(true)}>
-										{t("配置")}
-									</Button>
-								</div>
+								{agentSettings}
 							</>
 						) : null}
 
 						{step === 2 ? (
 							<Form layout="vertical" requiredMark={false}>
-								<Form.Item label={t("工程名称")} required>
+								{props.securityCheck && <Form.Item label="补充检查要求（可选）"><Input.TextArea value={requirements} onChange={(e) => setRequirements(e.target.value)} autoSize={{ minRows: 2, maxRows: 8 }} /></Form.Item>}
+								<Form.Item label={props.securityCheck ? "检查名称" : t("工程名称")} required>
 									<Input
 										value={name}
 										onChange={(event) => {
@@ -1524,7 +1578,8 @@ function CreateEngineForm(props: {
 								</Form.Item>
 								<Form.Item
 									label={t("目标清单")}
-									required
+									required={!props.securityCheck}
+									extra={props.securityCheck ? "也可留空，在下一步从凭据中心选择目标。" : undefined}
 								>
 									<Input.TextArea
 										value={targets}
@@ -1545,8 +1600,11 @@ function CreateEngineForm(props: {
 							</Form>
 						) : null}
 
-						{step === 3 ? (
+						{props.securityCheck && step === 3 && props.project && <SecurityCheckCredentials key={props.project.id} projectId={props.project.id} selected={credentialTargets} onChange={setCredentialTargets} onValidityChange={setCredentialsValid} />}
+
+						{step === settingsStep ? (
 							<>
+								{props.securityCheck && agentSettings}
 								<Space size={8} className="enginewiz-section">
 									<Text strong>{t("启动方式")}</Text>
 									<Text type="secondary">{t("时区 {timezone}", { timezone: browserTimezone() })}</Text>
@@ -1657,10 +1715,11 @@ function CreateEngineForm(props: {
 								</Radio.Group>
 
 								<Card size="small" className="enginewiz-review" title={t("确认")}>
+									{props.securityCheck && <Typography.Paragraph>项目：{props.project?.name} · 规则 {securityRules.length} 条 · 凭据目标 {credentialTargets.length} 条。工程可按需访问当前项目全部凭据。<br />{[targets, ...credentialTargets.map((r) => `${r.host} (${r.type})`)].filter(Boolean).join("；") || requirements}</Typography.Paragraph>}
 									<Space size={24} wrap>
-										<Text type="secondary">
+										{!props.securityCheck && <Text type="secondary">
 											{t("指挥")} <Text strong>{selectedDoctrine?.name ?? t("待填写")}</Text>
-										</Text>
+										</Text>}
 										<Text type="secondary">
 											{t("Agent")}{" "}
 											<Text strong>
@@ -1688,22 +1747,22 @@ function CreateEngineForm(props: {
 						) : null}
 
 						<div className="enginewiz-foot">
-							<Button disabled={step === 1} onClick={() => goToStep((step - 1) as WizardStep)}>
+							<Button disabled={step === 1 || submitting} onClick={() => goToStep((step - 1) as WizardStep)}>
 								{t("上一步")}
 							</Button>
-							<Button type="primary" onClick={next} disabled={uploading}>
+							<Button type="primary" onClick={next} disabled={uploading || (step === 1 && !rulesValid) || (step === 3 && props.securityCheck && !credentialsValid)} loading={submitting}>
 								{nextLabel}
 							</Button>
-							<Text type="secondary">{step} / 3</Text>
+							<Text type="secondary">{step} / {stepMeta.length}</Text>
 						</div>
 					</Card>
 				</Col>
-				<Col xs={24} lg={8}>
+				{!(props.securityCheck && (step === 1 || step === 3)) && <Col xs={24} lg={8}>
 					<Card size="small" title={t("草稿")} className="enginewiz-draft">
-						<Text type="secondary">DRAFT / 0{step}</Text>
+						{props.securityCheck ? <Text type="secondary">已选 {securityRules.length} 条规则 · {credentialTargets.length} 个凭据目标</Text> : <Text type="secondary">DRAFT / 0{step}</Text>}
 						<Text strong>{name.trim() || t("未命名工程")}</Text>
 						<Text type="secondary">
-							{selectedDoctrine?.name ?? t("待填写")} · {selectedPresetLabel}
+							{!props.securityCheck && `${selectedDoctrine?.name ?? t("待填写")} · `}{selectedPresetLabel}
 						</Text>
 						{files.length > 0 ? <Text type="secondary">{getLanguage() === "en" ? `${attachments.length} attachments uploaded` : `已上传 ${attachments.length} 个附件`}</Text> : null}
 					</Card>
@@ -1729,7 +1788,7 @@ function CreateEngineForm(props: {
 							</div>
 						</Space>
 					</Card>
-				</Col>
+				</Col>}
 			</Row>
 			<Drawer
 				title={t("Agent 白名单")}

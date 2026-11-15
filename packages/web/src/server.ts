@@ -97,6 +97,7 @@ import { handleRemoteModelsApi } from "./remote-models-api.ts";
 import { handleReportApi } from "./report-api.ts";
 import { submitReport } from "./report-content.ts";
 import { VulnReviewer } from "./reviewer.ts";
+import { SecurityChecks } from "./security-checks.ts";
 import { SubscriptionScheduler } from "./subscription-scheduler.ts";
 import { createTerminal } from "./terminal.ts";
 import { readUiConfig, writeUiConfig } from "./ui-config.ts";
@@ -569,6 +570,7 @@ export async function startSentinelServer(
 		? new EngineManager(
 				agentDir,
 				{
+					credentialStore: () => runtime.credentialStore,
 					archiveReport: async (engine, markdown) => {
 						const project = listProjects(agentDir).projects.find((entry) => entry.id === engine.projectId);
 						if (!project) throw new Error("工程所属项目不存在，无法归档报告。");
@@ -616,6 +618,21 @@ export async function startSentinelServer(
 	 * terminal state is an engine: the manager polls and judges, and the hook
 	 * below turns a confirmed fix into an engine the operator can watch.
 	 */
+	const securityChecks =
+		agentDir && engines
+			? new SecurityChecks(
+					agentDir,
+					engines,
+					(id) => {
+						const project = listProjects(agentDir).projects.find((entry) => entry.id === id);
+						return project
+							? { id: project.id, name: project.name, cwd: project.workDir, container: project.container }
+							: undefined;
+					},
+					() => runtime.credentialStore,
+				)
+			: undefined;
+	if (process.env.PI_OFFLINE !== "1") securityChecks?.sync.start();
 	const codeMonitorStore = agentDir ? new CodeMonitorStore(codeMonitorDbPath(agentDir)) : undefined;
 	const codeMonitors =
 		agentDir && codeMonitorStore
@@ -1545,6 +1562,20 @@ export async function startSentinelServer(
 					request,
 					response,
 					agentDir,
+					() =>
+						(!authEnabled || hasValidSession(currentAuth(), request)) &&
+						!consentFor(currentAuth()?.username ?? null).required,
+				);
+				return;
+			}
+			if (path === "/api/security-checks" || path.startsWith("/api/security-checks/")) {
+				if (!securityChecks) {
+					sendJson(response, { error: "安全检查需要配置数据目录" }, 503);
+					return;
+				}
+				void securityChecks.handleApi(
+					request,
+					response,
 					() =>
 						(!authEnabled || hasValidSession(currentAuth(), request)) &&
 						!consentFor(currentAuth()?.username ?? null).required,
@@ -4421,6 +4452,7 @@ export async function startSentinelServer(
 					engines?.dispose();
 					terminal.dispose();
 					credentials?.dispose();
+					securityChecks?.dispose();
 					runtime.dispose();
 					for (const client of clients) client.terminate();
 					snapshots.cancel();

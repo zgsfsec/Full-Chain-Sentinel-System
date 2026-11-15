@@ -176,3 +176,71 @@ test("switching project during verification setup cannot send its instruction in
 	expect(runtime.currentSessionId).toBe(projectBSession);
 	expect(prompt).not.toHaveBeenCalled();
 });
+
+test("engine worker credentials require explicit capability and stay project-bound on resume", async () => {
+	const created = vi.spyOn(sdk, "createAgentSession");
+	await runtime.init();
+	const own = runtime.credentialStore.save("a", [
+		parseCredential({ type: "Linux", host: "192.0.2.1", password: "fixture-secret" }),
+	])[0];
+	const other = runtime.credentialStore.save("b", [parseCredential({ type: "Linux", host: "192.0.2.2" })])[0];
+	const options = {
+		project: projectA,
+		appendPrompt: "worker",
+		presetId: null,
+		taskTitle: "check",
+		engineId: "e1",
+		taskId: "t1",
+		gateMode: "auto" as const,
+		taskSessionId: null,
+		reopen: false,
+		onFinding: () => {},
+		goalPort: {
+			current: () => undefined,
+			submitted: () => 0,
+			progress: () => {},
+			complete: () => {},
+			blocked: () => ({ streak: 0, accepted: false }),
+		},
+	};
+	const plain = await runtime.acquireTaskSession(options);
+	expect(plain.session.getActiveToolNames().some((name) => CREDENTIAL_TOOL_NAMES.includes(name))).toBe(false);
+	plain.release();
+	const worker = await runtime.acquireTaskSession({ ...options, taskId: "t2", credentials: { scope: "project" } });
+	expect(worker.session.getActiveToolNames()).toEqual(expect.arrayContaining([...CREDENTIAL_TOOL_NAMES]));
+	expect(worker.session.systemPrompt).toContain("凭据客户端选择");
+	const tools = created.mock.calls.at(-1)![0]!.customTools!;
+	const read = tools.find((t) => t.name === "credential_read")!;
+	await runtime.switchProject(projectB);
+	expect(
+		(await read.execute("own", { id: own.id, purpose: "verify" }, undefined, undefined, {} as never)).isError,
+	).not.toBe(true);
+	expect(
+		(await read.execute("other", { id: other.id, purpose: "verify" }, undefined, undefined, {} as never)).isError,
+	).toBe(true);
+	// Persist one entry so the runtime can reopen the ordinary task transcript.
+	worker.manager.appendMessage({ role: "user", content: "Check selected target", timestamp: Date.now() });
+	const sessionId = worker.manager.getSessionId();
+	worker.release();
+	const resumed = await runtime.acquireTaskSession({
+		...options,
+		taskId: "t2",
+		taskSessionId: sessionId,
+		reopen: true,
+		credentials: { scope: "project" },
+	});
+	expect(resumed.session.getActiveToolNames()).toEqual(expect.arrayContaining([...CREDENTIAL_TOOL_NAMES]));
+	const report = created.mock.calls.at(-1)![0]!.customTools!.find((t) => t.name === "credential_report_validation")!;
+	expect(
+		(
+			await report.execute(
+				"stale-read",
+				{ id: own.id, revision: own.revision, success: true, method: "fixture", summary: "fixture" },
+				undefined,
+				undefined,
+				{} as never,
+			)
+		).isError,
+	).toBe(true);
+	resumed.release();
+});

@@ -4,8 +4,11 @@ import { join } from "node:path";
 import * as sdk from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, test, vi } from "vitest";
 import type { CommanderPort } from "../src/commander-tools.ts";
+import { CredentialStore } from "../src/credential-store.ts";
+import { parseCredential } from "../src/credential-types.ts";
 import { deleteDoctrine, saveDoctrine } from "../src/doctrines.ts";
 import { type EngineHooks, EngineManager, type RuntimeAcquireTaskSession } from "../src/engine.ts";
+import { applyScheduleAction, normalizeSchedule } from "../src/engine-schedule.ts";
 import { EngineStore } from "../src/engine-store.ts";
 import { submissionInputPath } from "../src/engine-submission.ts";
 import { intelligenceEngineSubmission } from "../src/intelligence.ts";
@@ -112,7 +115,7 @@ function setup(overrides: Partial<EngineHooks> = {}) {
 	const begin = async () => {
 		const pending = manager.createEngine(project, request.input, request.submission);
 		await vi.waitFor(() => expect(commander.prompt).toHaveBeenCalled());
-		const engine = manager.findSubmittedEngine("intelligence", "attempt");
+		const engine = manager.findSubmittedEngine(request.submission.source, request.submission.key);
 		if (!engine) throw new Error("Missing submitted engine");
 		const entry = internals.live.get(engine.id);
 		if (!entry) throw new Error("Missing live entry");
@@ -258,4 +261,72 @@ test("aborting during an asynchronous environment check prevents late startup", 
 	await pending;
 	expect(env.create).not.toHaveBeenCalled();
 	expect(env.manager.getEngine(engine.id)?.status).toBe("stopped");
+});
+
+test("security-check engines pass persisted credential capability to workers and use ordinary report completion", async () => {
+	let vault: CredentialStore;
+	const env = setup({ credentialStore: () => vault });
+	vault = new CredentialStore(env.dir);
+	cleanups.push(() => vault.close());
+	vault.save(env.project.id, [parseCredential({ type: "Linux", host: "192.0.2.10", password: "PRIVATE_PASSWORD" })]);
+	env.request.submission.source = "security-check";
+	env.request.submission.credentials = { scope: "project" };
+	env.request.submission.inputInstructions = "rules 是操作员选定的检查指令";
+	const { engine, pending, port } = await env.begin();
+	const tools = env.create.mock.calls[0]![0]!.customTools!;
+	expect(tools.map((t) => t.name)).toContain("credential_list");
+	expect(tools.map((t) => t.name)).not.toContain("credential_read");
+	const list = tools.find((t) => t.name === "credential_list")!;
+	const output = await list.execute("list", {}, undefined, undefined, {} as never);
+	expect(JSON.stringify(output)).toContain("192.0.2.10");
+	expect(JSON.stringify(output)).not.toContain("PRIVATE_PASSWORD");
+	port.dispatch({
+		title: "Account check",
+		objective: "Check selected target",
+		target: "192.0.2.10",
+		criteria: [],
+		roundLimit: null,
+		presetId: null,
+	});
+	await vi.waitFor(() => expect(env.worker.prompt).toHaveBeenCalledOnce());
+	expect(env.acquire.mock.calls[0][0]).toMatchObject({
+		credentials: { scope: "project" },
+		project: { id: env.project.id },
+	});
+	expect(env.acquire.mock.calls[0][0].appendPrompt).toContain("rules 是操作员选定");
+	env.releaseOpening();
+	await pending;
+	await env.manager.pauseEngine(engine.id);
+	env.commander.prompt.mockImplementationOnce(async () => {
+		const currentPort = env.internals.commanderPort(env.internals.live.get(engine.id)!);
+		const paused = env.manager.getEngine(engine.id)!.tasks[0];
+		expect(
+			await currentPort.continueTask(paused.id, { instruction: "继续检查", criteria: [], roundLimit: 2 }),
+		).not.toHaveProperty("error");
+	});
+	await env.manager.resumeEngine(engine.id);
+	const resumed = env.internals.live.get(engine.id)!;
+	const resumedPort = env.internals.commanderPort(resumed);
+	await vi.waitFor(() => expect(env.acquire).toHaveBeenCalledTimes(2));
+	expect(env.acquire.mock.calls.at(-1)![0].credentials).toEqual({ scope: "project" });
+	expect(env.create.mock.calls.at(-1)![0]!.customTools!.map((t) => t.name)).toContain("credential_list");
+	env.complete();
+	const schedule = applyScheduleAction(
+		normalizeSchedule({ timezone: "UTC", startAt: Date.now() - 1000, repeatDaily: true }, Date.now() - 2000),
+		"start",
+		Date.now() - 1000,
+	);
+	env.internals.store.setEngineSchedule(engine.id, schedule);
+	resumed.engine = env.internals.store.getEngine(engine.id)!;
+	expect(await resumedPort.finish("# Security check report")).toEqual({ ok: true });
+	expect(env.archive).toHaveBeenCalledWith(expect.objectContaining({ id: engine.id }), "# Security check report");
+	expect(env.manager.getEngine(engine.id)).toMatchObject({ submissionSource: "security-check", status: "completed" });
+	const next = env.manager.listEngines().find((e) => e.id !== engine.id)!;
+	expect(next).toMatchObject({ status: "scheduled", submissionSource: "security-check" });
+	expect(env.manager.getSubmission(next.id)).toMatchObject({
+		data: env.request.submission.data,
+		credentials: { scope: "project" },
+		doctrines: env.request.submission.doctrines,
+	});
+	expect(env.manager.getSubmission(next.id)?.key).not.toBe(env.request.submission.key);
 });

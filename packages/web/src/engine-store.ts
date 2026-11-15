@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS engine_submissions (
 
 interface EngineRow {
 	id: string;
+	submission_source?: string | null;
 	project_id: string;
 	project_name: string;
 	name: string;
@@ -257,6 +258,7 @@ export class EngineStore {
 		}
 		const engine: SentinelEngine = {
 			id: `engine-${randomUUID()}`,
+			submissionSource: input.submission?.source,
 			projectId: input.projectId,
 			projectName: input.projectName,
 			name: input.name,
@@ -313,7 +315,11 @@ export class EngineStore {
 	}
 
 	getEngine(id: string): SentinelEngine | undefined {
-		const row = this.db.prepare("SELECT * FROM engines WHERE id = ?").get(id) as unknown as EngineRow | undefined;
+		const row = this.db
+			.prepare(
+				"SELECT engines.*, (SELECT source FROM engine_submissions WHERE engine_id=engines.id) AS submission_source FROM engines WHERE id = ?",
+			)
+			.get(id) as unknown as EngineRow | undefined;
 		if (!row) return undefined;
 		const tasks = this.db
 			.prepare("SELECT * FROM engine_tasks WHERE engine_id = ? ORDER BY seq ASC")
@@ -337,8 +343,16 @@ export class EngineStore {
 
 	listEngines(projectId?: string): SentinelEngine[] {
 		const rows = (projectId
-			? this.db.prepare("SELECT * FROM engines WHERE project_id = ? ORDER BY created_at DESC").all(projectId)
-			: this.db.prepare("SELECT * FROM engines ORDER BY created_at DESC").all()) as unknown as EngineRow[];
+			? this.db
+					.prepare(
+						"SELECT engines.*, (SELECT source FROM engine_submissions WHERE engine_id=engines.id) AS submission_source FROM engines WHERE project_id = ? ORDER BY created_at DESC",
+					)
+					.all(projectId)
+			: this.db
+					.prepare(
+						"SELECT engines.*, (SELECT source FROM engine_submissions WHERE engine_id=engines.id) AS submission_source FROM engines ORDER BY created_at DESC",
+					)
+					.all()) as unknown as EngineRow[];
 		const statement = this.db.prepare("SELECT * FROM engine_tasks WHERE engine_id = ? ORDER BY seq ASC");
 		return rows.map((row) => engineFromRow(row, (statement.all(row.id) as unknown as TaskRow[]).map(taskFromRow)));
 	}
@@ -568,6 +582,7 @@ export class EngineStore {
 function engineFromRow(row: EngineRow, tasks: SentinelEngineTask[]): SentinelEngine {
 	return {
 		id: row.id,
+		submissionSource: row.submission_source ?? undefined,
 		projectId: row.project_id,
 		projectName: row.project_name,
 		name: row.name,

@@ -517,6 +517,8 @@ interface ManagedSession {
 
 /** Extra wiring a task session needs beyond a console session. */
 export interface TaskSessionOptions {
+	/** Granted by persisted engine submission, never by a model tool argument. */
+	credentials?: { scope: "project" };
 	/** The engine's project, which may differ from the viewed one. */
 	project: { id: string; name: string; container: string; cwd: string };
 	/** Extra system-prompt text: the worker's engineering identity note. */
@@ -887,9 +889,9 @@ export class SentinelRuntime {
 			modeOverride: readSessionMode(manager.getBranch()),
 			droidOn: task ? false : readSessionDroid(manager.getBranch()),
 			iosOn: task ? false : readSessionIos(manager.getBranch()),
-			credentialsOn: task ? false : readSessionCredentials(manager.getBranch()),
+			credentialsOn: task ? task.credentials?.scope === "project" : readSessionCredentials(manager.getBranch()),
 			credentialAccess: new SessionCredentialAccess({
-				enabled: () => managed.credentialsOn && !managed.taskSession,
+				enabled: () => managed.credentialsOn,
 				projectId: project?.id ?? null,
 				sessionId: () => manager.getSessionId(),
 				store: () => this.credentialStore,
@@ -1061,7 +1063,7 @@ export class SentinelRuntime {
 			...(task ? [] : createApkTools(this.createDroidToolContext(managed))),
 			// The iOS toolset is opt-in per conversation, independent of Android.
 			...(task ? [] : createIosTools(this.createIosToolContext(managed))),
-			...(task ? [] : createCredentialTools(managed.credentialAccess)),
+			...(!task || task.credentials?.scope === "project" ? createCredentialTools(managed.credentialAccess) : []),
 			...(task ? [] : createIosFridaTools(this.createIosToolContext(managed))),
 			...(task ? [] : createIosCaptureTools(this.createIosToolContext(managed))),
 			...(task ? [] : createIosDecryptTools(this.createIosToolContext(managed))),
@@ -3245,7 +3247,6 @@ export class SentinelRuntime {
 	}
 
 	private applyCredentialTools(managed: ManagedSession): void {
-		if (managed.taskSession) return;
 		const active = managed.session.getActiveToolNames();
 		const wanted = managed.credentialsOn
 			? [...active, ...CREDENTIAL_TOOL_NAMES.filter((name) => !active.includes(name))]

@@ -2971,6 +2971,7 @@ export interface SentinelEngineTask {
 
 export interface SentinelEngine {
 	id: string;
+	submissionSource?: string;
 	projectId: string;
 	projectName: string;
 	name: string;
