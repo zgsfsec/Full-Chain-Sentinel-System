@@ -36,6 +36,7 @@ import { CodeMonitorManager } from "./code-monitor.ts";
 import { CodeMonitorStore, codeMonitorDbPath } from "./code-monitor-store.ts";
 import { consoleSessionEvent } from "./console-events.ts";
 import { broadcastConsoleMessage, keepConsoleAlive, sendConsoleMessage } from "./console-socket.ts";
+import { Credentials } from "./credentials.ts";
 import { buildImage, containerStates, deleteProjectWorkDir } from "./docker.ts";
 import { deleteDoctrine, listDoctrines, saveDoctrine } from "./doctrines.ts";
 import { DroidGateway } from "./droid-gateway.ts";
@@ -451,6 +452,13 @@ export async function startSentinelServer(
 	const proxyChecksInFlight = new Set<string>();
 	const proxyImagePulls = new Map<string, Promise<{ ok: boolean; error?: string }>>();
 	const agentDir = options.agentDir;
+	const credentials = agentDir
+		? new Credentials(
+				agentDir,
+				(id) => listProjects(agentDir).projects.find((project) => project.id === id),
+				() => runtime.credentialStore,
+			)
+		: undefined;
 	let storageUpdateTimer: ReturnType<typeof setTimeout> | undefined;
 	const projectStorage = agentDir
 		? new ProjectStorageCache(agentDir, () => {
@@ -1537,6 +1545,20 @@ export async function startSentinelServer(
 					request,
 					response,
 					agentDir,
+					() =>
+						(!authEnabled || hasValidSession(currentAuth(), request)) &&
+						!consentFor(currentAuth()?.username ?? null).required,
+				);
+				return;
+			}
+			if (path === "/api/credentials" || path.startsWith("/api/credentials/")) {
+				if (!credentials) {
+					sendJson(response, { error: "凭据中心需要配置数据目录" }, 503);
+					return;
+				}
+				void credentials.handleApi(
+					request,
+					response,
 					() =>
 						(!authEnabled || hasValidSession(currentAuth(), request)) &&
 						!consentFor(currentAuth()?.username ?? null).required,
@@ -2863,6 +2885,7 @@ export async function startSentinelServer(
 					if (engines) await engines.purgeProject(message.id);
 					codeMonitors?.removeByProject(message.id);
 					intelligenceStore?.purgeProject(message.id);
+					credentials?.purgeProject(message.id);
 					const purged = runtime.purgeProjectVulns(message.id);
 					const purgedGates = runtime.purgeProjectGates(message.id);
 					const purgedModels = runtime.purgeProjectApiModels(message.id);
@@ -3526,6 +3549,20 @@ export async function startSentinelServer(
 					} catch (error) {
 						sendError(socket, error instanceof Error ? error.message : String(error));
 					}
+					return;
+				}
+				case "credentials_set_enabled": {
+					runtime.setCredentialsEnabled(message.enabled);
+					return;
+				}
+				case "credentials_verify": {
+					const report = await ensureEnvironment();
+					if (!report.ok) {
+						sendError(socket, blockedReason(report));
+						broadcastEnvironment();
+						return;
+					}
+					await runtime.verifyCredentials(message.projectId, message.refs);
 					return;
 				}
 				case "ios_set_enabled": {
@@ -4383,6 +4420,7 @@ export async function startSentinelServer(
 					iosGateway.close();
 					engines?.dispose();
 					terminal.dispose();
+					credentials?.dispose();
 					runtime.dispose();
 					for (const client of clients) client.terminate();
 					snapshots.cancel();

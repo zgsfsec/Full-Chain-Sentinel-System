@@ -3,6 +3,7 @@ import { Alert, Button, Empty } from "antd";
 import type { CodeVulnTag } from "../../src/code-vuln-tags.ts";
 import { AboutPage } from "./components/AboutPage.tsx";
 import { ReportCenterPage } from "./components/ReportCenterPage.tsx";
+import { CredentialsPage } from "./components/CredentialsPage.tsx";
 import { ApiModelPage } from "./components/ApiModelPage.tsx";
 import { ApprovalQueue } from "./components/ApprovalQueue.tsx";
 import { AuthGate } from "./components/AuthGate.tsx";
@@ -351,6 +352,7 @@ export function App() {
 	/** The one page the content area shows; navigation lives in the sider. */
 	const [page, setPage] = useState<SentinelPageId>("dashboard");
 	const [reportRefresh, setReportRefresh] = useState(0);
+	const [credentialRefresh, setCredentialRefresh] = useState(0);
 	const [threatRefresh, setThreatRefresh] = useState(0);
 	const [webFuzzImport, setWebFuzzImport] = useState<{ projectId: string; flowId: string } | null>(null);
 	/**
@@ -2182,6 +2184,9 @@ export function App() {
 		if (filesOpen) loadFiles(filePathRef.current);
 		if (subagentsOpen) send({ type: "get_state" });
 		switch (page) {
+			case "credentials":
+				setCredentialRefresh((value) => value + 1);
+				break;
 			case "reports":
 				setReportRefresh((value) => value + 1);
 				break;
@@ -3229,6 +3234,8 @@ export function App() {
 									onToggleDroid={(next) => send({ type: "droid_set_enabled", enabled: next })}
 									iosEnabled={snapshot?.iosEnabled ?? false}
 									onToggleIos={(next) => send({ type: "ios_set_enabled", enabled: next })}
+									credentialsEnabled={snapshot?.credentialsEnabled ?? false}
+									onToggleCredentials={(next) => send({ type: "credentials_set_enabled", enabled: next })}
 									apiModels={
 										snapshot?.project
 											? apiModels.filter((item) => item.projectId === snapshot.project?.id)
@@ -3332,6 +3339,14 @@ export function App() {
 							onSetNode={(id, nodeTag) => runProxyAction(() => send({ type: "set_proxy_node", id, nodeTag }))}
 							testingId={testingProxyId}
 						/>
+					) : page === "credentials" ? (
+						<CredentialsPage key={snapshot?.project?.id ?? "none"} projectId={snapshot?.project?.id ?? null} refreshToken={credentialRefresh}
+							verificationDisabledReason={!envReport?.ok ? "请先完成环境检查" : !snapshot?.modelConfigured ? "请先配置主模型" : null}
+							onVerify={(refs) => {
+								if (!snapshot?.project) return;
+								send({ type: "credentials_verify", projectId: snapshot.project.id, refs });
+								setPage("chat");
+							}} />
 					) : page === "reports" ? (
 						<ReportCenterPage key={snapshot?.project?.id ?? "none"} projectId={snapshot?.project?.id ?? null} refreshToken={reportRefresh} />
 					) : page === "vulns" ? (

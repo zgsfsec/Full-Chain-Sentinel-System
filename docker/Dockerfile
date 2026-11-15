@@ -156,5 +156,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	|| echo "[sentinel] chromium/fonts 安装跳过（发包截图需要浏览器，可稍后在容器内补装或重建镜像）" \
 	&& rm -rf /var/lib/apt/lists/*
 
+# Credential clients: reuse SSH, curl, NetExec and Impacket from the core layer.
+# Install clients only, without recommended packages, database servers, desktop
+# runtimes or the much larger mongosh bundle. PyMongo provides MongoDB auth/ping;
+# dnspython supports mongodb+srv addresses. Keep this layer last to reuse the
+# existing toolbox cache when adding credential support.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+		sshpass \
+		ldap-utils \
+		mariadb-client-core \
+		postgresql-client \
+		redis-tools \
+		sqlite3 \
+		freetds-bin \
+		snmp \
+		python3-pymongo \
+		python3-dnspython \
+	&& apt-get clean \
+	&& rm -rf /var/lib/apt/lists/*
+
 # Long-running idle entrypoint; Full Chain Sentinel drives it with docker exec.
 CMD ["sleep", "infinity"]

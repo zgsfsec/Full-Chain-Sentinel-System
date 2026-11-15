@@ -2,6 +2,7 @@ import {
 	ArrowUpOutlined,
 	BellOutlined,
 	CloseOutlined,
+	KeyOutlined,
 	PaperClipOutlined,
 	PictureOutlined,
 	StopOutlined,
@@ -112,6 +113,8 @@ export function Composer({
 	onToggleDroid,
 	iosEnabled,
 	onToggleIos,
+	credentialsEnabled,
+	onToggleCredentials,
 	apiModels,
 	freshConversation,
 	presets,
@@ -162,6 +165,8 @@ export function Composer({
 	/** The iOS toolset switch, independent of Android for this conversation. */
 	iosEnabled: boolean;
 	onToggleIos: (next: boolean) => void;
+	credentialsEnabled: boolean;
+	onToggleCredentials: (next: boolean) => void;
 	/**
 	 * The modeling records already attached to this conversation (带建模数据).
 	 * While set, `api_model_read` is mounted and the picker shows them instead of
@@ -534,6 +539,9 @@ export function Composer({
 					>
 						{t("iOS")}
 						{iosEnabled ? <Text>✓</Text> : null}
+					</Button>
+					<Button size="small" type={credentialsEnabled ? "primary" : "default"} icon={<KeyOutlined />} disabled={!hasProject} onClick={() => onToggleCredentials(!credentialsEnabled)} title={credentialsEnabled ? "当前对话可读取、保存、更新并主动验证项目凭据，点击关闭" : "允许当前对话中的 Agent 管理、主动验证并上报当前项目凭据，无需逐条授权"}>
+						{t("凭据中心")}{credentialsEnabled ? <Text>✓</Text> : null}
 					</Button>
 					{goalDisabledReason ? <Text type="secondary">{goalDisabledReason}</Text> : null}
 				</Space>

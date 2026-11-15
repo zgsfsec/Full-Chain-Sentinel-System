@@ -76,6 +76,9 @@ import { type AssetQueryReport, type AssetToolContext, createAssetTools, writeAs
 import { createCaptureTools, DROID_CAPTURE_TOOL_NAMES, HTTP_EVIDENCE_TOOL_NAMES } from "./capture-tool.ts";
 import { CaptureStore, capturesDbPath } from "./captures.ts";
 import { readContainerNetwork } from "./container-network.ts";
+import { CredentialStore } from "./credential-store.ts";
+import { CREDENTIAL_TOOL_NAMES, createCredentialTools, SessionCredentialAccess } from "./credential-tool.ts";
+import { parseCredentialRefs } from "./credentials.ts";
 import { containerWorkPath, dockerBashOperations } from "./docker.ts";
 import { DroidStore, droidDbPath } from "./droid.ts";
 import type { DroidGateway } from "./droid-gateway.ts";
@@ -296,6 +299,7 @@ import { createReplayTools, type ReplayToolContext } from "./replay-tool.ts";
 import { ensureReplayd, type ReplaydStatus } from "./replayd.ts";
 import { createReportTool } from "./report-tool.ts";
 import { ReportStore, reportsDbPath } from "./reports.ts";
+import { readSessionCredentials, SESSION_CREDENTIALS_CUSTOM_TYPE } from "./session-credentials.ts";
 import { readSessionDroid, SESSION_DROID_CUSTOM_TYPE } from "./session-droid.ts";
 import { readSessionIos, SESSION_IOS_CUSTOM_TYPE } from "./session-ios.ts";
 import { readSessionMode, SESSION_MODE_CUSTOM_TYPE } from "./session-mode.ts";
@@ -455,6 +459,8 @@ interface ManagedSession {
 	 * the branch at creation and written back by the composer switch.
 	 */
 	iosOn: boolean;
+	credentialsOn: boolean;
+	credentialAccess: SessionCredentialAccess;
 	/**
 	 * The preset agent this session was created with, read from the branch. null
 	 * means the plain default agent. The body is not cached: it is read from disk
@@ -591,6 +597,12 @@ export class SentinelRuntime {
 	/** Injected once the server has built the WS device gateway (see server.ts). */
 	private droidGateway: DroidGateway | undefined;
 	private iosGateway: IosGateway | undefined;
+	private credentialStoreValue?: CredentialStore;
+	private credentialConversationStarting = false;
+	get credentialStore(): CredentialStore {
+		this.credentialStoreValue ??= new CredentialStore(this.agentDir);
+		return this.credentialStoreValue;
+	}
 	private readonly subscriptions: PocSubscriptions;
 	private readonly gateStore: GatekeeperStore;
 	private readonly gatekeeper: Gatekeeper;
@@ -875,6 +887,13 @@ export class SentinelRuntime {
 			modeOverride: readSessionMode(manager.getBranch()),
 			droidOn: task ? false : readSessionDroid(manager.getBranch()),
 			iosOn: task ? false : readSessionIos(manager.getBranch()),
+			credentialsOn: task ? false : readSessionCredentials(manager.getBranch()),
+			credentialAccess: new SessionCredentialAccess({
+				enabled: () => managed.credentialsOn && !managed.taskSession,
+				projectId: project?.id ?? null,
+				sessionId: () => manager.getSessionId(),
+				store: () => this.credentialStore,
+			}),
 			presetId,
 			presetMissing: presetId !== null && presetText === null,
 			// Modeling is a console feature: an engineering task's worker never gets
@@ -1042,6 +1061,7 @@ export class SentinelRuntime {
 			...(task ? [] : createApkTools(this.createDroidToolContext(managed))),
 			// The iOS toolset is opt-in per conversation, independent of Android.
 			...(task ? [] : createIosTools(this.createIosToolContext(managed))),
+			...(task ? [] : createCredentialTools(managed.credentialAccess)),
 			...(task ? [] : createIosFridaTools(this.createIosToolContext(managed))),
 			...(task ? [] : createIosCaptureTools(this.createIosToolContext(managed))),
 			...(task ? [] : createIosDecryptTools(this.createIosToolContext(managed))),
@@ -1171,6 +1191,7 @@ export class SentinelRuntime {
 		this.applyModelingTools(managed);
 		this.applyDroidTools(managed);
 		this.applyIosTools(managed);
+		this.applyCredentialTools(managed);
 		if (task) {
 			// Task sessions live under their engine's collapsible group in the
 			// sidebar, which already states the ownership — the name is just the
@@ -3211,11 +3232,58 @@ export class SentinelRuntime {
 			});
 	}
 
-	/**
-	 * Mount or unmount the iOS toolset as one switch. The tools refuse to act
-	 * while no device is online, so the switch controls prompt noise, not
-	 * authority — the authority control is the command gate above.
-	 */
+	/** Tools are opt-in; disabling also clears the versions read for verification. */
+	setCredentialsEnabled(enabled: boolean): void {
+		if (typeof enabled !== "boolean") throw new Error("凭据开关格式错误");
+		const active = this.active;
+		if (!active || active.taskSession) throw new Error("请先选择项目中的普通对话");
+		active.credentialsOn = enabled;
+		if (!enabled) active.credentialAccess.clear();
+		active.manager.appendCustomEntry(SESSION_CREDENTIALS_CUSTOM_TYPE, { enabled, at: Date.now() });
+		this.applyCredentialTools(active);
+		this.hooks.onStateChange();
+	}
+
+	private applyCredentialTools(managed: ManagedSession): void {
+		if (managed.taskSession) return;
+		const active = managed.session.getActiveToolNames();
+		const wanted = managed.credentialsOn
+			? [...active, ...CREDENTIAL_TOOL_NAMES.filter((name) => !active.includes(name))]
+			: active.filter((name) => !CREDENTIAL_TOOL_NAMES.includes(name));
+		if (wanted.length !== active.length || wanted.some((name, index) => name !== active[index]))
+			managed.session.setActiveToolsByName(wanted);
+	}
+
+	async verifyCredentials(projectId: string, selection: unknown): Promise<void> {
+		if (this.activeProjectId !== projectId) throw new Error("项目已切换，请重新选择凭据");
+		if (this.credentialConversationStarting) throw new Error("正在创建凭据验证对话，请稍后重试");
+		const refs = parseCredentialRefs(selection);
+		// Reject stale selection before creating an empty conversation.
+		for (const ref of refs)
+			if (this.credentialStore.get(projectId, ref.id).revision !== ref.revision)
+				throw new Error("凭据已修改，请刷新后重新选择");
+		const previousKey = this.activeKey;
+		this.credentialConversationStarting = true;
+		let key: string;
+		try {
+			key = await this.createSessionInto(SessionManager.create(this.cwd, this.sessionDir || undefined));
+			if (this.activeProjectId !== projectId || this.activeKey !== previousKey)
+				throw new Error("项目或对话已切换，请重新发起验证");
+			this.activeKey = key;
+			const managed = this.sessions.get(key)!;
+			managed.manager.appendSessionInfo(`凭据验证 · ${refs.length} 条`);
+			this.setCredentialsEnabled(true);
+			this.evictReleasedTaskSessions();
+			this.hooks.onSessionRenamed();
+		} finally {
+			this.credentialConversationStarting = false;
+		}
+		await this.prompt(
+			`请验证我在凭据中心选中的以下凭据：\n${refs.map((ref) => `- id=${ref.id} revision=${ref.revision}`).join("\n")}\n这是独立的凭据验证对话。先确认所选 revision 仍为当前版本，再使用 credential_read(purpose=verify) 按需读取，结合凭据类型选择合适的验证方式，遵循当前对话审批与项目范围。本轮只验证上述凭据。实际验证后逐条调用 credential_report_validation 上报结果、方式和简短结论；无法确认时保持原状态，不得推测成功。不要在回复、报告、验证记录中包含密码、密钥、Token、原始请求响应或业务数据。`,
+		);
+	}
+
+	/** Mount the iOS toolset for this conversation. */
 	private applyIosTools(managed: ManagedSession): void {
 		if (managed.taskSession) return;
 		const active = managed.session.getActiveToolNames();
@@ -4641,6 +4709,7 @@ export class SentinelRuntime {
 			modelingAttached: this.modelingAttachedView(active),
 			droidEnabled: active?.droidOn ?? false,
 			iosEnabled: active?.iosOn ?? false,
+			credentialsEnabled: active?.credentialsOn ?? false,
 			supervisor: this.activeKey ? this.supervisor.view(this.activeKey) : null,
 			supervisorConfig: readSupervisorConfig(this.agentDir),
 			gatekeeper,
@@ -5089,6 +5158,7 @@ export class SentinelRuntime {
 		this.apiModels.close();
 		this.droids.close();
 		this.ios.close();
+		this.credentialStoreValue?.close();
 		this.captures.close();
 		this.assets.close();
 		this.assetLibrary.close();
