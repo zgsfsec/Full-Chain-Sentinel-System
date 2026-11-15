@@ -319,20 +319,6 @@ export function ProjectsPage({
 				const running = project.state === "running";
 				return (
 					<Space size={4} wrap={false}>
-						<Button
-							size="small"
-							type="text"
-							icon={<EditOutlined />}
-							disabled={actionBusy || renaming}
-							title={renameTitle}
-							onClick={() => {
-								setRenameFor(project);
-								setRenameName(project.name);
-								setRenameError(null);
-							}}
-						>
-							{getLanguage() === "en" ? "Rename" : "修改名称"}
-						</Button>
 						{running ? (
 							<Button
 								size="small"
@@ -362,6 +348,17 @@ export function ProjectsPage({
 							disabled={busy || actionBusy}
 							menu={{
 								items: [
+									{
+										key: "rename",
+										label: getLanguage() === "en" ? "Rename" : "修改名称",
+										icon: <EditOutlined />,
+										disabled: renaming,
+										onClick: () => {
+											setRenameFor(project);
+											setRenameName(project.name);
+											setRenameError(null);
+										},
+									},
 									{ key: "recreate", label: t("重建容器"), icon: <ReloadOutlined />, onClick: () => recreate(project) },
 									{ key: "proxy", label: t("代理设置"), icon: <GlobalOutlined />, onClick: () => setProxyFor(project) },
 									{ type: "divider" },

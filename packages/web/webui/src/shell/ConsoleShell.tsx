@@ -42,7 +42,9 @@ import { useVersionCheck } from "../components/VersionCheck.tsx";
 import { getLanguage, t } from "../i18n.ts";
 import type { SentinelMode, SentinelPageId, SentinelProjectInfo, SentinelProxyConfigView } from "../types.ts";
 import { SENTINEL_MODE_LABELS } from "../types.ts";
-import { CONSOLE_COLORS, consoleSidebarTheme } from "../ui/theme.ts";
+import { consoleThemes } from "../ui/theme.ts";
+import { useThemeMode } from "../ui/theme-mode.ts";
+import { ThemeToggle } from "../ui/ThemeToggle.tsx";
 import {
 	NAV_GROUPS,
 	PAGE_TITLES,
@@ -59,8 +61,8 @@ import "./console-design.css";
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
 const CONSOLE_SURFACE_STYLE = {
-	"--console-sider": CONSOLE_COLORS.sider,
-	"--console-border": CONSOLE_COLORS.border,
+	"--console-sider": "var(--ant-layout-sider-bg, var(--ant-color-bg-container))",
+	"--console-border": "var(--ant-color-border-secondary)",
 } as CSSProperties;
 
 export interface ConsoleShellProps {
@@ -130,6 +132,7 @@ export function ConsoleShell({
 	onSwitchLanguage,
 	children,
 }: ConsoleShellProps) {
+	const themeMode = useThemeMode();
 	const screens = Grid.useBreakpoint();
 	const compact = screens.md === false;
 	const [drawerOpen, setDrawerOpen] = useState(false);
@@ -277,7 +280,7 @@ export function ConsoleShell({
 	);
 
 	const sidebarContent = (
-		<ConfigProvider theme={consoleSidebarTheme}>
+		<ConfigProvider theme={consoleThemes[themeMode].sidebar}>
 			<Flex vertical className="console-sidebar">
 				{showConversations ? (
 					<div className="console-sidebar__switch">
@@ -367,6 +370,7 @@ export function ConsoleShell({
 				) : null}
 			</div>
 			<div className="console-header__right">
+				<ThemeToggle />
 				<Badge
 					status={connected ? "success" : "error"}
 					text={<span className="console-header__conn">{connected ? t("已连接") : t("已断开")}</span>}

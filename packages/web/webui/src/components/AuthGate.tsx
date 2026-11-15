@@ -6,7 +6,7 @@
  * A white entry surface with a contained brand illustration and a focused form.
  */
 import { GithubOutlined } from "@ant-design/icons";
-import { Alert, Button, Checkbox, ConfigProvider, Form, Input, Popover, Typography } from "antd";
+import { Alert, Button, Checkbox, ConfigProvider, Form, Input, Popover, Space, Typography } from "antd";
 import { useId, useState } from "react";
 import {
 	CONSOLE_VERSION,
@@ -17,7 +17,9 @@ import {
 } from "../branding.ts";
 import { getLanguage, t } from "../i18n.ts";
 import { SESSION_ENDED_NOTICE } from "../ws.ts";
-import { consoleAuthTheme } from "../ui/theme.ts";
+import { consoleThemes } from "../ui/theme.ts";
+import { useThemeMode } from "../ui/theme-mode.ts";
+import { ThemeToggle } from "../ui/ThemeToggle.tsx";
 import { SentinelMark } from "./icons.tsx";
 import { LanguageSwitch } from "./LanguageSwitch.tsx";
 import { LoginBackdrop } from "./LoginBackdrop.tsx";
@@ -26,6 +28,7 @@ import "./auth-gate.css";
 const { Title, Text, Link } = Typography;
 
 export function AuthGate({ mode, onDone }: { mode: "setup" | "login"; onDone: () => void }) {
+	const themeMode = useThemeMode();
 	const formId = useId();
 	const [username, setUsername] = useState("");
 	const [password, setPassword] = useState("");
@@ -81,9 +84,12 @@ export function AuthGate({ mode, onDone }: { mode: "setup" | "login"; onDone: ()
 					</span>
 					<span className="auth-screen__name">{PROJECT_NAME}</span>
 				</div>
-				<LanguageSwitch className="auth-screen__language" />
+				<Space size={4}>
+					<ThemeToggle />
+					<LanguageSwitch className="auth-screen__language" />
+				</Space>
 			</header>
-			<ConfigProvider theme={consoleAuthTheme}>
+			<ConfigProvider theme={consoleThemes[themeMode].auth}>
 				<main className="auth-screen__main">
 					<section className="auth-screen__intro" aria-label={PROJECT_NAME}>
 						<span className="auth-screen__eyebrow">Full Chain Sentinel</span>

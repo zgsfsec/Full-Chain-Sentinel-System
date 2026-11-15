@@ -1,0 +1,243 @@
+/* Ant Design owns controls and portals; these rules cover legacy fixed-color
+   surfaces. Scope every override so the existing light theme stays intact. */
+:root[data-theme="dark"] {
+	--console-bg: #171b22;
+	--console-text: #dce3ec;
+	--console-border: #303946;
+	--console-sider: #1b2029;
+	--bg: #171b22;
+	--card: #202630;
+	--raised: #262d38;
+	--border: #303946;
+	--border-strong: #394452;
+	--text: #dce3ec;
+	--text-bright: #dce3ec;
+	--dim: #aab5c4;
+	--faint: #8693a6;
+	--disabled: #586476;
+	--accent: #d7e0ec;
+	--accent-hover: #edf2f8;
+	--accent-dim: #262d38;
+	--accent-border: #7e8b9d;
+	--accent-ring: #343e4d;
+	--danger: #ea8591;
+	--danger-dim: #331f26;
+	--ok: #70c7a4;
+	--ok-dim: #192e29;
+	--warn: #d9b56f;
+	--warn-dim: #30291d;
+	--info: #b5c5da;
+	--info-dim: #262d38;
+	--blue: #b5c5da;
+	--sev-critical: #ff98a4;
+	--sev-high: #eea28b;
+	--sev-medium: #d9b56f;
+	--st-done: #70c7a4;
+	background: var(--console-bg);
+}
+
+:root[data-theme="dark"] * {
+	scrollbar-color: #465366 transparent;
+}
+
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb {
+	background: #465366;
+}
+
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+	background: #65748a;
+}
+
+:root[data-theme="dark"] :is(.ant-app-root, .ant-modal, .ant-drawer, .ant-popover, .ant-dropdown) {
+	--console-text: var(--ant-color-text);
+	--console-border: var(--ant-color-border-secondary);
+	--disabled: var(--ant-color-text-quaternary);
+}
+
+:root[data-theme="dark"]
+	:is(
+		.ui-page:not(.dashboard),
+		.page-card,
+		.composer,
+		.composerbox__box,
+		.ui-section,
+		.settings-panel,
+		.settings-tile,
+		.permhub-panel,
+		.apimodel-doc,
+		.goalhub-strip,
+		.plugui-state,
+		.webfuzz-panel,
+		.auth-screen
+	) {
+	background: var(--ant-color-bg-container);
+	color: var(--ant-color-text);
+}
+
+:root[data-theme="dark"]
+	:is(
+		.thinking,
+		.attachment-file,
+		.projstats__item,
+		.filepanel__text,
+		.gatehub-command-full,
+		.vulnhub-pre,
+		.project-cell__container,
+		.entry--operator .entry__body,
+		.goalmark__body,
+		.foldrow__pre,
+		.goalhub-pre,
+		.modelhub-explainer,
+		.modelhub-pre,
+		.doctrinehub-pre,
+		.enginehub-pre,
+		.enginehub-msg__text,
+		.permhub-row--nested,
+		.droidhub-token,
+		.droidhub-command,
+		.sva-episode,
+		.sap-detail
+	) {
+	background: var(--ant-color-fill-tertiary);
+	border-color: var(--ant-color-border-secondary);
+	color: var(--ant-color-text);
+}
+
+:root[data-theme="dark"] .modelhub-gatekeeper > .settings-section__body > .settings-field:first-of-type {
+	background: var(--ant-color-fill-tertiary);
+}
+
+:root[data-theme="dark"]
+	:is(
+		.project-num,
+		.project-cell__name,
+		.projstats__value,
+		.settings-bar__title,
+		.settings-section__title,
+		.settings-field__label,
+		.assethub-entry__text,
+		.gatehub-detail,
+		.notifyhub-kind__icon,
+		.filepanel__icon
+	) {
+	color: var(--ant-color-text);
+}
+
+:root[data-theme="dark"]
+	:is(
+		.projstats__label,
+		.project-cell__meta,
+		.thinking summary,
+		.chat-head__sub,
+		.settings-bar__meta,
+		.settings-section__desc,
+		.settings-field__hint,
+		.vulnhub-filters__field,
+		.gatehub-empty-hint,
+		.vulnhub-empty-hint,
+		.permhub-plugin__hint,
+		.pluginhub-name .ant-typography:last-child,
+		.sva-session .ant-typography:last-child,
+		.composerbox__count,
+		.composerbox__fmeta
+	) {
+	color: var(--ant-color-text-secondary);
+}
+
+:root[data-theme="dark"] .projstats__value.is-on {
+	color: var(--ant-color-success);
+}
+
+:root[data-theme="dark"]
+	:is(
+		.pickmenu__item:hover,
+		.branchhub__point:hover,
+		.filepanel__row:hover,
+		.toolcard:hover,
+		.sap-run:hover,
+		.modelhub-role-row:hover,
+		.composer-goal-row .composer-tool:hover:not(:disabled)
+	) {
+	background: var(--ant-color-fill-tertiary);
+	color: var(--ant-color-text);
+}
+
+:root[data-theme="dark"] .composer-goal-row .composer-tool {
+	color: var(--ant-color-text-secondary);
+}
+
+:root[data-theme="dark"]
+	:is(
+		.composer-goal-row .composer-tool.on,
+		.composer.composer-dragging,
+		.composerbox__box.is-dragging,
+		.filepanel__row.is-active,
+		.sap-run.is-selected,
+		.enginehub-msg.is-operator .enginehub-msg__text,
+		.goalhub-strip.is-active
+	) {
+	background: var(--ant-color-primary-bg);
+	color: var(--ant-color-primary);
+	border-color: var(--ant-color-primary-border);
+}
+
+:root[data-theme="dark"]
+	:is(.goalhub-strip.is-paused, .foldrow.is-warn .ant-collapse-header, .supervisor-advice-row .foldrow__pre) {
+	background: var(--ant-color-warning-bg);
+	border-color: var(--ant-color-warning-border);
+}
+
+:root[data-theme="dark"] .goalhub-strip.is-blocked {
+	background: var(--ant-color-error-bg);
+	border-color: var(--ant-color-error-border);
+}
+
+:root[data-theme="dark"]
+	:is(
+		.gatehub-detail__error,
+		.sva-log__line.is-bad,
+		.svfw-log.is-bad,
+		.steprow.is-error .steprow__tool,
+		.composerbox__file.is-bad .composerbox__fmeta,
+		.cockpit-warn
+	) {
+	color: var(--ant-color-error);
+}
+
+:root[data-theme="dark"] :is(.permhub-row, .permhub-panel .ant-list-item) {
+	border-bottom-color: var(--ant-color-border-secondary);
+}
+
+:root[data-theme="dark"] .markdown-body :not(pre) > code {
+	background: var(--ant-color-fill-tertiary);
+	color: #e6abc6;
+}
+
+:root[data-theme="dark"] :is(.markdown-body th, .ant-table-wrapper .ant-table-thead > tr > :is(th, td)) {
+	background: var(--ant-color-fill-tertiary);
+}
+
+:root[data-theme="dark"] .run-body::before {
+	background: var(--ant-color-border-secondary);
+}
+
+:root[data-theme="dark"] .auth-screen__visual::after {
+	background: linear-gradient(90deg, #20263080, transparent 24%, transparent 76%, #20263080);
+}
+
+:root[data-theme="dark"] :is(.auth-screen__mark, .about-hero__mark) {
+	color: #171b22;
+}
+
+/* Keep the switch visible while a project name is long on a phone. */
+@media (max-width: 575px) {
+	.console-header__right {
+		flex: none;
+		gap: 2px;
+		margin-inline-start: auto;
+	}
+	.console-header__left {
+		flex: 1;
+		min-width: 0;
+	}
+}

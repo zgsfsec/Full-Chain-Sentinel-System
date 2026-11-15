@@ -15,7 +15,8 @@ import {
 import { App, Badge, Button, ConfigProvider, Dropdown, Empty, Input, Modal, Tooltip, Typography } from "antd";
 import { useEffect, useId, useMemo, useState } from "react";
 import { t } from "../i18n.ts";
-import { consoleTheme } from "../ui/theme.ts";
+import { consoleThemes } from "../ui/theme.ts";
+import { useThemeMode } from "../ui/theme-mode.ts";
 import type { SentinelEngine, SentinelSessionStatus, SessionInfoView } from "../types.ts";
 import { SESSION_STATUSES, SESSION_STATUS_LABELS } from "../components/SessionStatusControl.tsx";
 import { SessionActions } from "./SessionActions.tsx";
@@ -109,6 +110,7 @@ export function SessionPanel({
 	onDelete,
 	onSetStatus,
 }: SessionPanelProps) {
+	const themeMode = useThemeMode();
 	const { modal } = App.useApp();
 	const [query, setQuery] = useState("");
 	const [statusFilter, setStatusFilter] = useState<StatusFilter[]>(readStatusFilter);
@@ -357,7 +359,7 @@ export function SessionPanel({
 				})}
 			</div>
 
-			<ConfigProvider theme={consoleTheme}>
+			<ConfigProvider theme={consoleThemes[themeMode].main}>
 				<Modal
 					title={t("重命名会话")}
 					open={renaming !== null}

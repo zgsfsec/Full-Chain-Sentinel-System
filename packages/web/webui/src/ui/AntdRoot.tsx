@@ -19,14 +19,16 @@ import enUS from "antd/locale/en_US";
 import zhCN from "antd/locale/zh_CN";
 import type { ReactNode } from "react";
 import { getLanguage } from "../i18n.ts";
-import { consoleTheme } from "./theme.ts";
+import { consoleThemes } from "./theme.ts";
+import { useThemeMode } from "./theme-mode.ts";
 
 export function AntdRoot({ children }: { children: ReactNode }) {
 	const english = getLanguage() === "en";
+	const mode = useThemeMode();
 	return (
 		<StyleProvider hashPriority="high">
 			<ConfigProvider
-				theme={consoleTheme}
+				theme={consoleThemes[mode].main}
 				locale={english ? enUS : zhCN}
 				button={{ autoInsertSpace: false }}
 				form={{ requiredMark: "optional" }}

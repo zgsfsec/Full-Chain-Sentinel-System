@@ -101,9 +101,12 @@ test("the active project is marked in its row", () => {
 	expect(html).toContain("当前");
 });
 
-test("each project offers rename even when its container is stopped or missing", () => {
+test("each project exposes more actions without a standalone rename button", () => {
 	for (const state of ["running", "stopped", "missing"] as const) {
-		expect(render([project({ state })])).toContain("修改名称");
+		const html = render([project({ state })]);
+		expect(html).toContain('aria-label="靶场 的更多操作"');
+		expect(html).toContain('aria-haspopup="menu"');
+		expect(html).not.toContain("修改名称");
 	}
 });
 
