@@ -8,6 +8,7 @@
  */
 
 import { type ChildProcessByStdio, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -440,42 +441,105 @@ export function containerWorkPath(hostCwd: string | undefined, hostWorkDir: stri
 	return "/work";
 }
 
+// A descendant can call setsid (LibreOffice does), escaping the command's process
+// group while keeping its output pipes open. An inherited environment marker
+// identifies those processes without touching other calls in the same container.
+const KILL_BASH_PROCESSES = `
+for file in /proc/[0-9]*/environ; do
+  [ -r "$file" ] || continue
+  if tr '\\000' '\\n' < "$file" 2>/dev/null | grep -Fxq -- "$1"; then
+    pid="\${file#/proc/}"
+    pid="\${pid%/environ}"
+    kill -KILL "$pid" 2>/dev/null || :
+  fi
+done
+`;
+
+function killContainerBashProcesses(containerName: string, marker: string): Promise<boolean> {
+	return new Promise((resolve) => {
+		const child = spawn("docker", ["exec", containerName, "sh", "-c", KILL_BASH_PROCESSES, "zg", marker], {
+			stdio: "ignore",
+		});
+		let settled = false;
+		const finish = (ok: boolean) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve(ok);
+		};
+		// Docker itself can be unavailable. Do not make stopping a command wait
+		// indefinitely for its cleanup request or for inherited stdio to close.
+		const timer = setTimeout(() => {
+			child.kill("SIGKILL");
+			finish(false);
+		}, 5000);
+		child.once("error", () => finish(false));
+		child.once("exit", (code) => finish(code === 0));
+	});
+}
+
 /**
- * Bash execution inside a project container. Every command runs via
- * `docker exec`; output streams through onData like the local shell backend.
- *
- * The session cwd decides the exec working directory through `containerWorkPath`:
- * without it every command would run in the container's `-w /work` default and
- * per-task workspaces (/work/tasks/<name>) would not actually isolate anything.
+ * Run bash in a project container, streaming output and honoring timeout/abort.
+ * The session cwd maps to /work so per-task workspaces remain isolated.
  */
 export function dockerBashOperations(containerName: string, options: { hostWorkDir?: string } = {}): BashOperations {
 	return {
 		exec: (command, cwd, execOptions) => {
 			return new Promise((resolve, reject) => {
+				const timeout = execOptions.timeout;
+				if (
+					timeout !== undefined &&
+					(!Number.isFinite(timeout) || timeout <= 0 || timeout * 1000 > 2_147_483_647)
+				) {
+					reject(new Error("Invalid timeout: must be positive finite seconds within the timer limit"));
+					return;
+				}
+				if (execOptions.signal?.aborted) {
+					reject(new Error("aborted"));
+					return;
+				}
 				const workdir = options.hostWorkDir ? containerWorkPath(cwd, options.hostWorkDir) : cwd || "/work";
-				const child = spawn("docker", ["exec", "-i", "-w", workdir, containerName, "sh", "-c", command], {
-					stdio: ["ignore", "pipe", "pipe"],
-				});
-				let killed = false;
-				const onAbort = () => {
-					killed = true;
-					child.kill("SIGKILL");
+				const marker = `SENTINEL_BASH_EXEC_ID=${randomUUID()}`;
+				const child = spawn(
+					"docker",
+					["exec", "-i", "-w", workdir, "-e", marker, containerName, "sh", "-c", command],
+					{ stdio: ["ignore", "pipe", "pipe"] },
+				);
+				let settled = false;
+				let stopping = false;
+				let timer: NodeJS.Timeout | undefined;
+				const finish = (code: number | null, error?: Error) => {
+					if (settled) return;
+					settled = true;
+					if (timer) clearTimeout(timer);
+					execOptions.signal?.removeEventListener("abort", onAbort);
+					if (error) reject(error);
+					else resolve({ exitCode: code ?? 1 });
 				};
-				execOptions?.signal?.addEventListener("abort", onAbort, { once: true });
-				child.stdout.on("data", (chunk: Buffer) => execOptions?.onData(chunk));
-				child.stderr.on("data", (chunk: Buffer) => execOptions?.onData(chunk));
+				const stop = (error: Error) => {
+					if (settled || stopping) return;
+					stopping = true;
+					if (timer) clearTimeout(timer);
+					child.kill("SIGKILL");
+					child.stdout.destroy();
+					child.stderr.destroy();
+					void killContainerBashProcesses(containerName, marker).then((ok) => {
+						if (!ok) execOptions.onData(Buffer.from("\nWarning: container command process cleanup failed.\n"));
+						finish(null, error);
+					});
+				};
+				const onAbort = () => stop(new Error("aborted"));
+				child.stdout.on("data", (chunk: Buffer) => execOptions.onData(chunk));
+				child.stderr.on("data", (chunk: Buffer) => execOptions.onData(chunk));
 				child.on("close", (code) => {
-					execOptions?.signal?.removeEventListener("abort", onAbort);
-					if (execOptions?.signal?.aborted || killed) {
-						reject(new Error("aborted"));
-						return;
-					}
-					resolve({ exitCode: code ?? 1 });
+					if (!stopping) finish(code);
 				});
 				child.on("error", (error) => {
-					execOptions?.signal?.removeEventListener("abort", onAbort);
-					reject(error);
+					if (!stopping) finish(null, error);
 				});
+				if (timeout !== undefined) timer = setTimeout(() => stop(new Error(`timeout:${timeout}`)), timeout * 1000);
+				execOptions.signal?.addEventListener("abort", onAbort, { once: true });
+				if (execOptions.signal?.aborted) onAbort();
 			});
 		},
 	};

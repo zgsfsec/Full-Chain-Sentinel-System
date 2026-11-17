@@ -204,6 +204,11 @@ case "$cmd" in
 		[ "$1" = "-i" ] && shift
 		# dockerBashOperations passes the session cwd as the exec working dir.
 		[ "$1" = "-w" ] && shift 2
+		# Each bash call tags its descendants for timeout/cancellation cleanup.
+		if [ "$1" = "-e" ]; then
+			export "$2"
+			shift 2
+		fi
 		shift
 		# Remaining arguments: sh -c <script> zg <args...>
 		shift 2
