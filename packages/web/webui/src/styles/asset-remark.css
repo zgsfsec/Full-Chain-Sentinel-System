@@ -1,0 +1,35 @@
+.asset-remark-dialog {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.asset-remark-dialog p {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.asset-remark-hint {
+	color: var(--ant-color-text-secondary);
+	font-size: 12px;
+}
+
+.asset-remark-cell.ant-btn {
+	display: block;
+	max-width: 100%;
+	padding-inline: 0;
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.asset-remark-cell.ant-btn > span {
+	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.asset-remark-content {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}

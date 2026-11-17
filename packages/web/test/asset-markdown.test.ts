@@ -182,3 +182,13 @@ test("long text is exported in full, not truncated", () => {
 	});
 	expect(report.markdown).toContain(text);
 });
+
+test("exports editable multiline remarks separately from test records", () => {
+	const report = buildAssetReport({
+		projectName: "E2E",
+		assets: [asset({ remark: "人工标记\nAgent 复核", entries: [], testCount: 0 })],
+		vulnsByAsset: new Map(),
+	});
+	expect(report.markdown).toContain("- 备注：\n    人工标记\n    Agent 复核");
+	expect(report.markdown).toContain("测试记录：无");
+});

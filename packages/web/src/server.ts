@@ -1479,6 +1479,59 @@ export async function startSentinelServer(
 		}
 	}
 
+	async function handleAssetRemarks(request: IncomingMessage, response: ServerResponse): Promise<void> {
+		let store: AssetLibraryStore | undefined;
+		try {
+			if (!request.headers["content-type"]?.toLowerCase().startsWith("application/json")) {
+				sendJson(response, { error: "请使用 JSON 格式提交备注。" }, 415);
+				return;
+			}
+			const body = await readJsonBody(request, 128 * 1024);
+			if (authEnabled && !hasValidSession(currentAuth(), request)) {
+				sendJson(response, { error: t("未登录") }, 401);
+				return;
+			}
+			if (consentFor(currentAuth()?.username ?? null).required) {
+				sendJson(response, { error: "请先完成使用确认。" }, 403);
+				return;
+			}
+			if (
+				!body ||
+				typeof body.projectId !== "string" ||
+				typeof body.remark !== "string" ||
+				!Array.isArray(body.ids) ||
+				!body.ids.every((id): id is string => typeof id === "string" && id.trim() !== "") ||
+				body.ids.length < 1 ||
+				body.ids.length > 200 ||
+				(body.mode !== "append" && body.mode !== "replace")
+			) {
+				sendJson(response, { error: "备注请求无效，每次请选择 1 至 200 条资产。" }, 400);
+				return;
+			}
+			const project = runtime.currentProject;
+			if (!project || project.id !== body.projectId) {
+				sendJson(response, { error: "当前项目已切换，请关闭窗口后重试。" }, 409);
+				return;
+			}
+			if (!agentDir) {
+				sendJson(response, { error: "未配置资产库目录。" }, 503);
+				return;
+			}
+			store = new AssetLibraryStore(assetLibraryDbPath(agentDir));
+			const count = store.updateRemarks(project.id, body.ids, body.remark, body.mode);
+			broadcast({ type: "assets_changed" });
+			sendJson(response, { count });
+		} catch (error) {
+			sendJson(
+				response,
+				{ error: error instanceof Error ? error.message : String(error) },
+				error instanceof AssetInputError ? 400 : 500,
+			);
+		} finally {
+			store?.close();
+		}
+	}
+
 	const requestHandler = (request: IncomingMessage, response: ServerResponse): void => {
 		const url = new URL(request.url ?? "/", "http://localhost");
 		const path = url.pathname;
@@ -1667,6 +1720,15 @@ export async function startSentinelServer(
 					project ? { id: project.id, name: project.name } : { error: t("尚未选择项目") },
 					project ? 200 : 409,
 				);
+				return;
+			}
+			if (path === "/api/assets/remarks") {
+				if (request.method !== "POST") {
+					response.setHeader("Allow", "POST");
+					sendJson(response, { error: "请使用 POST 提交备注。" }, 405);
+				} else {
+					void handleAssetRemarks(request, response);
+				}
 				return;
 			}
 			if ((path === "/api/assets/import" || path === "/api/assets/import/preview") && request.method === "POST") {

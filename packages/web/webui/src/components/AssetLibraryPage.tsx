@@ -38,6 +38,7 @@ import { Page } from "../ui/Page.tsx";
 
 import { AssetDetailBody } from "./AssetDetailBody.tsx";
 import { AssetImportDialog } from "./AssetImportDialog.tsx";
+import { AssetRemarkDialog, assetRemarkLabels } from "./AssetRemarkDialog.tsx";
 
 const { Text } = Typography;
 
@@ -179,8 +180,11 @@ export function AssetLibraryPage({
 	const [search, setSearch] = useState(filters.search ?? "");
 	const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 	const [importOpen, setImportOpen] = useState(false);
+	const [remarkSearch, setRemarkSearch] = useState(filters.remark ?? "");
+	const [remarkEdit, setRemarkEdit] = useState<{ assets: SentinelAssetSummary[]; batch: boolean } | null>(null);
 
-	useEffect(() => { setImportOpen(false); }, [projectName, hasProject]);
+	useEffect(() => { setImportOpen(false); setRemarkEdit(null); }, [projectName, hasProject]);
+	useEffect(() => { setRemarkSearch(filters.remark ?? ""); }, [filters.remark]);
 
 	useEffect(() => {
 		setSearch(filters.search ?? "");
@@ -210,6 +214,7 @@ export function AssetLibraryPage({
 
 	const reset = () => {
 		setSearch("");
+		setRemarkSearch("");
 		onQuery({}, 1, pageSize);
 	};
 
@@ -269,6 +274,13 @@ export function AssetLibraryPage({
 			render: (_, item) => (item.title ? <Text type="secondary">{item.title}</Text> : <Text type="secondary">—</Text>),
 		},
 		{
+			title: t("备注"), dataIndex: "remark", key: "remark", width: 200,
+			render: (_, item) => <Button type="link" className="asset-remark-cell" title={item.remark || assetRemarkLabels.add}
+				aria-label={`${item.label} ${assetRemarkLabels.edit}`} onClick={() => setRemarkEdit({ assets: [item], batch: false })}>
+				{item.remark || assetRemarkLabels.add}
+			</Button>,
+		},
+		{
 			title: t("协议"),
 			dataIndex: "protocol",
 			key: "protocol",
@@ -316,7 +328,7 @@ export function AssetLibraryPage({
 				<>
 					{projectName ? `${projectName} · ` : ""}
 					{t("共 {total} 条 · 待测试 {pending}", { total: stats.total, pending: stats.byStatus.pending })}
-					{filters.search || filters.kind || filters.status || filters.tested !== undefined
+					{filters.search || filters.remark || filters.kind || filters.status || filters.tested !== undefined
 						? ` · ${t("筛选命中 {count} 条", { count: total })}`
 						: ""}
 				</>
@@ -351,6 +363,9 @@ export function AssetLibraryPage({
 					title={t("已选择 {count} 条", { count: selectedIds.length })}
 					action={
 						<Space size={8}>
+							<Button size="small" onClick={() => setRemarkEdit({ assets: items.filter((item) => selected.has(item.id)), batch: true })}>
+								{assetRemarkLabels.batch}
+							</Button>
 							<Button size="small" onClick={() => setSelected(new Set())}>
 								{t("取消选择")}
 							</Button>
@@ -369,7 +384,7 @@ export function AssetLibraryPage({
 				dataSource={items}
 				search={false}
 				options={false}
-				scroll={{ x: 1320 }}
+				scroll={{ x: 1520 }}
 				rowSelection={{
 					selectedRowKeys: selectedIds,
 					onChange: (keys) => setSelected(new Set(keys as string[])),
@@ -387,6 +402,10 @@ export function AssetLibraryPage({
 				toolbar={{
 					title: (
 						<div className="assethub-toolbar">
+							<Input.Search allowClear value={remarkSearch} style={{ width: 230 }}
+								aria-label={assetRemarkLabels.filter} placeholder={assetRemarkLabels.filter}
+								onChange={(event) => setRemarkSearch(event.target.value)}
+								onSearch={(value) => changeFilters({ remark: value.trim() || undefined })} />
 							<Input
 								allowClear
 								className="assethub-toolbar__search"
@@ -466,6 +485,8 @@ export function AssetLibraryPage({
 			/>
 
 			{importOpen ? <AssetImportDialog onClose={() => setImportOpen(false)} onImported={() => onQuery(filters, 1, pageSize)} /> : null}
+			{remarkEdit ? <AssetRemarkDialog assets={remarkEdit.assets} batch={remarkEdit.batch}
+				onClose={() => setRemarkEdit(null)} onSaved={() => onQuery(filters, page, pageSize)} /> : null}
 
 			{detail || detailState ? (
 				<AssetDetail

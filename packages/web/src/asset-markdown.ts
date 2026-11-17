@@ -61,6 +61,7 @@ function renderAsset(asset: SentinelAsset, vulns: SentinelVulnSummary[]): string
 	if (asset.title) lines.push(t("- 标题：{value}", { value: asset.title }));
 	if (asset.server) lines.push(t("- 服务：{value}", { value: asset.server }));
 	if (asset.tech) lines.push(t("- 技术栈：{value}", { value: asset.tech }));
+	if (asset.remark) lines.push(`- ${t("备注")}：\n${indent(asset.remark)}`);
 	if (asset.tags.length > 0) lines.push(t("- 标签：{tags}", { tags: asset.tags.join(t("、")) }));
 	lines.push(
 		t("- 来源：{source}{session}", {

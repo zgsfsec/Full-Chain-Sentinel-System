@@ -200,3 +200,15 @@ test("the detail renders both timeline kinds, linked findings and the warning", 
 	);
 	expect(orphan).toContain("没有关联的漏洞中枢记录");
 });
+
+test("remarks appear in rows, dedicated filters and the detail information tab", () => {
+	const html = renderToStaticMarkup(<AssetLibraryPage {...base} items={[summary({ remark: "人工标记：优先复查" })]} filters={{ remark: "优先" }} total={1} />);
+	expect(html).toContain("人工标记：优先复查");
+	expect(html).toContain("按备注筛选");
+	expect(html).toContain("筛选命中 1 条");
+	expect(html).toContain("编辑备注");
+	const body = renderToStaticMarkup(<AssetDetailBody detail={detail({ remark: "人工标记\nAgent 复核" })}
+		onClose={() => {}} onUpdate={() => {}} onRequestDelete={() => {}} onOpenVuln={() => {}} />);
+	expect(body).toContain("人工标记\nAgent 复核");
+	expect(body).toContain("编辑备注");
+});

@@ -662,6 +662,8 @@ export interface SentinelAssetEntry {
 }
 
 export interface SentinelAssetSummary {
+	/** Editable operator/agent remark, separate from the test timeline. */
+	remark?: string;
 	id: string;
 	label: string;
 	number: number;
@@ -705,6 +707,8 @@ export interface SentinelAssetDetail {
 }
 
 export interface SentinelAssetFilters {
+	/** Literal substring match on the editable remark. */
+	remark?: string;
 	kind?: SentinelAssetKind;
 	status?: SentinelAssetState;
 	tested?: boolean;

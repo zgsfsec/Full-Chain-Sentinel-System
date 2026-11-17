@@ -809,6 +809,8 @@ export interface SentinelAssetEntry {
 
 /** One asset without its timeline, for lists and for the agent's query. */
 export interface SentinelAssetSummary {
+	/** Editable operator/agent remark, separate from the test timeline. */
+	remark?: string;
 	id: string;
 	/** Human-readable id, `<project prefix>-A<sequence>`, e.g. "E2E-A0001". */
 	label: string;
@@ -860,6 +862,8 @@ export interface SentinelAssetDetail {
 
 /** List filters; every field is optional and they combine with AND. */
 export interface SentinelAssetFilters {
+	/** Literal substring match on the editable remark. */
+	remark?: string;
 	kind?: SentinelAssetKind;
 	status?: SentinelAssetState;
 	/** true = has a conclusive record; false = none. Notes do not count. */

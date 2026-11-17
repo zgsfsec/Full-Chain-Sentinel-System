@@ -194,6 +194,7 @@ interface AssetRow {
 	title: string | null;
 	server: string | null;
 	tech: string | null;
+	remark: string;
 	tags: string;
 	status: string;
 	source: string;
@@ -242,6 +243,7 @@ CREATE TABLE IF NOT EXISTS asset_library (
   title          TEXT,
   server         TEXT,
   tech           TEXT,
+  remark         TEXT NOT NULL DEFAULT '',
   tags           TEXT NOT NULL DEFAULT '[]',
   status         TEXT NOT NULL DEFAULT 'pending',
   source         TEXT NOT NULL,
@@ -573,6 +575,7 @@ function rowToSummary(row: AssetRow): SentinelAssetSummary {
 		...(optional(row.server) ? { server: row.server as string } : {}),
 		...(optional(row.tech) ? { tech: row.tech as string } : {}),
 		tags: parseTags(row.tags),
+		remark: row.remark,
 		status,
 		source: row.source,
 		...(optional(row.session_id) ? { sessionId: row.session_id as string } : {}),
@@ -598,6 +601,10 @@ export class AssetLibraryStore {
 		this.db = openSqliteDatabase(path);
 		this.db.exec("PRAGMA journal_mode = WAL");
 		this.db.exec(SCHEMA);
+		const columns = this.db.prepare("PRAGMA table_info(asset_library)").all() as { name: string }[];
+		if (!columns.some((column) => column.name === "remark")) {
+			this.db.exec("ALTER TABLE asset_library ADD COLUMN remark TEXT NOT NULL DEFAULT ''");
+		}
 		this.clock = clock;
 	}
 
@@ -812,6 +819,38 @@ export class AssetLibraryStore {
 		return { created: true, asset, warnings: identity.warnings };
 	}
 
+	/** Editable remarks never change test evidence, status, or discovery times. */
+	updateRemarks(
+		projectId: string,
+		ids: readonly string[],
+		remark: string,
+		mode: "append" | "replace" = "replace",
+	): number {
+		if (typeof remark !== "string" || remark.length > 10000) {
+			throw new AssetInputError("备注必须是字符串，且不超过 10000 字符。");
+		}
+		if (mode !== "append" && mode !== "replace") throw new AssetInputError("备注模式必须是 append 或 replace。");
+		const selected = scopedIds(ids);
+		if (selected.length === 0 || selected.length > 200) throw new AssetInputError("每次请选择 1 至 200 条资产。");
+		const text = blockText(remark);
+		if (mode === "append" && !text) throw new AssetInputError("追加备注不能为空。");
+		return this.transaction(() => {
+			const at = this.now();
+			const read = this.db.prepare("SELECT remark FROM asset_library WHERE project_id = ? AND id = ?");
+			const write = this.db.prepare(
+				"UPDATE asset_library SET remark = ?, updated_at = ? WHERE project_id = ? AND id = ?",
+			);
+			for (const id of selected) {
+				const row = read.get(projectId, id) as { remark: string } | undefined;
+				if (!row) throw new AssetInputError("部分资产不存在或不属于当前项目，请刷新后重试。");
+				const next = mode === "append" && row.remark ? `${row.remark}\n${text}` : text;
+				if (next.length > 10000) throw new AssetInputError("追加后备注超过 10000 字符，请缩短内容。");
+				write.run(next, at, projectId, id);
+			}
+			return selected.length;
+		});
+	}
+
 	/** Append one test record; operator notes and agent tests share this path. */
 	appendEntry(assetId: string, entry: AssetEntryInput): SentinelAsset | undefined {
 		if (!isAssetOutcome(entry.outcome)) {
@@ -975,26 +1014,17 @@ export class AssetLibraryStore {
 		}
 		if (filters.tested === true) conditions.push("last_tested_at IS NOT NULL");
 		if (filters.tested === false) conditions.push("last_tested_at IS NULL");
+		if (filters.remark?.trim()) {
+			conditions.push("remark LIKE ? ESCAPE '\\'");
+			params.push(likePattern(filters.remark.trim()));
+		}
 		const search = filters.search?.trim();
 		if (search) {
 			const pattern = likePattern(search);
 			conditions.push(
-				"(label LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\' OR host LIKE ? ESCAPE '\\' OR COALESCE(domain, '') LIKE ? ESCAPE '\\' OR COALESCE(ip, '') LIKE ? ESCAPE '\\' OR COALESCE(url, '') LIKE ? ESCAPE '\\' OR COALESCE(title, '') LIKE ? ESCAPE '\\' OR COALESCE(server, '') LIKE ? ESCAPE '\\' OR COALESCE(tech, '') LIKE ? ESCAPE '\\' OR COALESCE(protocol, '') LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR source LIKE ? ESCAPE '\\')",
+				"(label LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\' OR host LIKE ? ESCAPE '\\' OR COALESCE(domain, '') LIKE ? ESCAPE '\\' OR COALESCE(ip, '') LIKE ? ESCAPE '\\' OR COALESCE(url, '') LIKE ? ESCAPE '\\' OR COALESCE(title, '') LIKE ? ESCAPE '\\' OR COALESCE(server, '') LIKE ? ESCAPE '\\' OR COALESCE(tech, '') LIKE ? ESCAPE '\\' OR COALESCE(protocol, '') LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR source LIKE ? ESCAPE '\\' OR remark LIKE ? ESCAPE '\\')",
 			);
-			params.push(
-				pattern,
-				pattern,
-				pattern,
-				pattern,
-				pattern,
-				pattern,
-				pattern,
-				pattern,
-				pattern,
-				pattern,
-				pattern,
-				pattern,
-			);
+			params.push(...Array<SqliteValue>(13).fill(pattern));
 		}
 		const where = ` WHERE ${conditions.join(" AND ")}`;
 		const totalRow = this.db.prepare(`SELECT COUNT(*) AS n FROM asset_library${where}`).get(...params) as unknown as {

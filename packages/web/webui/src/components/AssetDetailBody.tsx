@@ -18,6 +18,7 @@ import type {
 	SentinelVulnSeverity,
 } from "../types.ts";
 import "../styles/asset-detail.css";
+import { AssetRemarkDialog, assetRemarkLabels } from "./AssetRemarkDialog.tsx";
 
 const OUTCOME_COLORS: Record<SentinelAssetOutcome, string> = {
 	note: "default",
@@ -65,6 +66,7 @@ export function AssetDetailBody({
 	const [tags, setTags] = useState(asset.tags.join(", "));
 	const [outcome, setOutcome] = useState<SentinelAssetOutcome>("note");
 	const [note, setNote] = useState("");
+	const [remarkOpen, setRemarkOpen] = useState(false);
 	const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 	const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -134,6 +136,7 @@ export function AssetDetailBody({
 
 	return (
 		<div className="asset-inspector">
+			{remarkOpen ? <AssetRemarkDialog assets={[asset]} onClose={() => setRemarkOpen(false)} /> : null}
 			<header className="asset-inspector__identity">
 				<div className="asset-inspector__eyebrow">
 					<span>{asset.label}</span>
@@ -208,6 +211,11 @@ export function AssetDetailBody({
 						label: t("基本信息"),
 						children: (
 							<section className="asset-inspector__section" aria-label={t("基本信息")}>
+								<div className="asset-inspector__tag-section">
+									<strong>{t("备注")}</strong>
+									<p className="asset-remark-content">{asset.remark || assetRemarkLabels.empty}</p>
+									<Button size="small" onClick={() => setRemarkOpen(true)}>{asset.remark ? assetRemarkLabels.edit : assetRemarkLabels.add}</Button>
+								</div>
 								<dl className="asset-inspector__facts">
 									{fields
 										.filter((field) => field.value !== undefined && field.value !== "")

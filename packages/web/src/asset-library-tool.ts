@@ -7,7 +7,7 @@
  * the existing row instead of creating a duplicate, so the model does not have
  * to be careful about repeats.
  *
- * `asset_note` appends a test record. The timeline is append-only: correcting a
+ * `asset_note` edits a remark or appends a test record. The timeline is append-only: correcting a
  * conclusion means appending another record, never editing the old one.
  *
  * `asset_list` and `asset_get` let the model read what the project already
@@ -123,7 +123,7 @@ function kindLabel(kind: SentinelAssetKind): string {
 }
 
 function renderListLine(asset: SentinelAssetSummary): string {
-	return `${asset.label} | ${kindLabel(asset.kind)} | ${asset.name} | ${stateLabel(asset.status)} | ${asset.testCount} 条 · ${outcomeLabel(asset.lastOutcome)} | ${formatWhen(asset.lastSeenAt)} | ${asset.source}`;
+	return `${asset.label} | ${kindLabel(asset.kind)} | ${asset.name} | ${stateLabel(asset.status)} | ${asset.testCount} 条 · ${outcomeLabel(asset.lastOutcome)} | ${formatWhen(asset.lastSeenAt)} | ${asset.source} | 备注：${asset.remark?.replace(/\n/g, " / ") || "—"}`;
 }
 
 function renderTimeline(asset: SentinelAsset): string[] {
@@ -154,6 +154,7 @@ function renderDetails(asset: SentinelAsset, vulns: SentinelVulnSummary[] | unde
 	if (asset.title) lines.push(`标题：${asset.title}`);
 	if (asset.server) lines.push(`服务：${asset.server}`);
 	if (asset.tech) lines.push(`技术栈：${asset.tech}`);
+	lines.push(`备注：${asset.remark || "（无）"}`);
 	if (asset.tags.length > 0) lines.push(`标签：${asset.tags.join("、")}`);
 	lines.push(
 		`来源：${asset.source}${asset.sessionName ? ` · 会话 ${asset.sessionName}` : ""} · 首次发现 ${formatWhen(asset.firstSeenAt)} · 最近发现 ${formatWhen(asset.lastSeenAt)}`,
@@ -236,7 +237,14 @@ const reportSchema = Type.Object({
 
 const noteSchema = Type.Object({
 	asset: Type.String({ minLength: 1, description: "Asset id or label, e.g. E2E-A0001." }),
-	result: resultSchema,
+	remark: Type.Optional(
+		Type.String({
+			maxLength: 10000,
+			description:
+				"Replace the editable remark; empty string clears it. Use alone with asset, without result/method/text. Does not add a test record.",
+		}),
+	),
+	result: Type.Optional(resultSchema),
 	method: Type.Optional(
 		Type.String({ description: "Method or command actually used, e.g. nmap -sV, curl /login, 手动 SQL 注入." }),
 	),
@@ -262,7 +270,10 @@ const listSchema = Type.Object({
 		}),
 	),
 	search: Type.Optional(
-		Type.String({ description: "Substring match on label, name, host, URL, title, tags or source." }),
+		Type.String({ description: "Substring match on label, name, host, URL, title, tags, source or remark." }),
+	),
+	remark: Type.Optional(
+		Type.String({ description: "Literal substring filter on the editable remark; combines with other filters." }),
 	),
 	limit: Type.Optional(
 		Type.Integer({
@@ -371,10 +382,11 @@ export function createAssetLibraryTools(options: AssetLibraryToolOptions): ToolD
 
 	const note = defineTool({
 		name: "asset_note",
-		label: "Record asset test",
+		label: "Edit asset remark or record test",
 		description:
-			"Append one test record to an asset already in this project's library. Use it after each validation attempt (port scan, HTTP request, login test, manual check) so the asset's timeline tells the next pass what was already done. Records are append-only: to correct an earlier conclusion, append a new record that says so. A conclusive result on a pending asset marks it as tested; it does not change an operator-set status.",
-		promptSnippet: "Append a test result (clean / suspicious / vulnerable / unreachable / note) to a recorded asset",
+			"Edit an asset's shared remark by passing asset and remark only (empty string clears it); read the current remark with asset_get first. Alternatively append one test record with result and method/text after a validation attempt. Remarks do not affect test evidence or status. Test records are append-only: correct an earlier conclusion by appending a new record. A conclusive result on a pending asset marks it as tested; it does not change an operator-set status.",
+		promptSnippet:
+			"Edit a shared asset remark, or append a test result (clean / suspicious / vulnerable / unreachable / note)",
 		promptGuidelines: [
 			"Use result=clean when a test found nothing, vulnerable when it confirmed a flaw, suspicious when something needs a second look, unreachable when the service did not answer, and note for an observation that is not a conclusion",
 			"Name the method actually used (e.g. 'nmap -sV', 'curl /login', 'manual SQL injection') and state what you observed",
@@ -397,6 +409,17 @@ export function createAssetLibraryTools(options: AssetLibraryToolOptions): ToolD
 						isError: true,
 					};
 				}
+				if (params.remark !== undefined) {
+					if (params.result !== undefined || params.method !== undefined || params.text !== undefined) {
+						throw new AssetInputError("修改备注请仅传 asset 和 remark；测试记录请另行调用。");
+					}
+					options.store.updateRemarks(project.id, [asset.id], params.remark);
+					options.onChange?.();
+					return {
+						content: [{ type: "text", text: `已更新 ${asset.label} 的备注；测试记录与状态保持不变。` }],
+						details: { ok: true, id: asset.id, label: asset.label, status: asset.status },
+					};
+				}
 				const method = params.method?.trim();
 				const text = params.text ?? "";
 				if (!method && text.trim() === "") {
@@ -406,6 +429,8 @@ export function createAssetLibraryTools(options: AssetLibraryToolOptions): ToolD
 						isError: true,
 					};
 				}
+				if (params.result === undefined)
+					throw new AssetInputError("测试记录必须提供 result；修改备注请使用 remark。");
 				const updated = options.store.appendEntry(asset.id, {
 					author: "agent",
 					source: options.getSource(),
@@ -446,7 +471,7 @@ export function createAssetLibraryTools(options: AssetLibraryToolOptions): ToolD
 		name: "asset_list",
 		label: "List assets",
 		description:
-			"List the assets already recorded for this project, newest seen first. Use it before reporting or when deciding what to test next; combine kind, status, tested and search to narrow the list. This reads the library; it never changes it.",
+			"List the assets and their editable remarks already recorded for this project, newest seen first. Combine kind, status, tested, search and remark to narrow the list. This reads the library; it never changes it.",
 		promptSnippet: "List assets already recorded for this project, with filters for kind, status and test evidence",
 		promptGuidelines: [
 			"At the start of an assessment or when resuming work on a target, use asset_list with the target as search to check existing assets and test history before repeating reconnaissance; use asset_get on relevant records for their full timeline. Existing records do not expand the task's target scope",
@@ -460,6 +485,7 @@ export function createAssetLibraryTools(options: AssetLibraryToolOptions): ToolD
 					...(params.status ? { status: params.status } : {}),
 					...(params.tested !== undefined ? { tested: params.tested } : {}),
 					...(params.search?.trim() ? { search: params.search.trim() } : {}),
+					...(params.remark?.trim() ? { remark: params.remark.trim() } : {}),
 				};
 				const limit = Math.min(Math.max(1, params.limit ?? 50), MAX_LIST_LIMIT);
 				const view = options.store.list(project.id, filters, 1, limit);
@@ -477,7 +503,7 @@ export function createAssetLibraryTools(options: AssetLibraryToolOptions): ToolD
 					);
 				}
 				const text = [
-					`当前项目 ${view.total} 条资产（编号 | 类型 | 名称 | 状态 | 测试 | 最近发现 | 来源）：`,
+					`当前项目 ${view.total} 条资产（编号 | 类型 | 名称 | 状态 | 测试 | 最近发现 | 来源 | 备注）：`,
 					body,
 					...notes,
 				].join("\n");
@@ -502,8 +528,8 @@ export function createAssetLibraryTools(options: AssetLibraryToolOptions): ToolD
 		name: "asset_get",
 		label: "Get asset",
 		description:
-			"Read one asset with its full test timeline and the findings linked to it, by id or by its human-readable label (e.g. E2E-A0001).",
-		promptSnippet: "Read one asset with its full test timeline and linked findings",
+			"Read one asset with its editable shared remark, full test timeline and linked findings, by id or by its human-readable label (e.g. E2E-A0001).",
+		promptSnippet: "Read one asset with its shared remark, full test timeline and linked findings",
 		parameters: getSchema,
 		async execute(_toolCallId, params): Promise<AgentToolResult<GetDetails>> {
 			try {

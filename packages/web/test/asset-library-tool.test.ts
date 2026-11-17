@@ -214,3 +214,51 @@ test("without a project the tools refuse", async () => {
 	const report = tool(tools, "asset_report");
 	await expect(report.execute("c2", { ip: "10.0.0.1" } as never)).rejects.toThrow("尚未选择项目");
 });
+
+test("Agents read operator remarks, edit and clear them without creating test records", async () => {
+	let changes = 0;
+	const tools = setup({
+		onChange: () => {
+			changes += 1;
+		},
+	});
+	const report = tool(tools, "asset_report");
+	await report.execute("c1", { domain: "remarks.example.com" } as never);
+	const asset = store?.find("p1", "E2E-A0001");
+	if (!asset || !store) throw new Error("missing asset");
+	store.updateRemarks("p1", [asset.id], "人工标记：稍后复查");
+	const list = tool(tools, "asset_list");
+	expect(textOf(await list.execute("c2", { remark: "稍后复查" } as never))).toContain("人工标记：稍后复查");
+	expect((await list.execute("c3", { remark: "不存在" } as never)).details?.total).toBe(0);
+	const get = tool(tools, "asset_get");
+	expect(textOf(await get.execute("c4", { asset: asset.label } as never))).toContain("人工标记：稍后复查");
+	const note = tool(tools, "asset_note");
+	expect((await note.execute("c5", { asset: asset.label, remark: "Agent 已确认归属" } as never)).isError).not.toBe(
+		true,
+	);
+	expect(store.get(asset.id)).toMatchObject({
+		remark: "Agent 已确认归属",
+		status: "pending",
+		testCount: 0,
+		entries: [],
+	});
+	expect(changes).toBe(2);
+	const mixed = await note.execute("c6", {
+		asset: asset.label,
+		remark: "不应写入",
+		result: "clean",
+		text: "测试",
+	} as never);
+	expect(mixed.isError).toBe(true);
+	expect(store.get(asset.id)?.remark).toBe("Agent 已确认归属");
+	const foreign = store.upsert({
+		projectId: "other",
+		projectName: "other",
+		source: "主代理",
+		identity: { ip: "10.0.0.50" },
+	}).asset;
+	expect((await note.execute("c7", { asset: foreign.id, remark: "越界" } as never)).isError).toBe(true);
+	await note.execute("c8", { asset: asset.label, remark: "" } as never);
+	expect(store.get(asset.id)?.remark).toBe("");
+	expect(store.get(asset.id)?.testCount).toBe(0);
+});

@@ -310,3 +310,82 @@ test("HTTP paste import previews without writes, merges records and rejects stal
 	expect((await post("/api/assets/import/preview", context.id, "a".repeat(200001))).status).toBe(400);
 	expect(library?.countByProject(context.id)).toBe((before ?? 0) + 2);
 });
+
+test("HTTP remarks update atomically and appear in filtered lists, details and exports", async () => {
+	const context = (await fetch(`${serverUrl}/api/assets/import`).then((response) => response.json())) as {
+		id: string;
+		name: string;
+	};
+	if (!library) throw new Error("missing library");
+	const first = library.upsert({
+		projectId: context.id,
+		projectName: context.name,
+		source: "主代理",
+		identity: { ip: "10.55.1.1" },
+	}).asset;
+	const second = library.upsert({
+		projectId: context.id,
+		projectName: context.name,
+		source: "主代理",
+		identity: { ip: "10.55.1.2" },
+	}).asset;
+	const foreign = library.upsert({
+		projectId: "other",
+		projectName: "other",
+		source: "主代理",
+		identity: { ip: "10.55.1.3" },
+	}).asset;
+	const post = (body: Record<string, unknown>) =>
+		fetch(`${serverUrl}/api/assets/remarks`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+	const body = { projectId: context.id, ids: [first.id, second.id], remark: "夜间待复查", mode: "append" };
+	incoming.splice(0, incoming.length);
+	const changed = waitFor((message) => message.type === "assets_changed");
+	expect(await (await post(body)).json()).toEqual({ count: 2 });
+	await changed;
+	send({ type: "list_assets", filters: { remark: "夜间待复查", tested: false }, page: 1, pageSize: 1 });
+	const page = await listAssets();
+	expect(page.total).toBe(2);
+	expect(page.hasMore).toBe(true);
+	expect(page.items[0].remark).toBe("夜间待复查");
+	send({ type: "get_asset", id: first.id });
+	const detail = await waitFor((message) => message.type === "asset");
+	expect(detail).toMatchObject({ detail: { asset: { remark: "夜间待复查", testCount: 0, entries: [] } } });
+	send({ type: "export_assets", filters: { remark: "夜间待复查" } });
+	const exported = await waitFor((message) => message.type === "assets_export");
+	if (exported.type !== "assets_export") throw new Error("missing export");
+	expect(exported.markdown).toContain("夜间待复查");
+	expect(exported.markdown).toContain(first.name);
+	expect(exported.markdown).toContain(second.name);
+	expect(exported.markdown).not.toContain("manual.example.com");
+	for (const invalid of [
+		{ ...body, ids: [first.id, foreign.id] },
+		{ ...body, ids: [first.id, "missing"] },
+		{ ...body, ids: [] },
+		{ ...body, ids: [123] },
+		{ ...body, mode: "invalid" },
+		{ ...body, remark: "x".repeat(10001) },
+	])
+		expect((await post(invalid)).status).toBe(400);
+	expect(library.get(first.id)?.remark).toBe("夜间待复查");
+	expect(library.get(foreign.id)?.remark).toBe("");
+	expect((await post({ ...body, projectId: "other" })).status).toBe(409);
+	expect((await fetch(`${serverUrl}/api/assets/remarks`)).status).toBe(405);
+	expect((await fetch(`${serverUrl}/api/assets/remarks`, { method: "POST", body: "text" })).status).toBe(415);
+	expect(
+		(
+			await fetch(`${serverUrl}/api/assets/remarks`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: "invalid",
+			})
+		).status,
+	).toBe(400);
+	expect((await post({ ...body, remark: "x".repeat(128 * 1024) })).status).toBe(400);
+	expect((await post({ ...body, ids: [first.id], remark: "", mode: "replace" })).status).toBe(200);
+	expect(library.get(first.id)?.remark).toBe("");
+	expect(library.get(second.id)?.remark).toBe("夜间待复查");
+});

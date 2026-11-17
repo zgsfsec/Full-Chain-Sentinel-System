@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { AssetInputError, AssetLibraryStore, assetLibraryDbPath, assetPrefix } from "../src/asset-library.ts";
 import type { SentinelAsset, SentinelAssetOutcome } from "../src/protocol.ts";
+import { openSqliteDatabase } from "../src/sqlite.ts";
 
 let root = "";
 let store: AssetLibraryStore | undefined;
@@ -301,4 +302,82 @@ test("find and get are scoped to their project", () => {
 	expect(assets.find("p1", asset.id)?.id).toBe(asset.id);
 	expect(assets.find("other", asset.label)).toBeUndefined();
 	expect(assets.find("other", asset.id)).toBeUndefined();
+});
+
+test("remarks replace, append, clear and survive reports without changing test evidence", () => {
+	const assets = freshStore();
+	const first = note(report({ ip: "10.0.0.41" }), "clean");
+	const second = report({ ip: "10.0.0.42" });
+	expect(assets.updateRemarks("p1", [first.id], " 原备注\r\n第二行 ")).toBe(1);
+	expect(assets.updateRemarks("p1", [first.id, second.id, first.id], "追加", "append")).toBe(2);
+	expect(assets.get(first.id)).toMatchObject({
+		remark: "原备注\n第二行\n追加",
+		status: first.status,
+		testCount: first.testCount,
+		lastOutcome: first.lastOutcome,
+		lastSeenAt: first.lastSeenAt,
+		lastTestedAt: first.lastTestedAt,
+		entries: first.entries,
+	});
+	expect(assets.get(second.id)).toMatchObject({ remark: "追加", testCount: 0, status: "pending", entries: [] });
+	expect(report({ ip: "10.0.0.41" }).remark).toBe("原备注\n第二行\n追加");
+	assets.updateRemarks("p1", [first.id, second.id], "统一覆盖", "replace");
+	expect(assets.get(first.id)?.remark).toBe("统一覆盖");
+	expect(assets.get(second.id)?.remark).toBe("统一覆盖");
+	assets.updateRemarks("p1", [first.id], "");
+	expect(assets.get(first.id)?.remark).toBe("");
+});
+
+test("remark batches roll back on missing, foreign or oversized remarks", () => {
+	const assets = freshStore();
+	const first = report({ ip: "10.0.0.43" });
+	const foreign = report({ ip: "10.0.0.44" }, { projectId: "other" });
+	assets.updateRemarks("p1", [first.id], "原备注");
+	for (const id of ["missing", foreign.id]) {
+		expect(() => assets.updateRemarks("p1", [first.id, id], "不应写入", "append")).toThrow(AssetInputError);
+		expect(assets.get(first.id)?.remark).toBe("原备注");
+	}
+	expect(assets.get(foreign.id)?.remark).toBe("");
+	const long = report({ ip: "10.0.0.45" });
+	assets.updateRemarks("p1", [long.id], "x".repeat(10000));
+	expect(() => assets.updateRemarks("p1", [first.id, long.id], "追加", "append")).toThrow("10000");
+	expect(assets.get(first.id)?.remark).toBe("原备注");
+	expect(() => assets.updateRemarks("p1", [first.id], "x".repeat(10001))).toThrow("10000");
+	expect(() => assets.updateRemarks("p1", [], "x")).toThrow(AssetInputError);
+	expect(() => assets.updateRemarks("p1", [first.id], "  ", "append")).toThrow(AssetInputError);
+});
+
+test("remark substring filters compose, paginate and escape SQL wildcards", () => {
+	const assets = freshStore();
+	const first = report({ domain: "remarks.example.com" });
+	const second = report({ ip: "10.0.0.46" });
+	const third = report({ ip: "10.0.0.47" });
+	assets.updateRemarks("p1", [first.id, second.id], "待复查 50%_C:\\data");
+	assets.updateRemarks("p1", [third.id], "待复查 50xxC:");
+	expect(assets.list("p1", { remark: "50%_C:\\" }).total).toBe(2);
+	expect(assets.list("p1", { search: "50%_C:\\" }).total).toBe(2);
+	expect(assets.list("p1", { remark: "待复查", kind: "domain", tested: false }).items.map((item) => item.id)).toEqual([
+		first.id,
+	]);
+	expect(assets.list("other", { remark: "待复查" }).total).toBe(0);
+	const page = assets.list("p1", { remark: "50%_" }, 2, 1);
+	expect(page.total).toBe(2);
+	expect(page.items).toHaveLength(1);
+	expect(page.items[0].remark).toBe("待复查 50%_C:\\data");
+	expect(page.hasMore).toBe(false);
+});
+
+test("migrates an existing inventory and persists remarks across reopen", () => {
+	freshStore();
+	const asset = note(report({ ip: "10.0.0.48" }), "clean");
+	closeStore();
+	const legacy = openSqliteDatabase(assetLibraryDbPath(root));
+	legacy.exec("ALTER TABLE asset_library DROP COLUMN remark");
+	legacy.close();
+	store = new AssetLibraryStore(assetLibraryDbPath(root));
+	expect(store.get(asset.id)).toMatchObject({ remark: "", entries: asset.entries, testCount: 1 });
+	store.updateRemarks("p1", [asset.id], "重启后保留");
+	closeStore();
+	store = new AssetLibraryStore(assetLibraryDbPath(root));
+	expect(store.get(asset.id)?.remark).toBe("重启后保留");
 });
