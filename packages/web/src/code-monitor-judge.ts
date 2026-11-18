@@ -9,6 +9,7 @@
  * finding.
  */
 
+import { type AuxiliaryModelConfig, completeAuxiliaryModel } from "./auxiliary-model.ts";
 import type { GithubCommitDetail } from "./code-host.ts";
 import { CODE_VULN_TAGS, type CodeVulnTag, normalizeCodeVulnTags } from "./code-vuln-tags.ts";
 import { t } from "./i18n.ts";
@@ -178,55 +179,30 @@ export function buildJudgePrompt(
 	return lines.join("\n");
 }
 
-interface JudgeEndpoint {
-	baseUrl: string;
-	apiKey: string;
-	modelId: string;
-}
-
 /**
  * One judgment. Kept separate from the queue so tests can stub the transport
  * and so a slow endpoint has exactly one timeout to explain.
  */
 export async function callMonitorJudge(
-	config: JudgeEndpoint,
+	config: AuxiliaryModelConfig,
 	systemPrompt: string,
 	userPrompt: string,
-	fetchImpl: typeof fetch = fetch,
+	fetchImpl?: typeof fetch,
 ): Promise<string> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 	try {
-		const response = await fetchImpl(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
-			},
-			body: JSON.stringify({
-				model: config.modelId,
-				messages: [
-					{ role: "system", content: systemPrompt },
-					{ role: "user", content: userPrompt },
-				],
-				temperature: 0,
-				response_format: { type: "json_object" },
-			}),
+		const reply = await completeAuxiliaryModel(config, {
+			systemPrompt,
+			input: userPrompt,
 			signal: controller.signal,
+			json: true,
+			...(fetchImpl ? { fetch: fetchImpl } : {}),
 		});
-		if (!response.ok) {
-			const body = (await response.text().catch(() => "")).slice(0, 200);
-			throw new Error(`${t("监测端点返回 {status}", { status: response.status })}${body ? `：${body}` : ""}`);
-		}
-		const data = (await response.json()) as {
-			choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
-		};
-		const content = data.choices?.[0]?.message?.content;
-		const answer = Array.isArray(content) ? content.map((part) => part.text ?? "").join("") : (content ?? "");
-		if (!answer.trim()) throw new Error(t("监测端点返回了空回复"));
-		return answer;
+		if (!reply.content.trim()) throw new Error(t("监测端点返回了空回复"));
+		return reply.content;
 	} catch (error) {
-		if (error instanceof Error && error.name === "AbortError") throw new Error(t("监测模型请求超时"));
+		if (controller.signal.aborted) throw new Error(t("监测模型请求超时"));
 		throw error;
 	} finally {
 		clearTimeout(timer);
@@ -235,7 +211,7 @@ export async function callMonitorJudge(
 
 /** Full judgment: fetch text, parse it, and turn transport errors into one line. */
 export async function judgeCommit(
-	config: JudgeEndpoint,
+	config: AuxiliaryModelConfig,
 	monitor: Pick<SentinelCodeMonitor, "owner" | "repo" | "host">,
 	commit: GithubCommitDetail,
 	diff: string,

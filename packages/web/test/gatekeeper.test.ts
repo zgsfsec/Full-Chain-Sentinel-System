@@ -158,6 +158,8 @@ describe("resolveJudgeEndpoint", () => {
 		writeTestModel(agentDir, { baseUrl: "http://judge/v1", apiKey: "sk-judge", modelId: "judge" }, "judge");
 		expect(resolveJudgeEndpoint(agentDir)).toEqual({
 			config: {
+				agentDir,
+				providerId: "zg-model-2",
 				baseUrl: "http://judge/v1",
 				apiKey: "sk-judge",
 				modelId: "judge",
@@ -174,6 +176,8 @@ describe("resolveJudgeEndpoint", () => {
 		expect(resolveJudgeEndpoint(agentDir)).toEqual({
 			// An unauthenticated endpoint is stored with the placeholder bearer.
 			config: {
+				agentDir,
+				providerId: "zg-model-1",
 				baseUrl: "http://main/v1",
 				apiKey: "sentinel-no-auth",
 				modelId: "main",

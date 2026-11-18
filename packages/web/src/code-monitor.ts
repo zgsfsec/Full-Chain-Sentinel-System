@@ -16,6 +16,7 @@
  *   retries a few of them, and the operator can retry any row by hand.
  */
 
+import { resolveAuxiliaryModel } from "./auxiliary-model.ts";
 import {
 	GithubApiError,
 	GithubClient,
@@ -40,7 +41,6 @@ import {
 import { CODE_VULN_TAGS, type CodeVulnTag } from "./code-vuln-tags.ts";
 import { nextCronTime, parseCronExpression, validateCronExpression } from "./cron.ts";
 import { execInContainer } from "./docker.ts";
-import { resolveLibraryRole } from "./model-library.ts";
 import type {
 	SentinelCodeActivityFilter,
 	SentinelCodeActivityView,
@@ -1052,7 +1052,7 @@ export class CodeMonitorManager {
 			});
 			return "not_security";
 		}
-		const config = resolveLibraryRole(this.agentDir, "monitor")?.config ?? null;
+		const config = resolveAuxiliaryModel(this.agentDir, "monitor");
 		if (!config) {
 			this.store.setVerdict(row.id, {
 				verdict: "failed",

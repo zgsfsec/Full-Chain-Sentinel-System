@@ -16,6 +16,7 @@
  * third settings page.
  */
 
+import { type AuxiliaryModelConfig, completeAuxiliaryModel, resolveAuxiliaryModel } from "./auxiliary-model.ts";
 import {
 	applyCapabilityLimits,
 	type CvssMetrics,
@@ -27,7 +28,7 @@ import {
 	type ReviewCapabilities,
 } from "./cvss.ts";
 import { t } from "./i18n.ts";
-import { readModelLibrary, resolveLibraryRole } from "./model-library.ts";
+import { readModelLibrary } from "./model-library.ts";
 import type { SentinelVulnerability } from "./protocol.ts";
 import { severityForCvss, type VulnerabilityStore } from "./vulnerabilities.ts";
 
@@ -215,43 +216,18 @@ export function parseVerdict(raw: string): ReviewVerdict {
 	return { metrics, ...(capabilities ? { capabilities } : {}), dubious: parsed.dubious, reason };
 }
 
-async function callReviewer(
-	config: { baseUrl: string; apiKey: string; modelId: string },
-	vuln: SentinelVulnerability,
-): Promise<ReviewVerdict> {
+async function callReviewer(config: AuxiliaryModelConfig, vuln: SentinelVulnerability): Promise<ReviewVerdict> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 	try {
-		const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
-			},
-			body: JSON.stringify({
-				model: config.modelId,
-				messages: [
-					{ role: "system", content: REVIEWER_SYSTEM_PROMPT },
-					{ role: "user", content: buildUserPrompt(vuln) },
-				],
-				temperature: 0,
-				response_format: { type: "json_object" },
-			}),
+		const reply = await completeAuxiliaryModel(config, {
+			systemPrompt: REVIEWER_SYSTEM_PROMPT,
+			input: buildUserPrompt(vuln),
 			signal: controller.signal,
+			json: true,
 		});
-		if (!response.ok) {
-			const body = await response.text().catch(() => "");
-			throw new Error(
-				`${t("端点返回 {status}", { status: response.status })}${body ? `：${body.slice(0, 200)}` : ""}`,
-			);
-		}
-		const data = (await response.json()) as {
-			choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
-		};
-		const content = data.choices?.[0]?.message?.content;
-		const text = Array.isArray(content) ? content.map((part) => part.text ?? "").join("") : (content ?? "");
-		if (!text.trim()) throw new Error(t("端点返回了空回复"));
-		return parseVerdict(text);
+		if (!reply.content.trim()) throw new Error(t("端点返回了空回复"));
+		return parseVerdict(reply.content);
 	} finally {
 		clearTimeout(timer);
 	}
@@ -270,10 +246,7 @@ export class VulnReviewer {
 	private readonly queue: Array<{ id: string; force: boolean }> = [];
 	private draining = false;
 	/** The model call; public and mutable so tests can stub it. */
-	call: (
-		config: { baseUrl: string; apiKey: string; modelId: string },
-		vuln: SentinelVulnerability,
-	) => Promise<ReviewVerdict>;
+	call: (config: AuxiliaryModelConfig, vuln: SentinelVulnerability) => Promise<ReviewVerdict>;
 
 	constructor(store: VulnerabilityStore, hooks: ReviewerHooks, agentDir: string) {
 		this.store = store;
@@ -351,7 +324,7 @@ export class VulnReviewer {
 	}
 
 	private async reviewOne(id: string, force: boolean): Promise<void> {
-		const config = resolveLibraryRole(this.agentDir, "reviewer")?.config ?? null;
+		const config = resolveAuxiliaryModel(this.agentDir, "reviewer");
 		const vuln = this.store.get(id);
 		// Re-check arbitration at execution time: the operator may have acted
 		// while the record sat in the queue.

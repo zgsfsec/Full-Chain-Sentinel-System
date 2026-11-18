@@ -10,6 +10,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
+import { type AuxiliaryModelConfig, completeAuxiliaryModel } from "./auxiliary-model.ts";
 import { t } from "./i18n.ts";
 import { resolveLibraryRole, toResolvedModelView } from "./model-library.ts";
 import type {
@@ -318,89 +319,19 @@ function extractToolResultText(result: unknown): string {
 	return "";
 }
 
-interface SupervisorCompletion {
-	content: string;
-	reasoning: string;
-	finishReason: string;
-	usage: SentinelSupervisorUsage;
-}
-
-async function requestSupervisorCompletion(
-	config: { baseUrl: string; apiKey: string; modelId: string },
-	input: string,
-	signal: AbortSignal,
-	maxTokens: number,
-): Promise<SupervisorCompletion> {
-	const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-		method: "POST",
-		headers: {
-			"content-type": "application/json",
-			...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
-		},
-		body: JSON.stringify({
-			model: config.modelId,
-			messages: [
-				{ role: "system", content: SUPERVISOR_SYSTEM_PROMPT },
-				{ role: "user", content: input },
-			],
-			temperature: 0,
-			max_tokens: maxTokens,
-			stream: false,
-		}),
-		signal,
-	});
-	if (!response.ok) {
-		const body = await response.text().catch(() => "");
-		throw new Error(
-			t("监督模型端点返回 {status}{detail}", {
-				status: response.status,
-				detail: body ? t("：{body}", { body: body.slice(0, 200) }) : "",
-			}),
-		);
-	}
-	const data = (await response.json()) as {
-		choices?: Array<{
-			message?: {
-				content?: string | Array<{ text?: string }>;
-				reasoning_content?: string;
-				reasoning?: string;
-				refusal?: string | null;
-			};
-			text?: string;
-			finish_reason?: string;
-		}>;
-		usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-	};
-	const choice = data.choices?.[0];
-	const content = choice?.message?.content;
-	const text = Array.isArray(content)
-		? content.map((part) => part.text ?? "").join("")
-		: (content ?? choice?.text ?? "");
-	const reasoning = choice?.message?.reasoning_content ?? choice?.message?.reasoning ?? "";
-	return {
-		content: text,
-		reasoning,
-		finishReason: choice?.finish_reason ?? "",
-		usage: {
-			input: asNumber(data.usage?.prompt_tokens),
-			output: asNumber(data.usage?.completion_tokens),
-			total: asNumber(data.usage?.total_tokens),
-		},
-	};
-}
-
 export async function callSupervisorModel(
-	config: { baseUrl: string; apiKey: string; modelId: string },
+	config: AuxiliaryModelConfig,
 	input: string,
 	signal: AbortSignal,
 ): Promise<ModelReply> {
-	let reply = await requestSupervisorCompletion(config, input, signal, 8192);
+	const request = { systemPrompt: SUPERVISOR_SYSTEM_PROMPT, input, signal };
+	let reply = await completeAuxiliaryModel(config, { ...request, maxTokens: 8192 });
 	let usage = reply.usage;
 	// A long episode can be cut off mid-array. Retry with the model's full output
 	// budget whenever the endpoint says the answer was truncated, not only when
 	// the content is empty.
 	if (reply.finishReason === "length") {
-		const retry = await requestSupervisorCompletion(config, input, signal, 16384);
+		const retry = await completeAuxiliaryModel(config, { ...request, maxTokens: 16384 });
 		usage = {
 			input: usage.input + retry.usage.input,
 			output: usage.output + retry.usage.output,
@@ -413,7 +344,7 @@ export async function callSupervisorModel(
 	const raw = reply.content.trim() || reply.reasoning.trim();
 	if (!raw) {
 		const detail = [
-			reply.finishReason ? `finish_reason=${reply.finishReason}` : "",
+			reply.finishReason ? `finish_reason=${reply.rawFinishReason}` : "",
 			`completion_tokens=${reply.usage.output}`,
 			reply.reasoning.trim() ? t("只有 reasoning_content") : t("content 为空"),
 		]
@@ -853,7 +784,11 @@ export class Supervisor {
 		const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
 		const started = Date.now();
 		try {
-			const reply = await this.call(resolved.config, buildSupervisorTestInput(), controller.signal);
+			const reply = await this.call(
+				{ ...resolved.config, agentDir: this.agentDir, providerId: resolved.entryId },
+				buildSupervisorTestInput(),
+				controller.signal,
+			);
 			parseSupervisorEpisode(reply.raw);
 			return {
 				result: {
@@ -981,7 +916,11 @@ export class Supervisor {
 				strategies: session.strategies,
 				strategyNote: session.strategyNote,
 			});
-			const reply = await this.call(resolved.config, input, controller.signal);
+			const reply = await this.call(
+				{ ...resolved.config, agentDir: this.agentDir, providerId: resolved.entryId },
+				input,
+				controller.signal,
+			);
 			// The session may have been deleted or stopped while the model answered.
 			if (!this.sessions.has(session.sessionId) || session.status !== "running") return;
 			let parsed: ReturnType<typeof parseSupervisorEpisode>;

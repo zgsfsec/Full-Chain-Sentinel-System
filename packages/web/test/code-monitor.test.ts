@@ -7,6 +7,7 @@ import { CodeMonitorStore, codeMonitorDbPath, setCodeMonitorSecret } from "../sr
 import type { CodeVulnTag } from "../src/code-vuln-tags.ts";
 import { addLibraryEntry } from "../src/model-library.ts";
 import type { SentinelVulnCategory } from "../src/protocol.ts";
+import { modelStream } from "./model-stream-fixtures.ts";
 
 const SHA_BASE = "basebasebasebasebasebasebasebasebasebase";
 const SHA_FIX = "fixfixfixfixfixfixfixfixfixfixfixfixfixfix";
@@ -126,25 +127,20 @@ describe("CodeMonitorManager.check", () => {
 					});
 				}
 				if (url.includes("/chat/completions")) {
-					return json({
-						choices: [
-							{
-								message: {
-									content: JSON.stringify({
-										security: true,
-										confidence: 0.9,
-										cve: "CVE-2024-9999",
-										severity: "high",
-										vuln_type: "认证绕过",
-										vuln_category: "web",
-										vuln_tags: ["auth-bypass", "access-control"],
-										title: "管理员接口缺少授权校验",
-										reason: "src/admin.ts 增加了 isAdmin 判断",
-									}),
-								},
-							},
-						],
-					});
+					return modelStream(
+						"openai-completions",
+						JSON.stringify({
+							security: true,
+							confidence: 0.9,
+							cve: "CVE-2024-9999",
+							severity: "high",
+							vuln_type: "认证绕过",
+							vuln_category: "web",
+							vuln_tags: ["auth-bypass", "access-control"],
+							title: "管理员接口缺少授权校验",
+							reason: "src/admin.ts 增加了 isAdmin 判断",
+						}),
+					);
 				}
 				return json({ message: "not found" }, 404);
 			}) as unknown as typeof fetch;

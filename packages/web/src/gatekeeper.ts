@@ -23,11 +23,12 @@
  *   worse than stopping.
  */
 
+import { type AuxiliaryModelConfig, completeAuxiliaryModel } from "./auxiliary-model.ts";
 import { readGatekeeperConfig } from "./gatekeeper-config.ts";
 import type { GateDecisionInput, GatekeeperStore } from "./gatekeeper-store.ts";
 import { t } from "./i18n.ts";
 import { resolveLibraryRole } from "./model-library.ts";
-import type { SentinelGateDecision, SentinelModelConfig } from "./protocol.ts";
+import type { SentinelGateDecision } from "./protocol.ts";
 
 /** The tool the judge is asked about; bash is the only execution surface. */
 export const GATEKEEPER_TOOL = "bash";
@@ -137,7 +138,7 @@ export interface JudgeCallResult {
 
 /** The endpoint the 守门模型 role resolves to, and where it came from. */
 export interface ResolvedJudgeEndpoint {
-	config: SentinelModelConfig | null;
+	config: AuxiliaryModelConfig | null;
 	/** Display name of the entry that answers, e.g. "DeepSeek-V3.1". */
 	from: string | null;
 	/** True when the role follows 主模型 instead of naming its own entry. */
@@ -229,53 +230,27 @@ export function parseGateVerdict(text: string): GateVerdict {
 export function resolveJudgeEndpoint(agentDir: string): ResolvedJudgeEndpoint {
 	const resolved = resolveLibraryRole(agentDir, "judge");
 	if (!resolved) return { config: null, from: null, followedMain: false };
-	return { config: resolved.config, from: resolved.entryName, followedMain: resolved.followedMain };
+	return {
+		config: { ...resolved.config, agentDir, providerId: resolved.entryId },
+		from: resolved.entryName,
+		followedMain: resolved.followedMain,
+	};
 }
 
 /** One HTTP call to the judge endpoint. `signal` carries the timeout and the abort. */
-async function callJudge(config: SentinelModelConfig, input: string, signal: AbortSignal): Promise<JudgeCallResult> {
-	const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-		method: "POST",
-		headers: {
-			"content-type": "application/json",
-			...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
-		},
-		body: JSON.stringify({
-			model: config.modelId,
-			messages: [
-				{ role: "system", content: GATEKEEPER_SYSTEM_PROMPT },
-				{ role: "user", content: input },
-			],
-			temperature: 0,
-			max_tokens: 128,
-			stream: false,
-		}),
+async function callJudge(config: AuxiliaryModelConfig, input: string, signal: AbortSignal): Promise<JudgeCallResult> {
+	const reply = await completeAuxiliaryModel(config, {
+		systemPrompt: GATEKEEPER_SYSTEM_PROMPT,
+		input,
 		signal,
+		maxTokens: 128,
 	});
-	if (!response.ok) {
-		const body = await response.text().catch(() => "");
-		throw new Error(`${t("端点返回 {status}", { status: response.status })}${body ? `：${body.slice(0, 200)}` : ""}`);
-	}
-	const data = (await response.json()) as {
-		choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>;
-		usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-	};
-	const content = data.choices?.[0]?.message?.content;
-	const raw = Array.isArray(content) ? content.map((part) => part.text ?? "").join("") : (content ?? "");
+	const raw = reply.content;
 	if (!raw.trim()) throw new Error(t("端点返回了空回复"));
-	const usage = data.usage;
 	return {
 		verdict: parseGateVerdict(raw),
 		raw: raw.trim().slice(0, MAX_RAW_CHARS),
-		...(usage
-			? {
-					usage: {
-						input: Number(usage.prompt_tokens ?? 0),
-						output: Number(usage.completion_tokens ?? 0),
-						total: Number(usage.total_tokens ?? 0),
-					},
-				}
-			: {}),
+		usage: reply.usage,
 	};
 }
 
@@ -350,7 +325,7 @@ export class Gatekeeper {
 	 */
 	private lastSuccessAt: number | null = null;
 	/** The model call; public and mutable so tests can stub it. */
-	call: (config: SentinelModelConfig, input: string, signal: AbortSignal) => Promise<JudgeCallResult>;
+	call: (config: AuxiliaryModelConfig, input: string, signal: AbortSignal) => Promise<JudgeCallResult>;
 
 	constructor(store: GatekeeperStore, hooks: GatekeeperHooks, agentDir: string) {
 		this.store = store;
