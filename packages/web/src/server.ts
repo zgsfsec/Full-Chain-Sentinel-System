@@ -1106,6 +1106,50 @@ export async function startSentinelServer(
 		}
 	}
 
+	/** Project master switch; repository configuration and history stay untouched. */
+	async function handleCodeMonitorProject(request: IncomingMessage, response: ServerResponse): Promise<void> {
+		response.setHeader("cache-control", "no-store");
+		if (!codeMonitors) {
+			sendJson(response, { error: t("未配置配置目录，无法使用开源监测") }, 503);
+			return;
+		}
+		try {
+			const projectId = new URL(request.url ?? "/", "http://localhost").searchParams.get("projectId") ?? "";
+			if (!agentDir || !listProjects(agentDir).projects.some((project) => project.id === projectId)) {
+				sendJson(response, { error: t("项目不存在") }, 404);
+				return;
+			}
+			if (request.method === "POST") {
+				if (!request.headers["content-type"]?.toLowerCase().startsWith("application/json")) {
+					sendJson(response, { error: "Content-Type must be application/json" }, 415);
+					return;
+				}
+				const body = await readJsonBody(request, 1024);
+				if (authEnabled && !hasValidSession(currentAuth(), request)) {
+					sendJson(response, { error: t("未登录") }, 401);
+					return;
+				}
+				if (consentFor(currentAuth()?.username ?? null).required) {
+					sendJson(response, { error: "consent_required" }, 403);
+					return;
+				}
+				if (typeof body?.enabled !== "boolean") {
+					sendJson(response, { error: "enabled must be a boolean" }, 400);
+					return;
+				}
+				codeMonitors.setProjectEnabled(projectId, body.enabled);
+			} else if (request.method !== "GET") {
+				response.setHeader("allow", "GET, POST");
+				sendJson(response, { error: "Method not allowed" }, 405);
+				return;
+			}
+			sendJson(response, { projectId, enabled: codeMonitors.projectEnabled(projectId) });
+		} catch (error) {
+			if (!response.destroyed)
+				sendJson(response, { error: error instanceof Error ? error.message : String(error) }, 400);
+		}
+	}
+
 	// --- Console authentication -------------------------------------------
 	// Static files carry no secrets and stay open; everything under /api and the
 	// WebSocket needs the session cookie. The credential file is created by the
@@ -1636,6 +1680,10 @@ export async function startSentinelServer(
 						(!authEnabled || hasValidSession(currentAuth(), request)) &&
 						!consentFor(currentAuth()?.username ?? null).required,
 				);
+				return;
+			}
+			if (path === "/api/code-monitors/project") {
+				void handleCodeMonitorProject(request, response);
 				return;
 			}
 			if (path === "/api/gate-audit/export") {
@@ -4552,6 +4600,7 @@ export async function startSentinelServer(
 				url: consoleUrl(),
 				environment,
 				close: () => {
+					codeMonitors?.stop();
 					projectStorage?.dispose();
 					if (storageUpdateTimer) clearTimeout(storageUpdateTimer);
 					intelligence?.stop();

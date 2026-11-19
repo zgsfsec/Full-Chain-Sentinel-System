@@ -136,6 +136,14 @@ export interface CodeCheckResult {
 	checkId: string;
 	/** First/joined error that made the pass partial; null when clean. */
 	error: string | null;
+	/** A project pause interrupted this pass; the queue resumes without using a retry. */
+	paused?: boolean;
+}
+
+class CodeMonitoringPaused extends Error {
+	constructor() {
+		super("项目已暂停开源情报监听");
+	}
 }
 
 function errorText(error: unknown): string {
@@ -312,6 +320,8 @@ export class CodeMonitorManager {
 	private pumping = false;
 	/** Monitors with a check in flight, so a tick cannot stack on a slow API. */
 	private readonly checking = new Set<string>();
+	/** A rapid off/on must still stop work that began before the pause. */
+	private readonly pauseVersions = new Map<string, number>();
 	/** Server-side sequential import; survives a browser refresh, unlike client state. */
 	private importQueue: SentinelCodeMonitorInput[] = [];
 	private importState: SentinelCodeImportState | null = null;
@@ -352,6 +362,34 @@ export class CodeMonitorManager {
 		return readCodeMonitorSecrets(this.agentDir)[monitorId] ?? "";
 	}
 
+	projectEnabled(projectId: string): boolean {
+		if (!this.hooks.project(projectId)) throw new Error("项目不存在");
+		return this.store.projectEnabled(projectId);
+	}
+
+	setProjectEnabled(projectId: string, enabled: boolean): void {
+		this.projectEnabled(projectId);
+		this.store.setProjectEnabled(projectId, enabled);
+		if (!enabled) this.pauseVersions.set(projectId, (this.pauseVersions.get(projectId) ?? 0) + 1);
+		this.hooks.onChange();
+		if (enabled) {
+			void this.tick(Date.now(), projectId);
+			void this.pump();
+		}
+	}
+
+	/** Check between requests; a request already sent may finish, then the pass yields. */
+	private monitoringGuard(projectId: string): () => void {
+		const version = this.pauseVersions.get(projectId);
+		const assertActive = (): void => {
+			if (!this.store.projectEnabled(projectId) || version !== this.pauseVersions.get(projectId)) {
+				throw new CodeMonitoringPaused();
+			}
+		};
+		assertActive();
+		return assertActive;
+	}
+
 	private view(monitorId: string): SentinelCodeMonitor {
 		const stored = this.store.getMonitor(monitorId);
 		if (!stored) throw new Error("监控不存在");
@@ -360,7 +398,7 @@ export class CodeMonitorManager {
 		return {
 			...stored,
 			tokenSet: Boolean(this.token(monitorId)),
-			nextCheckAt: nextCheckFor(stored),
+			nextCheckAt: this.store.projectEnabled(stored.projectId) ? nextCheckFor(stored) : null,
 			checkState: active ? (active.status === "running" ? "running" : "queued") : "idle",
 			...counts,
 		};
@@ -376,7 +414,7 @@ export class CodeMonitorManager {
 		return this.store.listMonitors().map((monitor) => ({
 			...monitor,
 			tokenSet: Boolean(secrets[monitor.id]),
-			nextCheckAt: nextCheckFor(monitor),
+			nextCheckAt: this.store.projectEnabled(monitor.projectId) ? nextCheckFor(monitor) : null,
 			checkState: active.get(monitor.id) ?? "idle",
 		}));
 	}
@@ -674,11 +712,13 @@ export class CodeMonitorManager {
 	}
 
 	/** One scheduler pass: enqueue every monitor whose interval elapsed. */
-	async tick(now = Date.now()): Promise<void> {
+	async tick(now = Date.now(), projectId?: string): Promise<void> {
 		if (this.ticking) return;
 		this.ticking = true;
 		try {
 			for (const monitor of this.store.listMonitors()) {
+				if (projectId && monitor.projectId !== projectId) continue;
+				if (!this.store.projectEnabled(monitor.projectId)) continue;
 				if (!monitorDue(monitor, now)) continue;
 				this.enqueue(monitor.id, "auto");
 			}
@@ -695,6 +735,7 @@ export class CodeMonitorManager {
 	enqueue(id: string, trigger: SentinelCodeCheckTrigger = "manual"): SentinelCodeCheckJob {
 		const monitor = this.store.getMonitor(id);
 		if (!monitor) throw new Error("监控不存在");
+		this.monitoringGuard(monitor.projectId);
 		const job = this.store.enqueueJob({
 			monitorId: id,
 			projectId: monitor.projectId,
@@ -765,7 +806,9 @@ export class CodeMonitorManager {
 			error = errorText(caught);
 		}
 		const attempts = job.attempts;
-		if (error && attempts < job.maxAttempts) {
+		if (result?.paused) {
+			this.store.suspendJob(job.id, Date.now());
+		} else if (error && attempts < job.maxAttempts) {
 			const delay =
 				JOB_RETRY_DELAYS_MS[Math.min(Math.max(attempts - 1, 0), JOB_RETRY_DELAYS_MS.length - 1)] ?? 30_000;
 			const cooldown = this.hostCooldownUntil.get(job.host) ?? 0;
@@ -786,10 +829,11 @@ export class CodeMonitorManager {
 		void this.pump();
 	}
 
-	/** Check one monitor now. Manual checks run even while the timer is paused. */
+	/** Manual checks may bypass a repository's timer, but never a project pause. */
 	async check(id: string, trigger: SentinelCodeCheckTrigger = "manual"): Promise<CodeCheckResult> {
 		const monitor = this.store.getMonitor(id);
 		if (!monitor) throw new Error("监控不存在");
+		const assertActive = this.monitoringGuard(monitor.projectId);
 		if (this.checking.has(id)) return { commits: 0, findings: 0, checkId: "", error: null };
 		this.checking.add(id);
 		let checkId: string;
@@ -841,7 +885,9 @@ export class CodeMonitorManager {
 			const retryRows = this.store.failedCommits(id, MAX_RETRIES_PER_CHECK);
 			for (const branch of monitor.branches) {
 				try {
+					assertActive();
 					const head = await client.getBranch(branch);
+					assertActive();
 					const base = baselines[branch];
 					if (!base) {
 						baselines[branch] = head.sha;
@@ -852,6 +898,7 @@ export class CodeMonitorManager {
 					let resynced = false;
 					try {
 						const compare = await client.compare(base, head.sha);
+						assertActive();
 						commits = compare.commits;
 						// A rewritten branch leaves no path from the old baseline. Fall back
 						// to the recent window, with an hour of overlap for clock skew.
@@ -859,16 +906,19 @@ export class CodeMonitorManager {
 							resynced = true;
 							const since = monitor.lastCheckAt ? monitor.lastCheckAt - 3_600_000 : undefined;
 							commits = await client.listCommits(branch, since);
+							assertActive();
 						}
 					} catch (error) {
 						if (!(error instanceof GithubApiError) || error.status !== 404) throw error;
 						resynced = true;
 						const since = monitor.lastCheckAt ? monitor.lastCheckAt - 3_600_000 : undefined;
 						commits = await client.listCommits(branch, since);
+						assertActive();
 					}
 					const batch = commits.slice(0, commitCap);
 					for (const commit of batch) {
-						const consumed = await this.consume(monitor.id, branch, commit, client);
+						assertActive();
+						const consumed = await this.consume(monitor.id, branch, commit, client, assertActive);
 						if (consumed) {
 							result.commits += 1;
 							if (consumed === "security") result.findings += 1;
@@ -882,6 +932,7 @@ export class CodeMonitorManager {
 						baselines[branch] = head.sha;
 					}
 				} catch (error) {
+					assertActive();
 					this.noteRateLimit(monitor.host, error);
 					rememberError(`${branch}: ${errorText(error)}`);
 				}
@@ -889,7 +940,9 @@ export class CodeMonitorManager {
 			// Failed judgments are retried after the branch pass, so a model outage
 			// does not need an operator to touch every row.
 			for (const failed of retryRows) {
-				const retried = await this.retry(monitor.id, failed).catch((error: unknown) => {
+				assertActive();
+				const retried = await this.retry(monitor.id, failed, assertActive).catch((error: unknown) => {
+					assertActive();
 					this.noteRateLimit(monitor.host, error);
 					rememberError(error);
 					return null;
@@ -897,12 +950,19 @@ export class CodeMonitorManager {
 				if (retried) result.commits += 1;
 				if (retried === "security") result.findings += 1;
 			}
+			assertActive();
 			this.store.setBaselines(id, baselines);
 			this.store.markChecked(id, Date.now(), lastError);
 			finish(lastError ? "error" : "ok", lastError);
 			result.error = lastError;
 			return result;
 		} catch (error) {
+			if (error instanceof CodeMonitoringPaused) {
+				this.store.setBaselines(id, baselines);
+				finish("ok", error.message);
+				result.paused = true;
+				return result;
+			}
 			rememberError(error);
 			finish("error", lastError);
 			result.error = lastError;
@@ -919,12 +979,14 @@ export class CodeMonitorManager {
 		branch: string,
 		summary: GithubCommitSummary,
 		client: GithubClient,
+		assertActive: () => void,
 	): Promise<"security" | "not_security" | "failed" | null> {
 		const existing = this.store.findCommit(monitorId, summary.sha);
 		if (existing && existing.verdict !== "pending" && existing.verdict !== "failed") return null;
 		const monitor = this.store.getMonitor(monitorId);
 		if (!monitor) throw new Error("监控不存在");
 		const detail = await client.getCommit(summary.sha);
+		assertActive();
 		if (!existing) {
 			const diff = renderCommitDiff(detail);
 			this.store.insertCommit({
@@ -946,7 +1008,7 @@ export class CodeMonitorManager {
 		}
 		const row = this.store.findCommit(monitorId, summary.sha);
 		if (!row) return null;
-		return this.judge(monitor, row, detail);
+		return this.judge(monitor, row, detail, assertActive);
 	}
 
 	/** Re-run one stored verdict, used by the sweep and by the operator's retry. */
@@ -955,6 +1017,7 @@ export class CodeMonitorManager {
 		if (!row) throw new Error("提交记录不存在");
 		const monitor = this.store.getMonitor(row.monitorId);
 		if (!monitor) throw new Error("监控不存在");
+		const assertActive = this.monitoringGuard(monitor.projectId);
 		const client = new GithubClient(
 			{
 				host: monitor.host,
@@ -967,6 +1030,7 @@ export class CodeMonitorManager {
 			this.hooks.fetchImpl ?? createProjectGithubFetch(this.agentDir, monitor.projectId),
 		);
 		const detail = await client.getCommit(row.sha);
+		assertActive();
 		this.store.setVerdict(row.id, {
 			verdict: "pending",
 			confidence: null,
@@ -978,14 +1042,35 @@ export class CodeMonitorManager {
 			reason: null,
 			judgedAt: null,
 		});
-		await this.judge(monitor, row, detail);
-		this.hooks.onChange();
+		try {
+			await this.judge(monitor, row, detail, assertActive);
+		} catch (error) {
+			if (error instanceof CodeMonitoringPaused) {
+				// Manual rejudgments may be older than the polling baseline. Keep the
+				// previous verdict instead of leaving an unreachable pending row.
+				this.store.setVerdict(row.id, {
+					verdict: row.verdict,
+					confidence: row.confidence,
+					cve: row.cve,
+					severity: row.severity,
+					vulnType: row.vulnType,
+					vulnCategory: row.vulnCategory,
+					vulnTags: row.vulnTags,
+					reason: row.reason,
+					judgedAt: row.judgedAt,
+				});
+			}
+			throw error;
+		} finally {
+			this.hooks.onChange();
+		}
 		return this.detail(row.monitorId);
 	}
 
 	private async retry(
 		monitorId: string,
 		row: SentinelCodeCommit,
+		assertActive: () => void,
 	): Promise<"security" | "not_security" | "failed" | null> {
 		const monitor = this.store.getMonitor(monitorId);
 		if (!monitor) return null;
@@ -1001,7 +1086,8 @@ export class CodeMonitorManager {
 			this.hooks.fetchImpl ?? createProjectGithubFetch(this.agentDir, monitor.projectId),
 		);
 		const detail = await client.getCommit(row.sha);
-		const verdict = await this.judge(monitor, row, detail);
+		assertActive();
+		const verdict = await this.judge(monitor, row, detail, assertActive);
 		return verdict;
 	}
 
@@ -1009,6 +1095,7 @@ export class CodeMonitorManager {
 		monitor: StoredCodeMonitor,
 		row: SentinelCodeCommit,
 		detail: GithubCommitDetail,
+		assertActive: () => void,
 	): Promise<"security" | "not_security" | "failed" | null> {
 		if (detail.parents > 1) {
 			this.store.setVerdict(row.id, {
@@ -1070,6 +1157,7 @@ export class CodeMonitorManager {
 		const diff = row.diff ?? renderCommitDiff(detail);
 		try {
 			const verdict = await judgeCommit(config, monitor, detail, diff, this.hooks.fetchImpl);
+			assertActive();
 			if (!verdict.security) {
 				this.store.setVerdict(row.id, {
 					verdict: "not_security",
@@ -1130,6 +1218,7 @@ export class CodeMonitorManager {
 			}
 			return "security";
 		} catch (error) {
+			assertActive();
 			this.store.setVerdict(row.id, {
 				verdict: "failed",
 				confidence: null,

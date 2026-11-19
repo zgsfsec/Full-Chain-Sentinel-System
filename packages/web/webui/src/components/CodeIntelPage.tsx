@@ -55,6 +55,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CODE_VULN_TAGS, type CodeVulnTag } from "../../../src/code-vuln-tags.ts";
 import { DEFAULT_CRON_EXPRESSION, nextCronOccurrences, validateCronExpression } from "../../../src/cron.ts";
 import { getLanguage, t } from "../i18n.ts";
+import { useCodeMonitorProject } from "../use-code-monitor-project.ts";
 import type { DetailLoadState } from "../detail-request.ts";
 import { DetailLoading } from "../ui/DetailLoading.tsx";
 import type {
@@ -214,7 +215,7 @@ function CodeErrorDetail({ error, onOpenProject, onOpenModels, onRetry }: {
 	error: string | null;
 	onOpenProject(): void;
 	onOpenModels(): void;
-	onRetry(): void;
+	onRetry?: () => void;
 }) {
 	const [open, setOpen] = useState(false);
 	if (!error) return <>—</>;
@@ -231,7 +232,7 @@ function CodeErrorDetail({ error, onOpenProject, onOpenModels, onRetry }: {
 			</Button>
 		</Tooltip>
 		<Modal open={open} onCancel={() => setOpen(false)} title={getLanguage() === "en" ? "Request failure details" : "请求失败详情"} width={760}
-			footer={<Space><Button onClick={() => { setOpen(false); onRetry(); }}>{t("重试")}</Button><Button onClick={() => setOpen(false)}>{t("关闭")}</Button></Space>}>
+			footer={<Space><Button disabled={!onRetry} onClick={() => { setOpen(false); onRetry?.(); }}>{t("重试")}</Button><Button onClick={() => setOpen(false)}>{t("关闭")}</Button></Space>}>
 			<Paragraph copyable className="code-intel-error-detail">{error}</Paragraph>
 			<CodeRecovery error={error} onOpenProject={onOpenProject} onOpenModels={onOpenModels} />
 		</Modal>
@@ -577,6 +578,9 @@ export function CodeIntelPage({
 	onProbeBranches,
 }: CodeIntelPageProps) {
 	const screens = Grid.useBreakpoint();
+	const monitoring = useCodeMonitorProject(project?.id, connected);
+	const monitoringActive = monitoring.ready && monitoring.enabled === true && !monitoring.saving;
+	const projectPaused = monitoring.enabled === false;
 	const [editor, setEditor] = useState<EditorState | null>(null);
 	/** Create mode: the textarea, and per-address branch choices (default main). */
 	const [bulkUrls, setBulkUrls] = useState("");
@@ -635,15 +639,15 @@ export function CodeIntelPage({
 				.includes(query);
 			const matchesStatus =
 				monitorFilter === "all" ||
-				(monitorFilter === "enabled" && monitor.enabled) ||
-				(monitorFilter === "paused" && !monitor.enabled) ||
+				(monitorFilter === "enabled" && !projectPaused && monitor.enabled) ||
+				(monitorFilter === "paused" && (projectPaused || !monitor.enabled)) ||
 				(monitorFilter === "error" && Boolean(monitor.lastError)) ||
 				monitor.checkState === monitorFilter;
 			return matchesQuery && matchesStatus;
 		});
-	}, [rows, monitorQuery, monitorFilter]);
+	}, [rows, monitorQuery, monitorFilter, projectPaused]);
 	const checkableMonitors = filteredMonitors.filter(
-		(monitor) => monitor.checkState === "idle" && !checkingIds.includes(monitor.id),
+		(monitor) => monitoringActive && monitor.checkState === "idle" && !checkingIds.includes(monitor.id),
 	);
 	const checkableSelected = checkableMonitors.filter((monitor) => selectedIds.includes(monitor.id));
 	const activityRows = activity?.items ?? [];
@@ -972,7 +976,7 @@ export function CodeIntelPage({
 				type="text"
 				icon={<ReloadOutlined />}
 				loading={checkingIds.includes(monitor.id) || monitor.checkState === "running"}
-				disabled={monitor.checkState !== "idle" || checkingIds.includes(monitor.id)}
+				disabled={!monitoringActive || monitor.checkState !== "idle" || checkingIds.includes(monitor.id)}
 				onClick={() => onCheck(monitor.id)}
 			>
 				{monitor.checkState === "queued" ? t("排队中") : t("检查")}
@@ -1049,7 +1053,7 @@ export function CodeIntelPage({
 			render: (_value, monitor) => (
 				<Tag
 					color={
-						monitor.checkState === "running"
+						projectPaused ? "default" : monitor.checkState === "running"
 							? "processing"
 							: monitor.checkState === "queued"
 								? "gold"
@@ -1060,7 +1064,7 @@ export function CodeIntelPage({
 										: "default"
 					}
 				>
-					{monitor.checkState === "running"
+					{projectPaused ? t("已暂停") : monitor.checkState === "running"
 						? t("检查中")
 						: monitor.checkState === "queued"
 							? t("排队中")
@@ -1102,8 +1106,8 @@ export function CodeIntelPage({
 			width: 180,
 			ellipsis: true,
 			render: (_value, monitor) => (
-				<Tooltip title={nextCheckText(monitor)}>
-					<Text type="secondary">{nextCheckText(monitor)}</Text>
+				<Tooltip title={projectPaused ? t("已暂停") : nextCheckText(monitor)}>
+					<Text type="secondary">{projectPaused ? t("已暂停") : nextCheckText(monitor)}</Text>
 				</Tooltip>
 			),
 		},
@@ -1149,8 +1153,8 @@ export function CodeIntelPage({
 			width: 100,
 			render: (status: SentinelCodeCheckStatus, check) => (
 				<Tooltip title={check.error ?? undefined}>
-					<Tag color={status === "ok" ? "green" : status === "error" ? "red" : "processing"}>
-						{CHECK_STATUS_LABELS[status]}
+					<Tag color={status === "ok" && check.error ? "default" : status === "ok" ? "green" : status === "error" ? "red" : "processing"}>
+						{status === "ok" && check.error ? t("已暂停") : CHECK_STATUS_LABELS[status]}
 					</Tag>
 				</Tooltip>
 			),
@@ -1184,7 +1188,7 @@ export function CodeIntelPage({
 			title: t("错误"),
 			dataIndex: "error",
 			key: "error",
-			render: (error: string | null, row) => <CodeErrorDetail error={error} onOpenProject={onOpenProject} onOpenModels={onOpenModels} onRetry={() => onCheck(row.monitorId)} />,
+			render: (error: string | null, row) => row.status === "ok" ? <Text type="secondary">{error ?? "—"}</Text> : <CodeErrorDetail error={error} onOpenProject={onOpenProject} onOpenModels={onOpenModels} onRetry={monitoringActive ? () => onCheck(row.monitorId) : undefined} />,
 		},
 	];
 
@@ -1247,7 +1251,7 @@ export function CodeIntelPage({
 			title: t("错误"),
 			dataIndex: "error",
 			key: "error",
-			render: (error: string | null, row) => <CodeErrorDetail error={error} onOpenProject={onOpenProject} onOpenModels={onOpenModels} onRetry={() => onCheck(row.monitorId)} />,
+			render: (error: string | null, row) => <CodeErrorDetail error={error} onOpenProject={onOpenProject} onOpenModels={onOpenModels} onRetry={monitoringActive ? () => onCheck(row.monitorId) : undefined} />,
 		},
 	];
 
@@ -1264,7 +1268,7 @@ export function CodeIntelPage({
 		commit.status !== "ignored" &&
 		!commit.engineId;
 	const canRejudge = (commit: SentinelCodeCommit): boolean =>
-		commit.status !== "dispatching" && commit.verdict !== "pending" && busyId !== commit.id;
+		monitoringActive && commit.status !== "dispatching" && commit.verdict !== "pending" && busyId !== commit.id;
 
 	const renderCommitActions = (commit: SentinelCodeCommit, showDetail: boolean) => {
 		const rejudge = commit.verdict === "failed";
@@ -1759,7 +1763,7 @@ export function CodeIntelPage({
 								title: t("错误"),
 								key: "error",
 								ellipsis: true,
-								render: (_value, monitor) => <CodeErrorDetail error={monitor.lastError} onOpenProject={onOpenProject} onOpenModels={onOpenModels} onRetry={() => onCheck(monitor.id)} />,
+								render: (_value, monitor) => <CodeErrorDetail error={monitor.lastError} onOpenProject={onOpenProject} onOpenModels={onOpenModels} onRetry={monitoringActive ? () => onCheck(monitor.id) : undefined} />,
 							},
 							...columns.filter((column) => column.key === "actions"),
 						]}
@@ -1829,7 +1833,19 @@ export function CodeIntelPage({
 				</Space>
 			}
 			extra={
-				<Space>
+				<Space wrap>
+					<Space size={8}>
+						<Text>{getLanguage() === "en" ? "Project monitoring" : "项目监听"}</Text>
+						<Switch
+							aria-label={getLanguage() === "en" ? "Project monitoring" : "项目监听"}
+							checked={monitoring.enabled === true}
+							checkedChildren={t("开启")}
+							unCheckedChildren={t("关闭")}
+							loading={monitoring.saving || Boolean(project && connected && monitoring.enabled === null && !monitoring.error)}
+							disabled={!monitoring.ready || monitoring.saving}
+							onChange={(enabled) => void monitoring.setEnabled(enabled)}
+						/>
+					</Space>
 					<Button
 						icon={<ReloadOutlined />}
 						loading={view === "activity" ? activityLoading : false}
@@ -1837,6 +1853,7 @@ export function CodeIntelPage({
 						onClick={() => {
 							if (!project) return;
 							onRefresh();
+							monitoring.refresh();
 							if (view === "activity") onLoadActivity(project.id, activityFilter, activityPage, activityPageSize, activityCategory, activityTag, activityQuery);
 							if (view === "logs") onLoadLogs(project.id);
 						}}
@@ -1854,6 +1871,19 @@ export function CodeIntelPage({
 				</Space>
 			}
 		>
+			{project && monitoring.error ? <Alert
+				type="error" showIcon style={{ marginBottom: 16 }}
+				title={getLanguage() === "en" ? "Unable to update monitoring status" : "监听状态读取或保存失败"}
+				description={monitoring.error}
+				action={<Button size="small" onClick={monitoring.refresh}>{t("重试")}</Button>}
+			/> : null}
+			{project && projectPaused ? <Alert
+				type="info" showIcon style={{ marginBottom: 16 }}
+				title={getLanguage() === "en" ? "Monitoring paused for this project" : "当前项目的开源情报监听已关闭"}
+				description={getLanguage() === "en"
+					? "All repository checks are paused. An in-flight request may finish before its check stops. Repository settings, history and queued checks are preserved; enable monitoring to continue. Existing engineering runs continue."
+					: "全部仓库暂停检查；正在处理的请求结束后停止。仓库设置、历史记录及待检查任务均保留，开启后继续检查。已下发的工程继续运行。"}
+			/> : null}
 			{project && rows.length > 0 ? (
 				<div className="code-intel-overview">
 					<button
@@ -1873,7 +1903,7 @@ export function CodeIntelPage({
 						</span>
 						<strong>{rows.length}</strong>
 						<span className="code-intel-metric__hint">
-							{t("已启用")} {rows.filter((row) => row.enabled).length} · {t("检查中")}{" "}
+							{t("已启用")} {projectPaused ? 0 : rows.filter((row) => row.enabled).length} · {t("检查中")}{" "}
 							{rows.filter((row) => row.checkState === "running" || checkingIds.includes(row.id)).length}
 						</span>
 					</button>
@@ -2568,7 +2598,7 @@ export function CodeIntelPage({
 								{detail.monitor.tokenSet ? t("已保存") : t("未配置")}
 							</Descriptions.Item>
 							<Descriptions.Item label={t("监控策略")}>{scheduleText(detail.monitor)}</Descriptions.Item>
-							<Descriptions.Item label={t("下次检查")}>{nextCheckText(detail.monitor)}</Descriptions.Item>
+							<Descriptions.Item label={t("下次检查")}>{projectPaused ? t("已暂停") : nextCheckText(detail.monitor)}</Descriptions.Item>
 							<Descriptions.Item label={t("自动复现")}>
 								{detail.monitor.autoDispatch ? t("开") : t("关")}
 							</Descriptions.Item>
@@ -2589,7 +2619,7 @@ export function CodeIntelPage({
 							<Button
 								icon={<ReloadOutlined />}
 								loading={checkingIds.includes(detail.monitor.id) || detail.monitor.checkState === "running"}
-								disabled={detail.monitor.checkState !== "idle"}
+								disabled={!monitoringActive || detail.monitor.checkState !== "idle"}
 								onClick={() => onCheck(detail.monitor.id)}
 							>
 								{t("立即检查")}

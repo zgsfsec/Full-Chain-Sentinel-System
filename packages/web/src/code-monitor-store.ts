@@ -69,6 +69,10 @@ const MAX_COMMITS_PER_MONITOR = 2000;
 const MAX_CHECKS_PER_MONITOR = 200;
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS code_monitor_projects (
+  project_id TEXT PRIMARY KEY,
+  enabled INTEGER NOT NULL DEFAULT 1
+);
 CREATE TABLE IF NOT EXISTS code_monitors (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
@@ -530,6 +534,21 @@ export class CodeMonitorStore {
 		this.db.close();
 	}
 
+	projectEnabled(projectId: string): boolean {
+		const row = this.db.prepare("SELECT enabled FROM code_monitor_projects WHERE project_id = ?").get(projectId) as
+			| { enabled: number }
+			| undefined;
+		return row?.enabled !== 0;
+	}
+
+	/** Independent of repository settings, including when a project has no repositories yet. */
+	setProjectEnabled(projectId: string, enabled: boolean): void {
+		this.db
+			.prepare(`INSERT INTO code_monitor_projects (project_id, enabled) VALUES (?, ?)
+			ON CONFLICT(project_id) DO UPDATE SET enabled = excluded.enabled`)
+			.run(projectId, enabled ? 1 : 0);
+	}
+
 	listMonitors(): Array<StoredCodeMonitor & { findingCount: number; pendingCount: number }> {
 		const rows = this.db
 			.prepare(
@@ -706,6 +725,7 @@ export class CodeMonitorStore {
 			.prepare("SELECT id FROM code_monitors WHERE project_id = ?")
 			.all(projectId) as unknown as Array<{ id: string }>;
 		for (const row of rows) this.deleteMonitor(row.id);
+		this.db.prepare("DELETE FROM code_monitor_projects WHERE project_id = ?").run(projectId);
 		return rows.map((row) => row.id);
 	}
 
@@ -981,6 +1001,8 @@ export class CodeMonitorStore {
 		const rows = this.db
 			.prepare(
 				`SELECT * FROM code_monitor_jobs WHERE status = 'queued' AND next_run_at <= ?
+				 AND NOT EXISTS (SELECT 1 FROM code_monitor_projects p
+				 WHERE p.project_id = code_monitor_jobs.project_id AND p.enabled = 0)
 				 ORDER BY next_run_at, created_at LIMIT ?`,
 			)
 			.all(now, limit) as unknown as JobRow[];
@@ -1008,6 +1030,14 @@ export class CodeMonitorStore {
 				 next_run_at = ?, error = ? WHERE id = ?`,
 			)
 			.run(nextRunAt, error, id);
+	}
+
+	/** Pausing is not a failed attempt and must not exhaust the retry budget. */
+	suspendJob(id: string, now: number): void {
+		this.db
+			.prepare(`UPDATE code_monitor_jobs SET status = 'queued', attempts = MAX(0, attempts - 1),
+			started_at = NULL, ended_at = NULL, next_run_at = ?, error = NULL, check_id = NULL WHERE id = ?`)
+			.run(now, id);
 	}
 
 	finishJob(
