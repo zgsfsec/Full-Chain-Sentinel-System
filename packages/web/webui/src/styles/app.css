@@ -1392,13 +1392,63 @@ body {
 .vulnhub-evidence-list {
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
+	gap: 0;
+}
+
+.vulnhub-evidence {
+	gap: 0;
+	padding: 10px 0;
+	border-bottom: 1px solid var(--console-border);
+}
+
+.vulnhub-evidence:first-child {
+	padding-top: 0;
+}
+
+.vulnhub-evidence:last-child {
+	padding-bottom: 0;
+	border-bottom: 0;
+}
+
+.vulnhub-evidence__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	min-width: 0;
+	font-weight: 600;
+}
+
+.vulnhub-evidence__head > .ant-space:first-child {
+	min-width: 0;
+}
+
+.vulnhub-evidence__head > .ant-space:first-child .ant-space-item:last-child {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.vulnhub-evidence__body {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 8px;
+}
+
+.vulnhub-evidence__body:empty {
+	display: none;
 }
 
 .vulnhub-evidence__file {
-	margin-top: 8px;
 	max-width: 100%;
 	overflow: hidden;
+}
+
+.vulnhub-evidence__file .ant-typography {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .vulnhub-preview {

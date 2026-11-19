@@ -823,49 +823,48 @@ function EvidenceBlock({
 	onPreview: (path: string) => void;
 }) {
 	return (
-		<Card
-			size="small"
-			className="vulnhub-evidence"
-			title={
+		<article className="vulnhub-evidence">
+			<header className="vulnhub-evidence__head">
 				<Space size={8}>
 					<Tag variant="filled">{index + 1}</Tag>
 					<span>{item.note ?? (item.kind === "file" ? t("容器文件") : t("命令证据"))}</span>
 				</Space>
-			}
-			extra={
 				<Space size={4}>
 					{item.command ? <CopyButton text={item.command} label={t("复制命令")} /> : null}
 					{item.output ? <CopyButton text={item.output} label={t("复制输出")} /> : null}
 				</Space>
-			}
-		>
-			{item.command ? <pre className="vulnhub-pre">{item.command}</pre> : null}
-			{item.output ? <pre className="vulnhub-pre">{item.output}</pre> : null}
-			{item.path ? (
-				<Space size={8} className="vulnhub-evidence__file">
-					<Text code>{item.path}</Text>
-					<Button size="small" onClick={() => onPreview(item.path as string)}>
-						{t("预览")}
-					</Button>
-				</Space>
-			) : null}
-			{preview && item.path && preview.path === item.path ? (
-				<div className="vulnhub-preview">
-					{preview.kind === "image" && preview.data ? (
-						<img src={`data:${preview.mimeType ?? "image/png"};base64,${preview.data}`} alt={item.path} />
-					) : preview.kind === "text" ? (
-						<pre className="vulnhub-pre">
-							{preview.text}
-							{preview.truncated ? `\n${t("…（已截断）")}` : ""}
-						</pre>
-					) : (
-						<Text type="secondary">
-							{t("二进制文件（{size} 字节），请在「文件」弹窗中下载查看", { size: preview.size })}
+			</header>
+			<div className="vulnhub-evidence__body">
+				{item.command ? <pre className="vulnhub-pre">{item.command}</pre> : null}
+				{item.output ? <pre className="vulnhub-pre">{item.output}</pre> : null}
+				{item.path ? (
+					<Space size={8} className="vulnhub-evidence__file">
+						<Text code title={item.path}>
+							{item.path}
 						</Text>
-					)}
-				</div>
-			) : null}
-		</Card>
+						<Button size="small" onClick={() => onPreview(item.path as string)}>
+							{t("预览")}
+						</Button>
+					</Space>
+				) : null}
+				{preview && item.path && preview.path === item.path ? (
+					<div className="vulnhub-preview">
+						{preview.kind === "image" && preview.data ? (
+							<img src={`data:${preview.mimeType ?? "image/png"};base64,${preview.data}`} alt={item.path} />
+						) : preview.kind === "text" ? (
+							<pre className="vulnhub-pre">
+								{preview.text}
+								{preview.truncated ? `\n${t("…（已截断）")}` : ""}
+							</pre>
+						) : (
+							<Text type="secondary">
+								{t("二进制文件（{size} 字节），请在「文件」弹窗中下载查看", { size: preview.size })}
+							</Text>
+						)}
+					</div>
+				) : null}
+			</div>
+		</article>
 	);
 }
 
