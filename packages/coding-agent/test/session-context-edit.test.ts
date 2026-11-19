@@ -227,6 +227,21 @@ describe("session context edits", () => {
 		expect(estimate.tokens).toBe(4_101);
 	});
 
+	it("retains measured input usage when only the failed response is omitted", () => {
+		const session = SessionManager.inMemory();
+		session.appendMessage({ role: "user", content: "中文问题", timestamp: Date.now() });
+		const response = assistant("");
+		response.stopReason = "length";
+		response.usage = { ...response.usage, input: 125_499, output: 1, totalTokens: 125_500 };
+		const attemptId = session.appendMessage(response);
+		session.appendContextEdit(attemptId, null);
+		session.appendMessage({ role: "user", content: "next", timestamp: Date.now() });
+
+		const estimate = estimateProjectedContextTokens(session.buildSessionProjection(), session.getBranch());
+		expect(estimate.usageTokens).toBe(125_499);
+		expect(estimate.tokens).toBe(125_500);
+	});
+
 	it("does not reuse post-edit assistant usage after a later compaction", () => {
 		const session = SessionManager.inMemory();
 		const userId = session.appendMessage({ role: "user", content: "small input", timestamp: Date.now() });

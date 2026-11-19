@@ -780,8 +780,14 @@ export class AgentSession {
 		if (!model || isVirtualModel(model) || !this._exceedsCompactionThreshold(model, projection)) {
 			return { ...context, messages: projection.messages };
 		}
-		await this._runAutoCompaction("threshold", false);
-		return { ...context, messages: this.sessionManager.buildSessionProjection().messages };
+		await this._runAutoCompaction("threshold", false, true);
+		const compacted = this.sessionManager.buildSessionProjection();
+		if (this._exceedsCompactionThreshold(model, compacted)) {
+			throw new Error(
+				"Context is still too large after compaction. Reduce context or switch to a larger-context model.",
+			);
+		}
+		return { ...context, messages: compacted.messages };
 	}
 
 	private _installAgentRequestProjection(): void {
@@ -836,8 +842,13 @@ export class AgentSession {
 			// The route stands: the router already decided this request. The state entry does not change
 			// the projection.
 			if (this._exceedsCompactionThreshold(route.model, projection)) {
-				await this._runAutoCompaction("threshold", false);
-				({ previous, context } = await prepare());
+				await this._runAutoCompaction("threshold", false, true);
+				({ previous, context, projection } = await prepare());
+				if (this._exceedsCompactionThreshold(route.model, projection)) {
+					throw new Error(
+						"Context is still too large after compaction. Reduce context or switch to a larger-context model.",
+					);
+				}
 			}
 			return { ...previous, context, model: route.model, thinkingLevel: route.thinkingLevel };
 		};
@@ -3013,7 +3024,7 @@ export class AgentSession {
 			// Case 2: the response completed successfully. Compact, but do not retry because
 			// agent.continue() cannot continue from a completed assistant response.
 			if (!willRetry) {
-				return await this._runAutoCompaction("overflow", false);
+				return await this._runAutoCompaction("overflow", false, !skipAbortedCheck);
 			}
 
 			if (this._overflowRecoveryAttempted) {
@@ -3041,7 +3052,7 @@ export class AgentSession {
 			// Persistently omit the selected final attempt before post-run recovery compaction.
 			this._overflowRecoveryAttempted = true;
 			this._omitRecoveryAttempt(assistantMessage, toolResults);
-			const retry = await this._runAutoCompaction("overflow", willRetry);
+			const retry = await this._runAutoCompaction("overflow", willRetry, !skipAbortedCheck);
 			if (retry) this._failedResponse = assistantMessage;
 			return retry;
 		}
@@ -3079,7 +3090,7 @@ export class AgentSession {
 			contextTokens = directContextTokens;
 		}
 		if (shouldCompact(contextTokens, contextWindow, settings)) {
-			return await this._runAutoCompaction("threshold", false);
+			return await this._runAutoCompaction("threshold", false, !skipAbortedCheck);
 		}
 		return false;
 	}
@@ -3094,7 +3105,11 @@ export class AgentSession {
 	 * @param willRetry Whether to continue the interrupted turn after overflow compaction
 	 * @returns Whether the post-run loop should call `agent.continue()`
 	 */
-	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
+	private async _runAutoCompaction(
+		reason: "overflow" | "threshold",
+		willRetry: boolean,
+		stopOnFailure = false,
+	): Promise<boolean> {
 		const model = this.model;
 		const settings = this.settingsManager.getCompactionSettings(model);
 		let abortController: AbortController | undefined;
@@ -3110,6 +3125,8 @@ export class AgentSession {
 			const pathEntries = this.sessionManager.getBranch();
 			const preparation = prepareCompaction(pathEntries, settings);
 			if (!preparation) {
+				if (stopOnFailure)
+					throw new Error("Context is too large and cannot be compacted. Reduce context or switch models.");
 				return false;
 			}
 
@@ -3202,6 +3219,16 @@ export class AgentSession {
 				usage,
 				details,
 			};
+			if (
+				stopOnFailure &&
+				model &&
+				!isVirtualModel(model) &&
+				this._exceedsCompactionThreshold(model, this.sessionManager.buildSessionProjection())
+			) {
+				throw new Error(
+					"Context is still too large after compaction. Reduce context or switch to a larger-context model.",
+				);
+			}
 			this._emit({ type: "compaction_end", reason, result, aborted: false, willRetry });
 
 			if (willRetry) return true;
@@ -3234,6 +3261,7 @@ export class AgentSession {
 					fromExtension,
 				});
 			}
+			if (stopOnFailure) throw error;
 			return false;
 		} finally {
 			if (this._autoCompactionAbortController === abortController) {

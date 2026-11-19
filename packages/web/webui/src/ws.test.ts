@@ -189,3 +189,30 @@ test("a stalled authorization check times out and reconnects instead of waiting 
 	expect(reload).not.toHaveBeenCalled();
 	connection.close();
 });
+
+test("a failed compaction reaches the existing visible error handler", () => {
+	const onMessage = vi.fn();
+	const connection = new SentinelConnection(onMessage);
+	connection.connect();
+	const socket = FakeWebSocket.instances[0];
+	socket.open();
+	socket.onmessage?.({ data: JSON.stringify({ type: "session_event", event: {
+		type: "compaction_end", aborted: false, errorMessage: "Summarization timed out",
+	} }) });
+	expect(onMessage).toHaveBeenCalledExactlyOnceWith({ type: "error", message: "Summarization timed out" });
+	connection.close();
+});
+
+test("successful and cancelled compactions do not produce error notifications", () => {
+	const onMessage = vi.fn();
+	const connection = new SentinelConnection(onMessage);
+	connection.connect();
+	const socket = FakeWebSocket.instances[0];
+	socket.open();
+	for (const event of [
+		{ type: "compaction_end", aborted: false, result: { summary: "saved" } },
+		{ type: "compaction_end", aborted: true, errorMessage: "cancelled" },
+	]) socket.onmessage?.({ data: JSON.stringify({ type: "session_event", event }) });
+	expect(onMessage).not.toHaveBeenCalled();
+	connection.close();
+});

@@ -17,7 +17,11 @@ import { createHarness, getUserTexts, type Harness } from "./harness.ts";
 
 type SessionWithCompactionInternals = {
 	_checkCompaction: (assistantMessage: AssistantMessage, skipAbortedCheck?: boolean) => Promise<boolean>;
-	_runAutoCompaction: (reason: "overflow" | "threshold", willRetry: boolean) => Promise<boolean>;
+	_runAutoCompaction: (
+		reason: "overflow" | "threshold",
+		willRetry: boolean,
+		stopOnFailure?: boolean,
+	) => Promise<boolean>;
 };
 
 function createUsage(totalTokens: number) {
@@ -489,7 +493,7 @@ describe("AgentSession compaction characterization", () => {
 			const order: string[] = [];
 			const observedSettings: unknown[] = [];
 			const harness = await createHarness({
-				models: [{ id: "faux-1", contextWindow: 2600, maxTokens: 100 }],
+				models: [{ id: "faux-1", contextWindow: 3100, maxTokens: 100 }],
 				settings: {
 					compaction: modelOverride
 						? {
@@ -536,6 +540,8 @@ describe("AgentSession compaction characterization", () => {
 			const agentStartsBefore = harness.eventsOfType("agent_start").length;
 			await harness.session.prompt("run the large tool");
 
+			// The retained tool result and prompt state must also fit after compaction.
+			expect(harness.eventsOfType("compaction_end")[0]?.result?.estimatedTokensAfter).toBeLessThan(2700);
 			expect(order.slice(0, 2)).toEqual(["compaction", "provider"]);
 			expect(observedSettings[0]).toEqual({ enabled: true, reserveTokens: 400, keepRecentTokens: 1750 });
 			expect(harness.eventsOfType("agent_start")).toHaveLength(agentStartsBefore + 1);
@@ -922,7 +928,7 @@ describe("AgentSession compaction characterization", () => {
 
 		await sessionInternals._checkCompaction(errorAssistant);
 
-		expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false);
+		expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false, false);
 	});
 
 	it("does not trigger threshold compaction for error messages when no prior usage exists", async () => {

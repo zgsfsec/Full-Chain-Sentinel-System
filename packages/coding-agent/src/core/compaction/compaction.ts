@@ -223,7 +223,7 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
 	};
 }
 
-/** Estimate projected context without trusting usage captured before a later edit or compaction. */
+/** Estimate projected context without trusting usage captured before edits to its input. */
 export function estimateProjectedContextTokens(
 	projection: SessionProjection,
 	branchEntries: SessionEntry[],
@@ -251,6 +251,37 @@ export function estimateProjectedContextTokens(
 			}
 		}
 		if (usageEntryIndex > latestInvalidatingEntryIndex) return estimate;
+	}
+
+	// Omitting a failed response does not shrink the input that produced it. Reuse
+	// that measured input until an edit changes an earlier entry or compaction
+	// replaces it; otherwise chars/4 can make an overflowing prompt look small.
+	const entryIndices = new Map(branchEntries.map((entry, index) => [entry.id, index]));
+	for (let i = branchEntries.length - 1; i >= 0; i--) {
+		const entry = branchEntries[i];
+		if (entry.type === "compaction") break;
+		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+		const usage = getAssistantUsage(entry.message);
+		if (!usage) continue;
+		const inputChanged = branchEntries
+			.slice(i + 1)
+			.some(
+				(later) =>
+					later.type === "context_edit" &&
+					((entryIndices.get(later.targetId) ?? -1) < i ||
+						(later.targetId === entry.id && later.replacement !== null)),
+			);
+		if (inputChanged) break;
+		const retained = projection.entries.find((projected) => projected.sourceEntry.id === entry.id);
+		const usageTokens = Math.max(0, calculateContextTokens(usage) - (retained?.messages.length ? 0 : usage.output));
+		const trailingTokens = projection.entries.reduce(
+			(sum, projected) =>
+				(entryIndices.get(projected.sourceEntry.id) ?? -1) > i
+					? sum + projected.messages.reduce((total, message) => total + estimateTokens(message), 0)
+					: sum,
+			0,
+		);
+		return { tokens: usageTokens + trailingTokens, usageTokens, trailingTokens, lastUsageIndex: null };
 	}
 
 	const currentSystem = getCurrentSystemMessage(projection.messages);
@@ -293,7 +324,7 @@ function estimateTextAndImageContentChars(content: string | Array<{ type: string
 
 /**
  * Estimate token count for a message using chars/4 heuristic.
- * This is conservative (overestimates tokens).
+ * This is an approximation; provider usage takes precedence when valid.
  */
 export function estimateTokens(message: AgentMessage): number {
 	let chars = 0;
@@ -583,18 +614,23 @@ ${UPDATE_SUMMARIZATION_INSTRUCTIONS}`;
  * A length stop contains partial text and must not become a session checkpoint.
  */
 export function getSummarizationFailure(response: AssistantMessage, label: string): string | undefined {
+	if (response.stopReason === "aborted") {
+		return `${label} cancelled`;
+	}
 	if (response.stopReason === "error") {
 		return `${label} failed: ${response.errorMessage || "Unknown error"}`;
 	}
 	if (response.stopReason === "length") {
 		return `${label} failed: generation hit the token cap and the summary is incomplete`;
 	}
+	if (!contentText(response.content).trim() && !response.content.some((block) => block.type === "toolCall")) {
+		return `${label} failed: the model returned an empty summary`;
+	}
 	return undefined;
 }
 
 function createSummarizationOptions(
 	model: Model<any>,
-	maxTokens: number,
 	apiKey: string | undefined,
 	headers: Record<string, string> | undefined,
 	env: Record<string, string> | undefined,
@@ -602,7 +638,7 @@ function createSummarizationOptions(
 	thinkingLevel: ThinkingLevel | undefined,
 	sessionId: string | undefined,
 ): SimpleStreamOptions {
-	const options: SimpleStreamOptions = { maxTokens, signal, apiKey, headers, env, sessionId };
+	const options: SimpleStreamOptions = { signal, apiKey, headers, env, sessionId };
 	if (model.reasoning && thinkingLevel && thinkingLevel !== "off") {
 		options.reasoning = thinkingLevel;
 	}
@@ -624,10 +660,17 @@ export async function completeSummarization(
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
 ): Promise<AssistantMessage> {
+	const controller = new AbortController();
+	const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+	signal.throwIfAborted();
+	const timer = setTimeout(() => {
+		controller.abort(new Error("Summarization timed out after 5 minutes. Retry compaction or switch models."));
+	}, 5 * 60_000);
 	// Avoid cache writes for one-off summaries. Reuse caller-supplied routing when available;
 	// callers without a session ID, including branch summaries, receive a fresh routing ID.
 	const requestOptions: SimpleStreamOptions = {
 		...options,
+		signal,
 		cacheRetention: "none",
 		sessionId: options.sessionId ?? uuidv7(),
 	};
@@ -635,7 +678,19 @@ export async function completeSummarization(
 		streamFn
 			? (await streamFn(model, context, requestOptions)).result()
 			: completeSimple(model, context, requestOptions);
-	return retryAssistantCall(produce, retry, requestOptions.signal, callbacks);
+	let onAbort: (() => void) | undefined;
+	try {
+		// A custom provider may ignore cancellation. Still release the session and
+		// never persist a summary that arrives after cancellation or the deadline.
+		const cancelled = new Promise<never>((_resolve, reject) => {
+			onAbort = () => reject(signal.reason instanceof Error ? signal.reason : new Error("Summarization cancelled"));
+			signal.addEventListener("abort", onAbort, { once: true });
+		});
+		return await Promise.race([retryAssistantCall(produce, retry, signal, callbacks), cancelled]);
+	} finally {
+		clearTimeout(timer);
+		if (onAbort) signal.removeEventListener("abort", onAbort);
+	}
 }
 
 /**
@@ -645,7 +700,7 @@ export async function completeSummarization(
 export async function generateSummary(
 	currentMessages: AgentMessage[],
 	model: Model<any>,
-	reserveTokens: number,
+	_reserveTokens: number,
 	apiKey: string | undefined,
 	headers?: Record<string, string>,
 	signal?: AbortSignal,
@@ -662,7 +717,7 @@ export async function generateSummary(
 		await generateSummaryWithUsage(
 			currentMessages,
 			model,
-			reserveTokens,
+			_reserveTokens,
 			apiKey,
 			headers,
 			signal,
@@ -696,7 +751,7 @@ function buildSummarizationContext(promptText: string): TranscriptContext {
 export async function generateSummaryWithUsage(
 	currentMessages: AgentMessage[],
 	model: Model<any>,
-	reserveTokens: number,
+	_reserveTokens: number,
 	apiKey: string | undefined,
 	headers?: Record<string, string>,
 	signal?: AbortSignal,
@@ -709,11 +764,8 @@ export async function generateSummaryWithUsage(
 	callbacks?: RetryCallbacks,
 	sessionId?: string,
 ): Promise<{ text: string; usage: Usage }> {
-	const maxTokens = Math.min(
-		Math.floor(0.8 * reserveTokens),
-		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
-	);
-
+	// Match upstream #9512: reserveTokens triggers compaction; summaries use
+	// the model's output limit, including any reasoning needed to produce text.
 	// Use update prompt if we have a previous summary, otherwise initial prompt
 	let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
 	if (customInstructions) {
@@ -732,16 +784,7 @@ export async function generateSummaryWithUsage(
 	}
 	promptText += basePrompt;
 
-	const completionOptions = createSummarizationOptions(
-		model,
-		maxTokens,
-		apiKey,
-		headers,
-		env,
-		signal,
-		thinkingLevel,
-		sessionId,
-	);
+	const completionOptions = createSummarizationOptions(model, apiKey, headers, env, signal, thinkingLevel, sessionId);
 
 	const response = await completeSummarization(
 		model,
@@ -1017,7 +1060,6 @@ export async function compact(
 		const turnPrefixResult = await generateTurnPrefixSummary(
 			turnPrefixMessages,
 			model,
-			settings.reserveTokens,
 			apiKey,
 			headers,
 			env,
@@ -1076,7 +1118,6 @@ export async function compact(
 async function generateTurnPrefixSummary(
 	messages: AgentMessage[],
 	model: Model<any>,
-	reserveTokens: number,
 	apiKey: string | undefined,
 	headers?: Record<string, string>,
 	env?: Record<string, string>,
@@ -1087,10 +1128,6 @@ async function generateTurnPrefixSummary(
 	callbacks?: RetryCallbacks,
 	sessionId?: string,
 ): Promise<{ text: string; usage: Usage }> {
-	const maxTokens = Math.min(
-		Math.floor(0.5 * reserveTokens),
-		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
-	); // Smaller budget for turn prefix
 	const llmMessages = convertToLlm(messages);
 	const conversationText = serializeConversation(llmMessages);
 	const promptText = `# Conversation\n${conversationText}\n\n# Instructions\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
@@ -1098,7 +1135,7 @@ async function generateTurnPrefixSummary(
 	const response = await completeSummarization(
 		model,
 		buildSummarizationContext(promptText),
-		createSummarizationOptions(model, maxTokens, apiKey, headers, env, signal, thinkingLevel, sessionId),
+		createSummarizationOptions(model, apiKey, headers, env, signal, thinkingLevel, sessionId),
 		streamFn,
 		retry,
 		callbacks,

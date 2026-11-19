@@ -48,7 +48,19 @@ export class SentinelConnection {
 		socket.onmessage = (event) => {
 			if (this.closed || this.socket !== socket) return;
 			try {
-				this.onMessage(JSON.parse(String(event.data)) as SentinelServerMessage);
+				const message = JSON.parse(String(event.data)) as
+					| SentinelServerMessage
+					| {
+							type: "session_event";
+							event: { type: "compaction_end"; aborted: boolean; errorMessage?: string };
+					  };
+				if (message.type === "session_event" && message.event.type === "compaction_end") {
+					if (!message.event.aborted && message.event.errorMessage) {
+						this.onMessage({ type: "error", message: message.event.errorMessage });
+					}
+					return;
+				}
+				this.onMessage(message as SentinelServerMessage);
 			} catch {
 				// Ignore malformed frames.
 			}

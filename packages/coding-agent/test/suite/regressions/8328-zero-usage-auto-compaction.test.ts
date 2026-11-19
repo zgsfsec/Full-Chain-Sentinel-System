@@ -4,7 +4,11 @@ import { createHarness, type Harness } from "../harness.ts";
 
 type SessionWithCompactionInternals = {
 	_checkCompaction: (assistantMessage: AssistantMessage) => Promise<boolean>;
-	_runAutoCompaction: (reason: "overflow" | "threshold", willRetry: boolean) => Promise<boolean>;
+	_runAutoCompaction: (
+		reason: "overflow" | "threshold",
+		willRetry: boolean,
+		stopOnFailure?: boolean,
+	) => Promise<boolean>;
 };
 
 function createZeroUsageAssistant(harness: Harness): AssistantMessage {
@@ -60,7 +64,7 @@ describe("issue #8328 zero-usage auto-compaction", () => {
 		await sessionInternals._checkCompaction(assistant);
 
 		expect(runAutoCompactionSpy).toHaveBeenCalledOnce();
-		expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false);
+		expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false, false);
 	});
 
 	it("does not compact when the zero-usage message estimate is below the threshold", async () => {

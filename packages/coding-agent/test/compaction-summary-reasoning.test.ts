@@ -276,7 +276,8 @@ describe("generateSummary reasoning options", () => {
 		expect(completeSimpleMock.mock.calls[0][2]).not.toHaveProperty("refusalFallbacks");
 	});
 
-	it("clamps compaction summary maxTokens to the model output cap", async () => {
+	// Regression for #9512: compaction reserves must not truncate summary output.
+	it("uses the model output limit for both history and split-turn summaries", async () => {
 		const preparation: CompactionPreparation = {
 			firstKeptEntryId: "entry-keep",
 			messagesToSummarize: messages,
@@ -284,7 +285,7 @@ describe("generateSummary reasoning options", () => {
 			isSplitTurn: true,
 			tokensBefore: 600000,
 			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
-			settings: { enabled: true, reserveTokens: 500000, keepRecentTokens: 20000 },
+			settings: { enabled: true, reserveTokens: 0, keepRecentTokens: 20000 },
 		};
 
 		const result = await compact(preparation, createModel(false, 128000), "test-key");
@@ -296,6 +297,11 @@ describe("generateSummary reasoning options", () => {
 			totalTokens: 40,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		});
-		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([128000, 128000]);
+		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([undefined, undefined]);
+	});
+
+	it("rejects an empty summary instead of persisting a useless checkpoint", async () => {
+		completeSimpleMock.mockResolvedValueOnce({ ...mockSummaryResponse, content: [] });
+		await expect(generateSummary(messages, createModel(false), 2000, "test-key")).rejects.toThrow("empty summary");
 	});
 });
