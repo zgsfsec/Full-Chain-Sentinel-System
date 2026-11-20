@@ -86,7 +86,14 @@ describe("max thinking level", () => {
 				},
 			}).result();
 
-			expect(payload).toMatchObject({ reasoning: { effort: "max", summary: "auto" } });
+			if (model.compat?.supportsMidConvoEffort) {
+				expect(payload).toMatchObject({
+					reasoning: { effort: "medium", summary: "auto" },
+					input: expect.arrayContaining([{ type: "configuration_update", reasoning: { effort: "max" } }]),
+				});
+			} else {
+				expect(payload).toMatchObject({ reasoning: { effort: "max", summary: "auto" } });
+			}
 		},
 	);
 });

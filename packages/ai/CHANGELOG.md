@@ -2,9 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added GPT-6.1 Terra and GPT-6.2 Astra/Sol to OpenAI, Azure, and Codex with upstream thinking-level mappings and context limits.
+
 ### Fixed
 
 - Fixed Mistral streams being aborted mid-generation (e.g. during long thinking) after the request timeout; the timeout now applies only to waiting for response headers ([#10609](https://github.com/earendil-works/pi/issues/10609))
+- Fixed OpenAI and Codex GPT-6 thinking-level changes invalidating the prompt cache by sending per-message effort updates ([#10853](https://github.com/earendil-works/pi/issues/10853), [#12269](https://github.com/earendil-works/pi/issues/12269)). Codex also forwards output token limits and caches the leading system prompt ([#12273](https://github.com/earendil-works/pi/issues/12273)).
+- Fixed Claude Haiku 5.5 and Opus 5 disabled thinking requests including incompatible effort markers, and fixed organization effort caps rejecting low-effort requests ([#10753](https://github.com/earendil-works/pi/issues/10753), [#10063](https://github.com/earendil-works/pi/issues/10063)).
+- Fixed Gemini 4 requests using token budgets instead of thinking levels ([#10890](https://github.com/earendil-works/pi/issues/10890)), Copilot omitting Gemini/Kimi reasoning effort and reasoning usage ([#12019](https://github.com/earendil-works/pi/issues/12019)), and Xiaomi exposing unsupported effort tiers ([#10818](https://github.com/earendil-works/pi/issues/10818)).
 
 ## [1.1.0] - 2026-10-07
 
