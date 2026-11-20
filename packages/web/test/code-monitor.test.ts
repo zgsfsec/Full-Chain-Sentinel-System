@@ -17,6 +17,59 @@ function json(value: unknown, status = 200): Response {
 }
 
 describe("CodeMonitorManager.check", () => {
+	it("scans the latest requested commits from the default branch once", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "sentinel-code-history-"));
+		const store = new CodeMonitorStore(codeMonitorDbPath(dir));
+		const commits = [1, 2, 3].map((number) => ({
+			sha: `sha-${number}`,
+			html_url: `https://github.com/acme/app/commit/sha-${number}`,
+			commit: {
+				message: `commit ${number}`,
+				author: { name: "dev", date: `2024-01-0${number}T00:00:00Z` },
+			},
+			parents: [{ sha: `parent-${number}` }],
+		}));
+		const requestedUrls: string[] = [];
+		const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+			requestedUrls.push(String(input));
+			const url = new URL(String(input));
+			if (url.pathname.endsWith("/repos/acme/app")) return json({ default_branch: "trunk" });
+			if (url.pathname.endsWith("/branches/trunk")) return json({ name: "trunk", commit: { sha: "sha-3" } });
+			if (url.pathname.endsWith("/commits")) return json(commits);
+			const sha = url.pathname.split("/").at(-1);
+			return json({
+				...commits.find((commit) => commit.sha === sha),
+				stats: { additions: 0, deletions: 0 },
+				files: [],
+			});
+		}) as unknown as typeof fetch;
+		const manager = new CodeMonitorManager(dir, store, {
+			onChange: () => {},
+			project: () => ({ id: "p1", name: "P", cwd: "/tmp", container: "c" }),
+			ensureContainer: async () => true,
+			createEngine: async () => "engine-1",
+			notify: () => {},
+			fetchImpl,
+		});
+
+		try {
+			const monitor = await manager.scanHistory({
+				projectId: "p1",
+				url: "https://github.com/acme/app",
+				token: "ghp_test",
+				commitLimit: 2,
+				autoDispatch: false,
+			});
+			await vi.waitFor(() => expect(store.getMonitor(monitor.id)?.lastCheckAt).not.toBeNull(), { timeout: 15_000 });
+			expect(monitor).toMatchObject({ oneShot: true, oneShotLimit: 2, branches: ["trunk"], enabled: false });
+			expect(store.listCommits(monitor.id).map((commit) => commit.title)).toEqual(["commit 3", "commit 2"]);
+			expect(store.listChecks(monitor.id)[0]).toMatchObject({ trigger: "one-shot", commits: 2, status: "ok" });
+			expect(requestedUrls.some((url) => url.includes("sha=trunk"))).toBe(true);
+		} finally {
+			store.close();
+		}
+	});
+
 	it.each<{
 		name: string;
 		enabled: boolean;

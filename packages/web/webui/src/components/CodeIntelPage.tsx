@@ -35,6 +35,7 @@ import {
 	Form,
 	Grid,
 	Input,
+	InputNumber,
 	Modal,
 	Pagination,
 	Progress,
@@ -71,6 +72,7 @@ import type {
 	SentinelCodeMonitor,
 	SentinelCodeMonitorDetail,
 	SentinelCodeMonitorInput,
+	SentinelCodeOneShotInput,
 	SentinelEngine,
 	SentinelCodeScheduleKind,
 	SentinelProjectInfo,
@@ -108,6 +110,7 @@ const CHECK_TRIGGER_LABELS: Record<SentinelCodeCheckTrigger, string> = {
 	manual: t("手动"),
 	auto: t("定时"),
 	batch: t("批量"),
+	"one-shot": t("单次扫描"),
 };
 
 const CHECK_STATUS_LABELS: Record<SentinelCodeCheckStatus, string> = {
@@ -299,6 +302,7 @@ export interface CodeIntelPageProps {
 	activityLoading: boolean;
 	activityError: string | null;
 	onImport: (inputs: SentinelCodeMonitorInput[]) => void;
+	onScanHistory: (input: SentinelCodeOneShotInput) => void;
 	onDismissImport: () => void;
 	onLoadActivity: (
 		projectId: string,
@@ -531,6 +535,7 @@ function scheduleText(monitor: SentinelCodeMonitor): string {
 }
 
 function nextCheckText(monitor: SentinelCodeMonitor): string {
+	if (monitor.oneShot) return t("一次性任务");
 	if (!monitor.enabled) return t("已暂停");
 	if (monitor.scheduleKind === "interval" && monitor.intervalMinutes === 0) return t("仅手动");
 	if (!monitor.nextCheckAt) return t("待首次检查");
@@ -561,6 +566,7 @@ export function CodeIntelPage({
 	activityLoading,
 	activityError,
 	onImport,
+	onScanHistory,
 	onDismissImport,
 	onLoadActivity,
 	logs,
@@ -582,6 +588,12 @@ export function CodeIntelPage({
 	const monitoringActive = monitoring.ready && monitoring.enabled === true && !monitoring.saving;
 	const projectPaused = monitoring.enabled === false;
 	const [editor, setEditor] = useState<EditorState | null>(null);
+	const [oneShotOpen, setOneShotOpen] = useState(false);
+	const [oneShotUrl, setOneShotUrl] = useState("");
+	const [oneShotToken, setOneShotToken] = useState("");
+	const [oneShotApiBase, setOneShotApiBase] = useState("");
+	const [oneShotLimit, setOneShotLimit] = useState(5);
+	const [oneShotAutoDispatch, setOneShotAutoDispatch] = useState(false);
 	/** Create mode: the textarea, and per-address branch choices (default main). */
 	const [bulkUrls, setBulkUrls] = useState("");
 	const [repoBranches, setRepoBranches] = useState<Record<string, string[]>>({});
@@ -647,7 +659,7 @@ export function CodeIntelPage({
 		});
 	}, [rows, monitorQuery, monitorFilter, projectPaused]);
 	const checkableMonitors = filteredMonitors.filter(
-		(monitor) => monitoringActive && monitor.checkState === "idle" && !checkingIds.includes(monitor.id),
+		(monitor) => !monitor.oneShot && monitoringActive && monitor.checkState === "idle" && !checkingIds.includes(monitor.id),
 	);
 	const checkableSelected = checkableMonitors.filter((monitor) => selectedIds.includes(monitor.id));
 	const activityRows = activity?.items ?? [];
@@ -727,6 +739,7 @@ export function CodeIntelPage({
 		setActivitySearch("");
 		setActivityQuery("");
 		setEditor(null);
+		setOneShotOpen(false);
 		setBatchOpen(false);
 		setDispatchOpen(false);
 	}, [project?.id]);
@@ -827,6 +840,28 @@ export function CodeIntelPage({
 		setEditor(emptyEditor());
 	};
 
+	const openOneShot = () => {
+		setOneShotUrl("");
+		setOneShotToken("");
+		setOneShotApiBase("");
+		setOneShotLimit(5);
+		setOneShotAutoDispatch(false);
+		setOneShotOpen(true);
+	};
+
+	const submitOneShot = () => {
+		if (!project || !oneShotUrl.trim()) return;
+		onScanHistory({
+			projectId: project.id,
+			url: oneShotUrl.trim(),
+			...(oneShotToken.trim() ? { token: oneShotToken.trim() } : {}),
+			...(oneShotApiBase.trim() ? { apiBaseUrl: oneShotApiBase.trim() } : {}),
+			commitLimit: oneShotLimit,
+			autoDispatch: oneShotAutoDispatch,
+		});
+		setOneShotOpen(false);
+	};
+
 	const openEdit = (monitor: SentinelCodeMonitor) => {
 		resetProbes();
 		setProbeErrors({});
@@ -871,7 +906,7 @@ export function CodeIntelPage({
 	};
 
 	const applyBatchDispatch = () => {
-		const ids = dispatchAll ? rows.map((row) => row.id) : selectedIds;
+		const ids = dispatchAll ? rows.filter((row) => !row.oneShot).map((row) => row.id) : selectedIds;
 		if (!canApplyDispatch) return;
 		const patch: Parameters<CodeIntelPageProps["onSetDispatch"]>[1] = {};
 		if (dispatchSwitch !== "keep") patch.autoDispatch = dispatchSwitch === "on";
@@ -959,7 +994,7 @@ export function CodeIntelPage({
 				? createRepos.length > 0 && createRepos.every((url) => branchesFor(url).length > 0)
 				: Boolean(editor.url.trim()) && editor.branches.length > 0
 		: false;
-	const dispatchTargetCount = dispatchAll ? rows.length : selectedIds.length;
+	const dispatchTargetCount = dispatchAll ? rows.filter((row) => !row.oneShot).length : selectedIds.length;
 	const canApplyDispatch =
 		dispatchTargetCount > 0 &&
 		(dispatchSwitch !== "keep" || dispatchCats !== "keep" || dispatchTypes !== "keep") &&
@@ -971,7 +1006,7 @@ export function CodeIntelPage({
 			<Button size="small" type="link" onClick={() => onOpen(monitor.id)}>
 				{t("详情")}
 			</Button>
-			<Button
+			{!monitor.oneShot ? <Button
 				size="small"
 				type="text"
 				icon={<ReloadOutlined />}
@@ -980,13 +1015,13 @@ export function CodeIntelPage({
 				onClick={() => onCheck(monitor.id)}
 			>
 				{monitor.checkState === "queued" ? t("排队中") : t("检查")}
-			</Button>
+			</Button> : null}
 			<Dropdown
 				trigger={["click"]}
 				placement="bottomRight"
 				menu={{
 					items: [
-						{ key: "edit", icon: <EditOutlined />, label: t("编辑"), onClick: () => openEdit(monitor) },
+						...(!monitor.oneShot ? [{ key: "edit", icon: <EditOutlined />, label: t("编辑"), onClick: () => openEdit(monitor) }] : []),
 						{ type: "divider" },
 						{
 							key: "delete",
@@ -1030,6 +1065,7 @@ export function CodeIntelPage({
 						<Text strong className="code-intel-line__text">
 							{monitor.name}
 						</Text>
+						{monitor.oneShot ? <Tag color="blue">{t("单次扫描")}</Tag> : null}
 						{monitor.autoDispatch ? <Tag color="purple">{t("自动复现")}</Tag> : null}
 					</div>
 				</Tooltip>
@@ -1053,26 +1089,24 @@ export function CodeIntelPage({
 			render: (_value, monitor) => (
 				<Tag
 					color={
-						projectPaused ? "default" : monitor.checkState === "running"
-							? "processing"
-							: monitor.checkState === "queued"
-								? "gold"
-								: monitor.lastError
-									? "red"
-									: monitor.enabled
-										? "green"
-										: "default"
+						monitor.checkState === "running" ? "processing"
+							: monitor.checkState === "queued" ? "gold"
+								: monitor.oneShot && monitor.lastError ? "red"
+									: monitor.oneShot && monitor.lastCheckAt ? "green"
+										: monitor.oneShot ? "default"
+											: projectPaused ? "default"
+												: monitor.lastError ? "red"
+													: monitor.enabled ? "green" : "default"
 					}
 				>
-					{projectPaused ? t("已暂停") : monitor.checkState === "running"
-						? t("检查中")
-						: monitor.checkState === "queued"
-							? t("排队中")
-							: monitor.lastError
-								? t("失败")
-								: monitor.enabled
-									? t("已启用")
-									: t("已暂停")}
+					{monitor.checkState === "running" ? t("检查中")
+						: monitor.checkState === "queued" ? t("排队中")
+							: monitor.oneShot && monitor.lastError ? t("失败")
+								: monitor.oneShot && monitor.lastCheckAt ? t("已完成")
+									: monitor.oneShot ? t("等待扫描")
+										: projectPaused ? t("已暂停")
+											: monitor.lastError ? t("失败")
+												: monitor.enabled ? t("已启用") : t("已暂停")}
 				</Tag>
 			),
 		},
@@ -1082,8 +1116,10 @@ export function CodeIntelPage({
 			width: 130,
 			ellipsis: true,
 			render: (_value, monitor) => (
-				<Tooltip title={scheduleText(monitor)}>
-					<Text type="secondary">{scheduleText(monitor)}</Text>
+				<Tooltip title={monitor.oneShot ? t("扫描最近 {count} 条提交", { count: monitor.oneShotLimit ?? 0 }) : scheduleText(monitor)}>
+					<Text type="secondary">
+						{monitor.oneShot ? t("最近 {count} 条", { count: monitor.oneShotLimit ?? 0 }) : scheduleText(monitor)}
+					</Text>
 				</Tooltip>
 			),
 		},
@@ -1106,8 +1142,8 @@ export function CodeIntelPage({
 			width: 180,
 			ellipsis: true,
 			render: (_value, monitor) => (
-				<Tooltip title={projectPaused ? t("已暂停") : nextCheckText(monitor)}>
-					<Text type="secondary">{projectPaused ? t("已暂停") : nextCheckText(monitor)}</Text>
+				<Tooltip title={projectPaused && !monitor.oneShot ? t("已暂停") : nextCheckText(monitor)}>
+					<Text type="secondary">{projectPaused && !monitor.oneShot ? t("已暂停") : nextCheckText(monitor)}</Text>
 				</Tooltip>
 			),
 		},
@@ -1868,6 +1904,9 @@ export function CodeIntelPage({
 					>
 						{t("新增监控")}
 					</Button>
+					<Button disabled={!project || !monitoringActive} onClick={openOneShot}>
+						{t("单次扫描")}
+					</Button>
 				</Space>
 			}
 		>
@@ -2180,6 +2219,7 @@ export function CodeIntelPage({
 							rowSelection={{
 								selectedRowKeys: selectedIds,
 								preserveSelectedRowKeys: true,
+								getCheckboxProps: (monitor) => ({ disabled: monitor.oneShot }),
 								onChange: (keys) => setSelectedIds(keys.map((key) => String(key))),
 							}}
 							tableLayout="fixed"
@@ -2188,6 +2228,81 @@ export function CodeIntelPage({
 					</>
 				)}
 			</div>
+
+			<Modal
+				open={oneShotOpen}
+				title={t("单次扫描")}
+				onCancel={() => setOneShotOpen(false)}
+				onOk={submitOneShot}
+				okText={t("开始扫描")}
+				cancelText={t("取消")}
+				okButtonProps={{ disabled: !oneShotUrl.trim() || !Number.isInteger(oneShotLimit) || oneShotLimit < 1 || oneShotLimit > (oneShotToken.trim() ? 20 : 5) }}
+				width={620}
+				destroyOnHidden
+			>
+				<Form layout="vertical">
+					<Alert
+						type="info"
+						showIcon
+						message={t("仅扫描仓库默认分支最近的提交；结果会保留在动态和历史记录中。")}
+					/>
+					<Form.Item label={t("仓库地址")} required style={{ marginTop: 16 }}>
+						<Input
+							autoFocus
+							value={oneShotUrl}
+							placeholder="https://github.com/owner/repo"
+							onChange={(event) => setOneShotUrl(event.target.value)}
+						/>
+					</Form.Item>
+					<Form.Item
+						label={t("最近提交数")}
+						extra={oneShotToken.trim() ? t("填写访问令牌后最多扫描 20 条提交。") : t("未填写访问令牌时最多扫描 5 条提交。")}
+					>
+						<InputNumber
+							min={1}
+							max={oneShotToken.trim() ? 20 : 5}
+							precision={0}
+							value={oneShotLimit}
+							style={{ width: 180 }}
+							onChange={(value) => setOneShotLimit(value ?? 1)}
+						/>
+					</Form.Item>
+					<Form.Item
+						label={
+							<Space size={4} align="center">
+								<Tooltip title={<TokenHelp host={hostFromUrl(oneShotUrl) ?? "github.com"} />}>
+									<QuestionCircleOutlined className="code-intel-help" />
+								</Tooltip>
+								<span>{t("访问令牌（可选）")}</span>
+							</Space>
+						}
+					>
+						<Input.Password
+							value={oneShotToken}
+							placeholder={t("私有仓库需要访问令牌")}
+							onChange={(event) => setOneShotToken(event.target.value)}
+						/>
+					</Form.Item>
+					<Form.Item label={t("API Base URL（可选）")}>
+						<Input
+							value={oneShotApiBase}
+							placeholder="https://api.github.com"
+							onChange={(event) => setOneShotApiBase(event.target.value)}
+						/>
+					</Form.Item>
+					<Form.Item label={t("发现安全更新后")}>
+						<Radio.Group
+							value={oneShotAutoDispatch ? "dispatch" : "record"}
+							onChange={(event) => setOneShotAutoDispatch(event.target.value === "dispatch")}
+						>
+							<Space direction="vertical">
+								<Radio value="record">{t("仅记录")}</Radio>
+								<Radio value="dispatch">{t("自动下发复现")}</Radio>
+							</Space>
+						</Radio.Group>
+					</Form.Item>
+				</Form>
+			</Modal>
 
 			<Modal
 				open={editor !== null}
@@ -2597,8 +2712,14 @@ export function CodeIntelPage({
 							<Descriptions.Item label={t("访问令牌")}>
 								{detail.monitor.tokenSet ? t("已保存") : t("未配置")}
 							</Descriptions.Item>
-							<Descriptions.Item label={t("监控策略")}>{scheduleText(detail.monitor)}</Descriptions.Item>
-							<Descriptions.Item label={t("下次检查")}>{projectPaused ? t("已暂停") : nextCheckText(detail.monitor)}</Descriptions.Item>
+							<Descriptions.Item label={t("监控策略")}>
+								{detail.monitor.oneShot
+									? t("扫描最近 {count} 条提交", { count: detail.monitor.oneShotLimit ?? 0 })
+									: scheduleText(detail.monitor)}
+							</Descriptions.Item>
+							<Descriptions.Item label={t("下次检查")}>
+								{projectPaused && !detail.monitor.oneShot ? t("已暂停") : nextCheckText(detail.monitor)}
+							</Descriptions.Item>
 							<Descriptions.Item label={t("自动复现")}>
 								{detail.monitor.autoDispatch ? t("开") : t("关")}
 							</Descriptions.Item>
@@ -2615,19 +2736,21 @@ export function CodeIntelPage({
 							) : null}
 						</Descriptions>
 
-						<Space>
-							<Button
-								icon={<ReloadOutlined />}
-								loading={checkingIds.includes(detail.monitor.id) || detail.monitor.checkState === "running"}
-								disabled={!monitoringActive || detail.monitor.checkState !== "idle"}
-								onClick={() => onCheck(detail.monitor.id)}
-							>
-								{t("立即检查")}
-							</Button>
-							<Button icon={<EditOutlined />} onClick={() => openEdit(detail.monitor)}>
-								{t("编辑")}
-							</Button>
-						</Space>
+						{!detail.monitor.oneShot ? (
+							<Space>
+								<Button
+									icon={<ReloadOutlined />}
+									loading={checkingIds.includes(detail.monitor.id) || detail.monitor.checkState === "running"}
+									disabled={!monitoringActive || detail.monitor.checkState !== "idle"}
+									onClick={() => onCheck(detail.monitor.id)}
+								>
+									{t("立即检查")}
+								</Button>
+								<Button icon={<EditOutlined />} onClick={() => openEdit(detail.monitor)}>
+									{t("编辑")}
+								</Button>
+							</Space>
+						) : null}
 
 						<Tabs
 							style={{ width: "100%" }}

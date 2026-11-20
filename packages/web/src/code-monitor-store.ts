@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS code_monitors (
   schedule_kind TEXT NOT NULL DEFAULT 'interval',
   cron_expression TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
+  one_shot INTEGER NOT NULL DEFAULT 0,
+  one_shot_limit INTEGER,
   last_check_at INTEGER,
   last_error TEXT,
   created_at INTEGER NOT NULL
@@ -245,6 +247,8 @@ interface MonitorRow {
 	schedule_kind: string;
 	cron_expression: string | null;
 	enabled: number;
+	one_shot: number;
+	one_shot_limit: number | null;
 	last_check_at: number | null;
 	last_error: string | null;
 	created_at: number;
@@ -414,6 +418,8 @@ function toMonitor(row: MonitorRow): StoredCodeMonitor {
 		scheduleKind: row.schedule_kind === "cron" ? "cron" : "interval",
 		cronExpression: row.cron_expression,
 		enabled: row.enabled === 1,
+		oneShot: row.one_shot === 1,
+		oneShotLimit: row.one_shot_limit,
 		lastCheckAt: row.last_check_at,
 		lastError: row.last_error,
 		createdAt: row.created_at,
@@ -469,6 +475,7 @@ export class CodeMonitorStore {
 		this.db.exec("PRAGMA journal_mode = WAL");
 		this.db.exec(SCHEMA);
 		this.addScheduleColumns();
+		this.addOneShotColumns();
 		this.addVulnerabilityTagsColumn();
 		const columns = this.db.prepare("PRAGMA table_info(code_commits)").all() as Array<{ name: string }>;
 		if (!columns.some((column) => column.name === "reproduction_stage")) {
@@ -482,6 +489,14 @@ export class CodeMonitorStore {
 			.prepare(`UPDATE code_commits SET status = 'new', reproduction_stage = 'failed',
 			error = '服务重启，源码准备中断，请重新复现' WHERE status = 'dispatching'`)
 			.run();
+	}
+
+	private addOneShotColumns(): void {
+		const columns = this.db.prepare("PRAGMA table_info(code_monitors)").all() as Array<{ name: string }>;
+		const names = new Set(columns.map((column) => column.name));
+		if (!names.has("one_shot"))
+			this.db.exec("ALTER TABLE code_monitors ADD COLUMN one_shot INTEGER NOT NULL DEFAULT 0");
+		if (!names.has("one_shot_limit")) this.db.exec("ALTER TABLE code_monitors ADD COLUMN one_shot_limit INTEGER");
 	}
 
 	/** Databases created before cron scheduling have no strategy columns. */
@@ -619,6 +634,8 @@ export class CodeMonitorStore {
 		scheduleKind: "interval" | "cron";
 		cronExpression: string | null;
 		enabled: boolean;
+		oneShot?: boolean;
+		oneShotLimit?: number | null;
 	}): StoredCodeMonitor {
 		const id = randomUUID();
 		const createdAt = Date.now();
@@ -627,8 +644,8 @@ export class CodeMonitorStore {
 				`INSERT INTO code_monitors
 					(id, project_id, project_name, name, host, owner, repo, repo_url, api_base_url,
 					 branches, baselines, auto_dispatch, auto_dispatch_categories, auto_dispatch_tags, interval_minutes,
-					 schedule_kind, cron_expression, enabled, created_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					 schedule_kind, cron_expression, enabled, one_shot, one_shot_limit, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			)
 			.run(
 				id,
@@ -649,6 +666,8 @@ export class CodeMonitorStore {
 				monitor.scheduleKind,
 				monitor.cronExpression,
 				monitor.enabled ? 1 : 0,
+				monitor.oneShot ? 1 : 0,
+				monitor.oneShotLimit ?? null,
 				createdAt,
 			);
 		const created = this.getMonitor(id);

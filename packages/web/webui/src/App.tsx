@@ -3462,6 +3462,7 @@ export function App() {
 							activityError={codeActivityError}
 							onLoadActivity={loadCodeActivity}
 							onImport={importCodeMonitors}
+							onScanHistory={(input) => send({ type: "scan_code_history", input })}
 							onDismissImport={dismissCodeMonitorImport}
 							onUpdate={(id, input) => {
 								setCodeMonitorBusy(id);

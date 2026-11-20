@@ -870,7 +870,7 @@ export type SentinelCodeVerdict = "pending" | "security" | "not_security" | "fai
 
 export type SentinelCodeScheduleKind = "interval" | "cron";
 
-export type SentinelCodeCheckTrigger = "manual" | "auto" | "batch";
+export type SentinelCodeCheckTrigger = "manual" | "auto" | "batch" | "one-shot";
 
 export type SentinelCodeCheckStatus = "running" | "ok" | "error";
 
@@ -902,6 +902,8 @@ export interface SentinelCodeMonitor {
 	cronExpression: string | null;
 	nextCheckAt: number | null;
 	checkState: "idle" | "queued" | "running";
+	oneShot: boolean;
+	oneShotLimit: number | null;
 	enabled: boolean;
 	lastCheckAt: number | null;
 	lastError: string | null;
@@ -1035,6 +1037,15 @@ export interface SentinelCodeMonitorInput {
 	autoDispatchCategories?: SentinelVulnCategory[] | null;
 	autoDispatchTags?: CodeVulnTag[] | null;
 	enabled?: boolean;
+}
+
+export interface SentinelCodeOneShotInput {
+	projectId: string;
+	url: string;
+	token?: string;
+	apiBaseUrl?: string;
+	commitLimit: number;
+	autoDispatch: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1755,6 +1766,7 @@ export type SentinelClientMessage =
 			apiBaseUrl?: string;
 	  }
 	| { type: "create_code_monitor"; input: SentinelCodeMonitorInput }
+	| { type: "scan_code_history"; input: SentinelCodeOneShotInput }
 	| { type: "update_code_monitor"; id: string; input: SentinelCodeMonitorInput }
 	| { type: "delete_code_monitor"; id: string }
 	| { type: "delete_code_monitors"; ids: string[] }

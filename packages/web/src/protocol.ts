@@ -1020,7 +1020,7 @@ export type SentinelCodeVerdict = "pending" | "security" | "not_security" | "fai
 export type SentinelCodeScheduleKind = "interval" | "cron";
 
 /** What started a check; kept in the audit log. */
-export type SentinelCodeCheckTrigger = "manual" | "auto" | "batch";
+export type SentinelCodeCheckTrigger = "manual" | "auto" | "batch" | "one-shot";
 
 /** Lifecycle of one check run. */
 export type SentinelCodeCheckStatus = "running" | "ok" | "error";
@@ -1147,6 +1147,10 @@ export interface SentinelCodeMonitor {
 	nextCheckAt: number | null;
 	/** Whether a queued/running job currently exists for this monitor. */
 	checkState: "idle" | "queued" | "running";
+	/** This record represents one historical scan and is never polled. */
+	oneShot: boolean;
+	/** Number of recent commits requested by a one-time scan. */
+	oneShotLimit: number | null;
 	enabled: boolean;
 	lastCheckAt: number | null;
 	lastError: string | null;
@@ -1253,6 +1257,16 @@ export interface SentinelCodeMonitorInput {
 	/** Null allows all types; a nonempty list requires at least one matching tag. */
 	autoDispatchTags?: CodeVulnTag[] | null;
 	enabled?: boolean;
+}
+
+/** A one-time scan of recent commits on the repository's default branch. */
+export interface SentinelCodeOneShotInput {
+	projectId: string;
+	url: string;
+	token?: string;
+	apiBaseUrl?: string;
+	commitLimit: number;
+	autoDispatch: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -2292,6 +2306,7 @@ export type SentinelClientMessage =
 			apiBaseUrl?: string;
 	  }
 	| { type: "create_code_monitor"; input: SentinelCodeMonitorInput }
+	| { type: "scan_code_history"; input: SentinelCodeOneShotInput }
 	| { type: "update_code_monitor"; id: string; input: SentinelCodeMonitorInput }
 	| { type: "delete_code_monitor"; id: string }
 	| { type: "delete_code_monitors"; ids: string[] }

@@ -3916,6 +3916,36 @@ export async function startSentinelServer(
 						);
 					return;
 				}
+				case "scan_code_history": {
+					if (!codeMonitors) {
+						sendError(socket, t("未配置配置目录，无法使用开源监测"));
+						return;
+					}
+					void codeMonitors
+						.scanHistory(message.input)
+						.then((monitor) => {
+							sendTo(socket, {
+								type: "code_monitor_result",
+								action: "单次扫描",
+								id: monitor.id,
+								ok: true,
+								detail: t("已加入扫描队列：{name}，最近 {count} 条", {
+									name: monitor.name,
+									count: monitor.oneShotLimit ?? message.input.commitLimit,
+								}),
+							});
+							broadcastCodeMonitors();
+						})
+						.catch((error: unknown) =>
+							sendTo(socket, {
+								type: "code_monitor_result",
+								action: "单次扫描",
+								ok: false,
+								error: error instanceof Error ? error.message : String(error),
+							}),
+						);
+					return;
+				}
 				case "update_code_monitor": {
 					if (!codeMonitors) {
 						sendError(socket, t("未配置配置目录，无法使用开源监测"));

@@ -52,6 +52,7 @@ import type {
 	SentinelCodeMonitor,
 	SentinelCodeMonitorDetail,
 	SentinelCodeMonitorInput,
+	SentinelCodeOneShotInput,
 	SentinelEngineStatus,
 	SentinelProjectInfo,
 	SentinelVulnCategory,
@@ -228,7 +229,7 @@ function resolveSchedule(
 
 /** Whether the scheduler should fire this monitor at `now`. */
 function monitorDue(monitor: StoredCodeMonitor, now: number): boolean {
-	if (!monitor.enabled) return false;
+	if (monitor.oneShot || !monitor.enabled) return false;
 	if (monitor.scheduleKind === "cron") {
 		if (!monitor.cronExpression) return false;
 		try {
@@ -417,6 +418,50 @@ export class CodeMonitorManager {
 			nextCheckAt: this.store.projectEnabled(monitor.projectId) ? nextCheckFor(monitor) : null,
 			checkState: active.get(monitor.id) ?? "idle",
 		}));
+	}
+
+	/** Create a durable one-time record and queue a scan of recent default-branch commits. */
+	async scanHistory(input: SentinelCodeOneShotInput): Promise<SentinelCodeMonitor> {
+		const project = this.hooks.project(input.projectId);
+		if (!project) throw new Error("项目不存在，请重新选择项目");
+		this.monitoringGuard(project.id);
+		const ref = parseGithubRepoUrl(input.url, input.apiBaseUrl);
+		const token = input.token?.trim() ?? "";
+		if (/\s/.test(token)) throw new Error("访问令牌不能包含空白字符");
+		const maxCommits = token ? MAX_COMMITS_PER_CHECK : 5;
+		if (!Number.isInteger(input.commitLimit) || input.commitLimit < 1 || input.commitLimit > maxCommits) {
+			throw new Error(`提交数量必须在 1 到 ${maxCommits} 之间${token ? "" : "（未填写令牌时最多 5 条）"}`);
+		}
+		const client = new GithubClient(
+			ref,
+			token,
+			this.hooks.fetchImpl ?? createProjectGithubFetch(this.agentDir, project.id),
+		);
+		const { defaultBranch } = await client.getRepo();
+		const head = await client.getBranch(defaultBranch);
+		const monitor = this.store.createMonitor({
+			projectId: project.id,
+			projectName: project.name,
+			name: `${ref.owner}/${ref.repo} · 单次扫描`,
+			host: ref.host,
+			owner: ref.owner,
+			repo: ref.repo,
+			repoUrl: ref.repoUrl,
+			apiBaseUrl: ref.apiBaseUrl,
+			branches: [defaultBranch],
+			baselines: { [defaultBranch]: head.sha },
+			autoDispatch: input.autoDispatch === true,
+			intervalMinutes: 0,
+			scheduleKind: "interval",
+			cronExpression: null,
+			enabled: false,
+			oneShot: true,
+			oneShotLimit: input.commitLimit,
+		});
+		setCodeMonitorSecret(this.agentDir, monitor.id, token);
+		this.hooks.onChange();
+		this.enqueue(monitor.id, "one-shot");
+		return this.view(monitor.id);
 	}
 
 	/** Project-wide activity for the cross-monitor inbox tab. */
@@ -735,6 +780,8 @@ export class CodeMonitorManager {
 	enqueue(id: string, trigger: SentinelCodeCheckTrigger = "manual"): SentinelCodeCheckJob {
 		const monitor = this.store.getMonitor(id);
 		if (!monitor) throw new Error("监控不存在");
+		if (monitor.oneShot && trigger !== "one-shot") throw new Error("单次扫描不能再次检查");
+		if (!monitor.oneShot && trigger === "one-shot") throw new Error("单次扫描记录无效");
 		this.monitoringGuard(monitor.projectId);
 		const job = this.store.enqueueJob({
 			monitorId: id,
@@ -882,61 +929,83 @@ export class CodeMonitorManager {
 		try {
 			// Take the retry list before this pass judges anything: a model outage in
 			// this check must not make every fresh failure retry itself immediately.
-			const retryRows = this.store.failedCommits(id, MAX_RETRIES_PER_CHECK);
-			for (const branch of monitor.branches) {
+			const retryRows = trigger === "one-shot" ? [] : this.store.failedCommits(id, MAX_RETRIES_PER_CHECK);
+			if (trigger === "one-shot") {
+				const branch = monitor.branches[0];
+				if (!branch || !monitor.oneShotLimit) throw new Error("单次扫描缺少分支或提交数量");
 				try {
 					assertActive();
-					const head = await client.getBranch(branch);
+					const commits = await client.listCommits(branch);
 					assertActive();
-					const base = baselines[branch];
-					if (!base) {
-						baselines[branch] = head.sha;
-						continue;
-					}
-					if (base === head.sha) continue;
-					let commits: GithubCommitSummary[] = [];
-					let resynced = false;
-					try {
-						const compare = await client.compare(base, head.sha);
-						assertActive();
-						commits = compare.commits;
-						// A rewritten branch leaves no path from the old baseline. Fall back
-						// to the recent window, with an hour of overlap for clock skew.
-						if (compare.status === "diverged" || commits.length === 0) {
-							resynced = true;
-							const since = monitor.lastCheckAt ? monitor.lastCheckAt - 3_600_000 : undefined;
-							commits = await client.listCommits(branch, since);
-							assertActive();
-						}
-					} catch (error) {
-						if (!(error instanceof GithubApiError) || error.status !== 404) throw error;
-						resynced = true;
-						const since = monitor.lastCheckAt ? monitor.lastCheckAt - 3_600_000 : undefined;
-						commits = await client.listCommits(branch, since);
-						assertActive();
-					}
-					const batch = commits.slice(0, commitCap);
-					for (const commit of batch) {
+					const recent = commits.slice(-monitor.oneShotLimit);
+					for (const commit of recent) {
 						assertActive();
 						const consumed = await this.consume(monitor.id, branch, commit, client, assertActive);
 						if (consumed) {
 							result.commits += 1;
 							if (consumed === "security") result.findings += 1;
 						}
-						baselines[branch] = commit.sha;
-					}
-					if (batch.length < commits.length) {
-						// Capped: keep the baseline at the last consumed commit so the next
-						// tick continues from there.
-					} else if (!resynced || batch.length === 0) {
-						baselines[branch] = head.sha;
 					}
 				} catch (error) {
 					assertActive();
 					this.noteRateLimit(monitor.host, error);
 					rememberError(`${branch}: ${errorText(error)}`);
 				}
-			}
+			} else
+				for (const branch of monitor.branches) {
+					try {
+						assertActive();
+						const head = await client.getBranch(branch);
+						assertActive();
+						const base = baselines[branch];
+						if (!base) {
+							baselines[branch] = head.sha;
+							continue;
+						}
+						if (base === head.sha) continue;
+						let commits: GithubCommitSummary[] = [];
+						let resynced = false;
+						try {
+							const compare = await client.compare(base, head.sha);
+							assertActive();
+							commits = compare.commits;
+							// A rewritten branch leaves no path from the old baseline. Fall back
+							// to the recent window, with an hour of overlap for clock skew.
+							if (compare.status === "diverged" || commits.length === 0) {
+								resynced = true;
+								const since = monitor.lastCheckAt ? monitor.lastCheckAt - 3_600_000 : undefined;
+								commits = await client.listCommits(branch, since);
+								assertActive();
+							}
+						} catch (error) {
+							if (!(error instanceof GithubApiError) || error.status !== 404) throw error;
+							resynced = true;
+							const since = monitor.lastCheckAt ? monitor.lastCheckAt - 3_600_000 : undefined;
+							commits = await client.listCommits(branch, since);
+							assertActive();
+						}
+						const batch = commits.slice(0, commitCap);
+						for (const commit of batch) {
+							assertActive();
+							const consumed = await this.consume(monitor.id, branch, commit, client, assertActive);
+							if (consumed) {
+								result.commits += 1;
+								if (consumed === "security") result.findings += 1;
+							}
+							baselines[branch] = commit.sha;
+						}
+						if (batch.length < commits.length) {
+							// Capped: keep the baseline at the last consumed commit so the next
+							// tick continues from there.
+						} else if (!resynced || batch.length === 0) {
+							baselines[branch] = head.sha;
+						}
+					} catch (error) {
+						assertActive();
+						this.noteRateLimit(monitor.host, error);
+						rememberError(`${branch}: ${errorText(error)}`);
+					}
+				}
 			// Failed judgments are retried after the branch pass, so a model outage
 			// does not need an operator to touch every row.
 			for (const failed of retryRows) {
