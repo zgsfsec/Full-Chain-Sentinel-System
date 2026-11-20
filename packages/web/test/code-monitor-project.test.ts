@@ -63,6 +63,84 @@ function fixture() {
 }
 
 describe("project monitoring switch", () => {
+	it("sets up multiple one-shot repositories sequentially and continues after a repository fails", async () => {
+		const { store, manager } = fixture();
+		const firstRepo = deferred<{ defaultBranch: string }>();
+		const metadata = vi
+			.spyOn(GithubClient.prototype, "getRepo")
+			.mockReturnValueOnce(firstRepo.promise)
+			.mockRejectedValueOnce(new Error("Repository unavailable"))
+			.mockResolvedValueOnce({ defaultBranch: "trunk" });
+		vi.spyOn(GithubClient.prototype, "getBranch").mockResolvedValue({ name: "trunk", sha: "head" });
+		vi.spyOn(GithubClient.prototype, "listCommits").mockResolvedValue([]);
+		const scans = ["first", "missing", "last"].map((repo) =>
+			manager.scanHistory({
+				projectId: "p1",
+				url: `https://github.com/acme/${repo}`,
+				token: "ghp_test",
+				commitLimit: 2,
+				autoDispatch: true,
+			}),
+		);
+		const settled = Promise.allSettled(scans);
+		await vi.waitFor(() => expect(metadata).toHaveBeenCalledTimes(1));
+		expect(store.listMonitors()).toEqual([]);
+		firstRepo.resolve({ defaultBranch: "trunk" });
+		const results = await settled;
+		expect(results.map((result) => result.status)).toEqual(["fulfilled", "rejected", "fulfilled"]);
+		expect(metadata).toHaveBeenCalledTimes(3);
+		await vi.waitFor(() => expect(store.activeJobs()).toHaveLength(0));
+		const monitors = manager.list().sort((left, right) => left.repo.localeCompare(right.repo));
+		expect(monitors.map((monitor) => monitor.repo)).toEqual(["first", "last"]);
+		for (const monitor of monitors) {
+			expect(monitor).toMatchObject({
+				projectId: "p1",
+				oneShot: true,
+				oneShotLimit: 2,
+				autoDispatch: true,
+				tokenSet: true,
+				enabled: false,
+				branches: ["trunk"],
+			});
+			expect(store.listJobs(monitor.id)[0]).toMatchObject({ trigger: "one-shot", status: "done" });
+		}
+	});
+
+	it("runs a one-shot scan next after the active host check despite a large monitoring backlog", async () => {
+		const { store, manager, create } = fixture();
+		const active = create();
+		const pending = deferred<{ commits: number; findings: number; checkId: string; error: null }>();
+		const check = vi
+			.spyOn(manager, "check")
+			.mockReturnValueOnce(pending.promise)
+			.mockResolvedValue({ commits: 0, findings: 0, checkId: "check", error: null });
+		manager.enqueue(active.id);
+		for (let index = 0; index < 105; index++) {
+			const monitor = create();
+			store.enqueueJob({
+				monitorId: monitor.id,
+				projectId: "p1",
+				host: monitor.host,
+				trigger: "auto",
+				now: index + 1,
+				maxAttempts: 3,
+			});
+		}
+		vi.spyOn(GithubClient.prototype, "getRepo").mockResolvedValue({ defaultBranch: "main" });
+		vi.spyOn(GithubClient.prototype, "getBranch").mockResolvedValue({ name: "main", sha: "head" });
+		const scan = await manager.scanHistory({
+			projectId: "p1",
+			url: "https://github.com/acme/app",
+			commitLimit: 5,
+			autoDispatch: false,
+		});
+		expect(check).toHaveBeenCalledTimes(1);
+		expect(store.activeJob(scan.id)?.status).toBe("queued");
+		pending.resolve({ commits: 0, findings: 0, checkId: "active", error: null });
+		await vi.waitFor(() => expect(store.listJobs(scan.id)[0]?.status).toBe("done"));
+		expect(check.mock.calls[1]).toEqual([scan.id, "one-shot"]);
+	});
+
 	it("persists a pause even without repositories and preserves repository settings and history", () => {
 		const { dir, store, manager, create } = fixture();
 		const monitor = create("p1", false);

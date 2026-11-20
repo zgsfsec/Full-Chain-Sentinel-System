@@ -354,16 +354,24 @@ export class GithubClient {
 		return { name: text(record.name) || name, sha };
 	}
 
-	/** Commits on one branch, newest first as GitHub returns them. */
-	async listCommits(branch: string, sinceMs?: number): Promise<GithubCommitSummary[]> {
-		const query: Record<string, string> = { sha: branch, per_page: String(COMMIT_PAGE_SIZE) };
+	/** Select the latest commits in GitHub's order, then return them oldest first for consumption. */
+	async listCommits(branch: string, sinceMs?: number, limit = COMMIT_PAGE_SIZE): Promise<GithubCommitSummary[]> {
+		if (!Number.isInteger(limit) || limit < 1) throw new Error("提交数量必须为正整数");
+		const pageSize = Math.min(COMMIT_PAGE_SIZE, limit);
+		const query: Record<string, string> = { sha: branch, per_page: String(pageSize) };
 		if (sinceMs && sinceMs > 0) query.since = new Date(sinceMs).toISOString();
-		const data = await this.request<unknown[]>(`/commits`, query);
-		if (!Array.isArray(data)) return [];
-		return data
-			.map((raw) => toCommitSummary(raw))
-			.filter((commit): commit is GithubCommitSummary => commit !== null)
-			.sort((left, right) => left.authoredAt - right.authoredAt);
+		const commits: GithubCommitSummary[] = [];
+		for (let page = 1; page <= Math.ceil(limit / pageSize); page++) {
+			const data = await this.request<unknown[]>(`/commits`, { ...query, page: String(page) });
+			if (!Array.isArray(data)) break;
+			for (const raw of data) {
+				const commit = toCommitSummary(raw);
+				if (commit) commits.push(commit);
+				if (commits.length === limit) break;
+			}
+			if (commits.length === limit || data.length < pageSize) break;
+		}
+		return commits.sort((left, right) => left.authoredAt - right.authoredAt);
 	}
 
 	async compare(baseSha: string, headSha: string): Promise<GithubCompare> {

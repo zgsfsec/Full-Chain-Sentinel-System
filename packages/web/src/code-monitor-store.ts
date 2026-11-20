@@ -1017,12 +1017,15 @@ export class CodeMonitorStore {
 	}
 
 	dueJobs(now: number, limit = 50): SentinelCodeCheckJob[] {
+		// An explicit historical scan must not wait behind hundreds of polling jobs.
+		// Apply priority before LIMIT so the pump can see it in a large backlog.
 		const rows = this.db
 			.prepare(
 				`SELECT * FROM code_monitor_jobs WHERE status = 'queued' AND next_run_at <= ?
 				 AND NOT EXISTS (SELECT 1 FROM code_monitor_projects p
 				 WHERE p.project_id = code_monitor_jobs.project_id AND p.enabled = 0)
-				 ORDER BY next_run_at, created_at LIMIT ?`,
+				 ORDER BY CASE WHEN trigger = 'one-shot' THEN 0 ELSE 1 END,
+				 next_run_at, created_at LIMIT ?`,
 			)
 			.all(now, limit) as unknown as JobRow[];
 		return rows.map(toJob);

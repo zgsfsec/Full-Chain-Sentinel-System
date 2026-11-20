@@ -54,6 +54,7 @@ import {
 import type { TableColumnsType } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CODE_VULN_TAGS, type CodeVulnTag } from "../../../src/code-vuln-tags.ts";
+import { MAX_CODE_HISTORY_COMMITS } from "../../../src/code-monitor-limits.ts";
 import { DEFAULT_CRON_EXPRESSION, nextCronOccurrences, validateCronExpression } from "../../../src/cron.ts";
 import { getLanguage, t } from "../i18n.ts";
 import { useCodeMonitorProject } from "../use-code-monitor-project.ts";
@@ -589,7 +590,7 @@ export function CodeIntelPage({
 	const projectPaused = monitoring.enabled === false;
 	const [editor, setEditor] = useState<EditorState | null>(null);
 	const [oneShotOpen, setOneShotOpen] = useState(false);
-	const [oneShotUrl, setOneShotUrl] = useState("");
+	const [oneShotUrls, setOneShotUrls] = useState("");
 	const [oneShotToken, setOneShotToken] = useState("");
 	const [oneShotApiBase, setOneShotApiBase] = useState("");
 	const [oneShotLimit, setOneShotLimit] = useState(5);
@@ -668,6 +669,7 @@ export function CodeIntelPage({
 		({ attention: 0, review: 0, failed: 0, dispatchFailed: 0, pending: 0, anomalies: 0, reproducing: 0, finished: 0 } as const);
 	const activityAnomalies = rows.filter((monitor) => Boolean(monitor.lastError));
 	const editingMonitor = editor?.monitor ?? null;
+	const oneShotRepos = useMemo(() => repoLines(oneShotUrls), [oneShotUrls]);
 	const createRepos = useMemo(() => repoLines(bulkUrls), [bulkUrls]);
 	const pagedCreateRepos = useMemo(
 		() => createRepos.slice((repoPage - 1) * REPO_PAGE_SIZE, repoPage * REPO_PAGE_SIZE),
@@ -841,7 +843,7 @@ export function CodeIntelPage({
 	};
 
 	const openOneShot = () => {
-		setOneShotUrl("");
+		setOneShotUrls("");
 		setOneShotToken("");
 		setOneShotApiBase("");
 		setOneShotLimit(5);
@@ -850,15 +852,17 @@ export function CodeIntelPage({
 	};
 
 	const submitOneShot = () => {
-		if (!project || !oneShotUrl.trim()) return;
-		onScanHistory({
-			projectId: project.id,
-			url: oneShotUrl.trim(),
-			...(oneShotToken.trim() ? { token: oneShotToken.trim() } : {}),
-			...(oneShotApiBase.trim() ? { apiBaseUrl: oneShotApiBase.trim() } : {}),
-			commitLimit: oneShotLimit,
-			autoDispatch: oneShotAutoDispatch,
-		});
+		if (!project || !monitoringActive || oneShotRepos.length === 0) return;
+		for (const url of oneShotRepos) {
+			onScanHistory({
+				projectId: project.id,
+				url,
+				...(oneShotToken.trim() ? { token: oneShotToken.trim() } : {}),
+				...(oneShotApiBase.trim() ? { apiBaseUrl: oneShotApiBase.trim() } : {}),
+				commitLimit: oneShotLimit,
+				autoDispatch: oneShotAutoDispatch,
+			});
+		}
 		setOneShotOpen(false);
 	};
 
@@ -2234,9 +2238,9 @@ export function CodeIntelPage({
 				title={t("单次扫描")}
 				onCancel={() => setOneShotOpen(false)}
 				onOk={submitOneShot}
-				okText={t("开始扫描")}
+				okText={`${t("开始扫描")}（${oneShotRepos.length}）`}
 				cancelText={t("取消")}
-				okButtonProps={{ disabled: !oneShotUrl.trim() || !Number.isInteger(oneShotLimit) || oneShotLimit < 1 || oneShotLimit > (oneShotToken.trim() ? 20 : 5) }}
+				okButtonProps={{ disabled: !monitoringActive || oneShotRepos.length === 0 || !Number.isInteger(oneShotLimit) || oneShotLimit < 1 || oneShotLimit > MAX_CODE_HISTORY_COMMITS }}
 				width={620}
 				destroyOnHidden
 			>
@@ -2246,21 +2250,30 @@ export function CodeIntelPage({
 						showIcon
 						message={t("仅扫描仓库默认分支最近的提交；结果会保留在动态和历史记录中。")}
 					/>
-					<Form.Item label={t("仓库地址")} required style={{ marginTop: 16 }}>
-						<Input
+					<Form.Item label={t("仓库地址")} required style={{ marginTop: 16 }}
+						extra={getLanguage() === "en"
+							? "One Git address per line. Blank lines and duplicates are ignored. Each repository uses the commit count and settings below."
+							: "每行一个 Git 地址，自动忽略空行和重复地址；每个仓库均使用下面的提交数和设置。"}>
+						<Input.TextArea
+							rows={4}
 							autoFocus
-							value={oneShotUrl}
-							placeholder="https://github.com/owner/repo"
-							onChange={(event) => setOneShotUrl(event.target.value)}
+							value={oneShotUrls}
+							placeholder={"https://github.com/owner/repo-a\nhttps://github.com/owner/repo-b"}
+							onChange={(event) => setOneShotUrls(event.target.value)}
 						/>
 					</Form.Item>
 					<Form.Item
 						label={t("最近提交数")}
-						extra={oneShotToken.trim() ? t("填写访问令牌后最多扫描 20 条提交。") : t("未填写访问令牌时最多扫描 5 条提交。")}
+						extra={<>
+							{getLanguage() === "en"
+								? `Each repository scans up to ${MAX_CODE_HISTORY_COMMITS} commits.`
+								: `每个仓库最多扫描 ${MAX_CODE_HISTORY_COMMITS} 条提交。`}
+							{!oneShotToken.trim() ? ` ${t("公开仓库不填令牌时受每小时 60 次请求限制，建议填令牌。")}` : null}
+						</>}
 					>
 						<InputNumber
 							min={1}
-							max={oneShotToken.trim() ? 20 : 5}
+							max={MAX_CODE_HISTORY_COMMITS}
 							precision={0}
 							value={oneShotLimit}
 							style={{ width: 180 }}
@@ -2270,7 +2283,7 @@ export function CodeIntelPage({
 					<Form.Item
 						label={
 							<Space size={4} align="center">
-								<Tooltip title={<TokenHelp host={hostFromUrl(oneShotUrl) ?? "github.com"} />}>
+								<Tooltip title={<TokenHelp host={hostFromUrl(oneShotRepos[0] ?? "") ?? "github.com"} />}>
 									<QuestionCircleOutlined className="code-intel-help" />
 								</Tooltip>
 								<span>{t("访问令牌（可选）")}</span>

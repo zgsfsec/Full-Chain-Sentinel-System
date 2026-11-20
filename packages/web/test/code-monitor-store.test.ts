@@ -192,6 +192,48 @@ describe("CodeMonitorStore", () => {
 		expect(store.listJobsByProject("p1")).toHaveLength(1);
 	});
 
+	it("prioritizes due one-shot scans before the queue limit while preserving pauses and retry delays", () => {
+		const { store } = open();
+		try {
+			const backlog = [];
+			for (let index = 0; index < 105; index++) {
+				backlog.push(
+					store.enqueueJob({
+						monitorId: addMonitor(store).id,
+						projectId: "p1",
+						host: "github.com",
+						trigger: "auto",
+						now: index + 1,
+						maxAttempts: 3,
+					}),
+				);
+			}
+			const scan = store.enqueueJob({
+				monitorId: addMonitor(store, "p2").id,
+				projectId: "p2",
+				host: "github.com",
+				trigger: "one-shot",
+				now: 106,
+				maxAttempts: 3,
+			});
+			expect(store.dueJobs(200, 1).map((job) => job.id)).toEqual([scan.id]);
+			expect(
+				store
+					.dueJobs(200, 100)
+					.slice(0, 3)
+					.map((job) => job.id),
+			).toEqual([scan.id, backlog[0].id, backlog[1].id]);
+			store.setProjectEnabled("p2", false);
+			expect(store.dueJobs(200, 1)[0]?.id).toBe(backlog[0].id);
+			store.setProjectEnabled("p2", true);
+			store.requeueJob(scan.id, 300, "rate limit");
+			expect(store.dueJobs(200, 1)[0]?.id).toBe(backlog[0].id);
+			expect(store.dueJobs(300, 1)[0]?.id).toBe(scan.id);
+		} finally {
+			store.close();
+		}
+	});
+
 	it("records check runs and closes interrupted ones", () => {
 		const { store } = open();
 		const monitor = addMonitor(store);

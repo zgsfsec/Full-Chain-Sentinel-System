@@ -79,6 +79,48 @@ describe("parseGithubRepoUrl", () => {
 });
 
 describe("GithubClient", () => {
+	it.each([100, 125])("reads exactly %i recent commits across pages before sorting by author date", async (limit) => {
+		const commits = Array.from({ length: 250 }, (_, index) => ({
+			sha: `sha-${index}`,
+			commit: {
+				message: `commit ${index}`,
+				author: { name: "dev", date: new Date(index * 1000).toISOString() },
+			},
+		}));
+		const pages: number[] = [];
+		const client = new GithubClient(
+			parseGithubRepoUrl("https://github.com/acme/app"),
+			"token",
+			fakeFetch((raw) => {
+				const url = new URL(raw);
+				expect(url.searchParams.get("sha")).toBe("pinned-head");
+				const page = Number(url.searchParams.get("page"));
+				const size = Number(url.searchParams.get("per_page"));
+				pages.push(page);
+				return Response.json(commits.slice((page - 1) * size, page * size));
+			}),
+			{ minRequestIntervalMs: 0 },
+		);
+		const result = await client.listCommits("pinned-head", undefined, limit);
+		expect(result.map((commit) => commit.sha)).toEqual(commits.slice(0, limit).map((commit) => commit.sha));
+		expect(pages).toEqual(limit === 100 ? [1] : [1, 2]);
+	});
+
+	it("stops at the end of a short repository without inventing the remaining commits", async () => {
+		let calls = 0;
+		const client = new GithubClient(
+			parseGithubRepoUrl("https://github.com/acme/app"),
+			"",
+			fakeFetch(() => {
+				calls++;
+				return Response.json([{ sha: "only-commit" }]);
+			}),
+			{ minRequestIntervalMs: 0 },
+		);
+		expect(await client.listCommits("main", undefined, 1000)).toHaveLength(1);
+		expect(calls).toBe(1);
+	});
+
 	it("sends the token and normalizes branches", async () => {
 		let authorization = "";
 		const client = new GithubClient(

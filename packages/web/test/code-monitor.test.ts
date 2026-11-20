@@ -2,7 +2,9 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { GithubClient, type GithubCommitDetail } from "../src/code-host.ts";
 import { buildSourceScript, CodeMonitorManager } from "../src/code-monitor.ts";
+import { MAX_CODE_HISTORY_COMMITS } from "../src/code-monitor-limits.ts";
 import { CodeMonitorStore, codeMonitorDbPath, setCodeMonitorSecret } from "../src/code-monitor-store.ts";
 import type { CodeVulnTag } from "../src/code-vuln-tags.ts";
 import { addLibraryEntry } from "../src/model-library.ts";
@@ -35,7 +37,7 @@ describe("CodeMonitorManager.check", () => {
 			const url = new URL(String(input));
 			if (url.pathname.endsWith("/repos/acme/app")) return json({ default_branch: "trunk" });
 			if (url.pathname.endsWith("/branches/trunk")) return json({ name: "trunk", commit: { sha: "sha-3" } });
-			if (url.pathname.endsWith("/commits")) return json(commits);
+			if (url.pathname.endsWith("/commits")) return json(commits.toReversed());
 			const sha = url.pathname.split("/").at(-1);
 			return json({
 				...commits.find((commit) => commit.sha === sha),
@@ -64,8 +66,74 @@ describe("CodeMonitorManager.check", () => {
 			expect(monitor).toMatchObject({ oneShot: true, oneShotLimit: 2, branches: ["trunk"], enabled: false });
 			expect(store.listCommits(monitor.id).map((commit) => commit.title)).toEqual(["commit 3", "commit 2"]);
 			expect(store.listChecks(monitor.id)[0]).toMatchObject({ trigger: "one-shot", commits: 2, status: "ok" });
-			expect(requestedUrls.some((url) => url.includes("sha=trunk"))).toBe(true);
+			expect(requestedUrls.some((url) => url.includes("sha=sha-3"))).toBe(true);
 		} finally {
+			store.close();
+		}
+	});
+
+	it.each([
+		{ count: 100, token: "" },
+		{ count: 125, token: "ghp_test" },
+	])("scans and retains all $count requested commits (token: $token)", async ({ count, token }) => {
+		const dir = mkdtempSync(join(tmpdir(), "sentinel-code-history-large-"));
+		const store = new CodeMonitorStore(codeMonitorDbPath(dir));
+		const commits: GithubCommitDetail[] = Array.from({ length: count }, (_, index) => ({
+			sha: `sha-${index}`,
+			message: `commit ${index}`,
+			author: "dev",
+			authoredAt: index,
+			url: `https://github.com/acme/app/commit/sha-${index}`,
+			parents: 1,
+			parentSha: `parent-${index}`,
+			additions: 0,
+			deletions: 0,
+			files: [],
+		}));
+		vi.spyOn(GithubClient.prototype, "getRepo").mockResolvedValue({ defaultBranch: "main" });
+		vi.spyOn(GithubClient.prototype, "getBranch").mockResolvedValue({ name: "main", sha: "pinned-head" });
+		const list = vi.spyOn(GithubClient.prototype, "listCommits").mockResolvedValue(commits);
+		const get = vi.spyOn(GithubClient.prototype, "getCommit").mockImplementation(async (sha) => {
+			const commit = commits.find((entry) => entry.sha === sha);
+			if (!commit) throw new Error(`Unexpected commit: ${sha}`);
+			return commit;
+		});
+		const manager = new CodeMonitorManager(dir, store, {
+			onChange: () => {},
+			project: () => ({ id: "p1", name: "P", cwd: dir, container: "c" }),
+			ensureContainer: async () => true,
+			createEngine: async () => "engine",
+			notify: () => {},
+		});
+		try {
+			const monitor = await manager.scanHistory({
+				projectId: "p1",
+				url: "https://github.com/acme/app",
+				token,
+				commitLimit: count,
+				autoDispatch: false,
+			});
+			await vi.waitFor(() => expect(store.listJobs(monitor.id)[0]?.status).toBe("done"));
+			expect(monitor.oneShotLimit).toBe(count);
+			expect(list).toHaveBeenCalledWith("pinned-head", undefined, count);
+			expect(get).toHaveBeenCalledTimes(count);
+			expect(manager.detail(monitor.id).commits).toHaveLength(count);
+			expect(store.listChecks(monitor.id)[0]).toMatchObject({ status: "ok", commits: count });
+			for (const commitLimit of [0, 1.5, MAX_CODE_HISTORY_COMMITS + 1]) {
+				await expect(
+					manager.scanHistory({
+						projectId: "p1",
+						url: "https://github.com/acme/app",
+						token,
+						commitLimit,
+						autoDispatch: false,
+					}),
+				).rejects.toThrow(`1 到 ${MAX_CODE_HISTORY_COMMITS}`);
+			}
+			expect(manager.list()).toHaveLength(1);
+		} finally {
+			vi.restoreAllMocks();
+			manager.stop();
 			store.close();
 		}
 	});

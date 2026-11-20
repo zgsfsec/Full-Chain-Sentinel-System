@@ -28,6 +28,7 @@ import {
 	renderCommitDiff,
 } from "./code-host.ts";
 import { judgeCommit } from "./code-monitor-judge.ts";
+import { MAX_CODE_HISTORY_COMMITS } from "./code-monitor-limits.ts";
 import { createProjectGithubFetch } from "./code-monitor-network.ts";
 import {
 	type CodeMonitorStore,
@@ -323,6 +324,8 @@ export class CodeMonitorManager {
 	private readonly checking = new Set<string>();
 	/** A rapid off/on must still stop work that began before the pause. */
 	private readonly pauseVersions = new Map<string, number>();
+	/** Serialize repository setup when the console submits several one-shot scans. */
+	private historyQueue: Promise<void> = Promise.resolve();
 	/** Server-side sequential import; survives a browser refresh, unlike client state. */
 	private importQueue: SentinelCodeMonitorInput[] = [];
 	private importState: SentinelCodeImportState | null = null;
@@ -421,16 +424,29 @@ export class CodeMonitorManager {
 	}
 
 	/** Create a durable one-time record and queue a scan of recent default-branch commits. */
-	async scanHistory(input: SentinelCodeOneShotInput): Promise<SentinelCodeMonitor> {
+	scanHistory(input: SentinelCodeOneShotInput): Promise<SentinelCodeMonitor> {
+		const pending = this.historyQueue.then(() => this.scanHistoryUnlocked(input));
+		// One inaccessible repository must not block later submissions.
+		this.historyQueue = pending.then(
+			() => {},
+			() => {},
+		);
+		return pending;
+	}
+
+	private async scanHistoryUnlocked(input: SentinelCodeOneShotInput): Promise<SentinelCodeMonitor> {
 		const project = this.hooks.project(input.projectId);
 		if (!project) throw new Error("项目不存在，请重新选择项目");
 		this.monitoringGuard(project.id);
 		const ref = parseGithubRepoUrl(input.url, input.apiBaseUrl);
 		const token = input.token?.trim() ?? "";
 		if (/\s/.test(token)) throw new Error("访问令牌不能包含空白字符");
-		const maxCommits = token ? MAX_COMMITS_PER_CHECK : 5;
-		if (!Number.isInteger(input.commitLimit) || input.commitLimit < 1 || input.commitLimit > maxCommits) {
-			throw new Error(`提交数量必须在 1 到 ${maxCommits} 之间${token ? "" : "（未填写令牌时最多 5 条）"}`);
+		if (
+			!Number.isInteger(input.commitLimit) ||
+			input.commitLimit < 1 ||
+			input.commitLimit > MAX_CODE_HISTORY_COMMITS
+		) {
+			throw new Error(`提交数量必须在 1 到 ${MAX_CODE_HISTORY_COMMITS} 之间`);
 		}
 		const client = new GithubClient(
 			ref,
@@ -491,7 +507,7 @@ export class CodeMonitorManager {
 		const monitor = this.view(id);
 		return {
 			monitor,
-			commits: this.store.listCommits(id),
+			commits: this.store.listCommits(id, monitor.oneShot ? (monitor.oneShotLimit ?? 100) : 100),
 			checks: this.store.listChecks(id),
 			jobs: this.store.listJobs(id),
 		};
@@ -935,10 +951,9 @@ export class CodeMonitorManager {
 				if (!branch || !monitor.oneShotLimit) throw new Error("单次扫描缺少分支或提交数量");
 				try {
 					assertActive();
-					const commits = await client.listCommits(branch);
+					const commits = await client.listCommits(baselines[branch] ?? branch, undefined, monitor.oneShotLimit);
 					assertActive();
-					const recent = commits.slice(-monitor.oneShotLimit);
-					for (const commit of recent) {
+					for (const commit of commits) {
 						assertActive();
 						const consumed = await this.consume(monitor.id, branch, commit, client, assertActive);
 						if (consumed) {
