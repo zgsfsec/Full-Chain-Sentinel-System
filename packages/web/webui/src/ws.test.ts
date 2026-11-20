@@ -190,6 +190,52 @@ test("a stalled authorization check times out and reconnects instead of waiting 
 	connection.close();
 });
 
+test("ordinary reconnects do not wait for a slow authorization request", async () => {
+	let finish: ((result: { status: number }) => void) | undefined;
+	fetchSession.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+	const status = vi.fn();
+	const connection = new SentinelConnection(vi.fn(), status);
+	connection.connect();
+	FakeWebSocket.instances[0].open();
+	const pending = FakeWebSocket.instances[0].end(1006);
+	expect(connection.connected).toBe(false);
+	expect(status).toHaveBeenLastCalledWith(false);
+	await vi.advanceTimersByTimeAsync(500);
+	expect(FakeWebSocket.instances).toHaveLength(2);
+	FakeWebSocket.instances[1].open();
+	// The old request must not invalidate a connection already authenticated by the server.
+	finish?.({ status: 401 });
+	await pending;
+	expect(connection.connected).toBe(true);
+	expect(reload).not.toHaveBeenCalled();
+	connection.close();
+});
+
+test("a rejected authorization check cancels an ordinary reconnect before it opens", async () => {
+	fetchSession.mockResolvedValueOnce({ status: 401 });
+	const connection = new SentinelConnection(vi.fn());
+	connection.connect();
+	await FakeWebSocket.instances[0].end(1006);
+	await vi.advanceTimersByTimeAsync(10000);
+	expect(FakeWebSocket.instances).toHaveLength(1);
+	expect(reload).toHaveBeenCalledOnce();
+	expect(vi.getTimerCount()).toBe(0);
+});
+
+test("explicit revocation still waits for authorization before opening a replacement", async () => {
+	let finish: ((result: { status: number }) => void) | undefined;
+	fetchSession.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+	const connection = new SentinelConnection(vi.fn());
+	connection.connect();
+	const pending = FakeWebSocket.instances[0].end(4001, "session_replaced");
+	await vi.advanceTimersByTimeAsync(1000);
+	expect(FakeWebSocket.instances).toHaveLength(1);
+	finish?.({ status: 401 });
+	await pending;
+	expect(reload).toHaveBeenCalledOnce();
+	connection.close();
+});
+
 test("a failed compaction reaches the existing visible error handler", () => {
 	const onMessage = vi.fn();
 	const connection = new SentinelConnection(onMessage);

@@ -30,6 +30,7 @@ export class SentinelConnection {
 		const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 		const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
 		const generation = ++this.generation;
+		let openedAt: number | undefined;
 		this.socket = socket;
 		socket.onopen = () => {
 			if (this.closed || this.socket !== socket) {
@@ -42,6 +43,7 @@ export class SentinelConnection {
 				// Storage may be disabled; it is only used for the login notice.
 			}
 			this.reconnectDelay = 500;
+			openedAt = Date.now();
 			this.onStatus(true);
 			for (const message of this.queue.splice(0)) socket.send(JSON.stringify(message));
 		};
@@ -69,9 +71,15 @@ export class SentinelConnection {
 			if (this.socket !== socket) return;
 			this.socket = null;
 			this.onStatus(false);
-			if (this.closed) return;
+			if (this.closed || generation !== this.generation) return;
+			console.warn(
+				`[sentinel-ws] closed: code=${event.code} reason=${event.reason || "none"} connectedForMs=${openedAt === undefined ? 0 : Date.now() - openedAt}`,
+			);
 			// Never replay queued commands after a login has been replaced.
 			if (event.code === 4001) this.queue = [];
+			// The replacement handshake authenticates the cookie too. A slow HTTP check
+			// must not extend an ordinary network interruption by up to five seconds.
+			else this.scheduleReconnect();
 			let expired = event.code === 4001;
 			try {
 				const session = await fetch("/api/auth/session", { cache: "no-store", signal: AbortSignal.timeout(5000) });
@@ -81,10 +89,8 @@ export class SentinelConnection {
 				// A network failure should retry; an explicit revocation should not.
 			}
 			if (this.closed || generation !== this.generation) return;
-			console.warn(`[sentinel-ws] reconnecting: code=${event.code} reason=${event.reason || "none"}`);
 			if (expired) {
-				this.closed = true;
-				this.queue = [];
+				this.close();
 				try {
 					window.sessionStorage.setItem(
 						SESSION_ENDED_NOTICE,
@@ -96,10 +102,15 @@ export class SentinelConnection {
 				window.location.reload();
 				return;
 			}
-			this.reconnectTimer = window.setTimeout(() => this.open(), this.reconnectDelay);
-			this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000);
+			if (event.code === 4001) this.scheduleReconnect();
 		};
 		socket.onerror = () => socket.close();
+	}
+
+	private scheduleReconnect(): void {
+		window.clearTimeout(this.reconnectTimer);
+		this.reconnectTimer = window.setTimeout(() => this.open(), this.reconnectDelay);
+		this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000);
 	}
 
 	get connected(): boolean {

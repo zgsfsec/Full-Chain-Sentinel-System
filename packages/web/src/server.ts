@@ -448,6 +448,9 @@ export async function startSentinelServer(
 	const snapshots = new SnapshotBroadcast(() => {
 		if (clients.size > 0) broadcast({ type: "snapshot", snapshot: runtime.snapshot() });
 	});
+	const monitorBroadcasts = new SnapshotBroadcast(() => {
+		if (clients.size > 0 && codeMonitors) broadcast({ type: "code_monitors", monitors: codeMonitors.list() });
+	});
 	const sessionsBroadcasts = new Map<string | undefined, Promise<void>>();
 	const clientRequests = new WeakMap<WebSocket, IncomingMessage>();
 	/** Profiles whose connectivity test is running; one is enough per profile. */
@@ -830,7 +833,9 @@ export async function startSentinelServer(
 
 	/** Every watched repository; the page filters by the active project. */
 	function broadcastCodeMonitors(): void {
-		if (codeMonitors) broadcast({ type: "code_monitors", monitors: codeMonitors.list() });
+		// A scheduler tick enqueues hundreds of jobs in one turn. Build the latest
+		// list once after the batch, so repeated full lists cannot fill each socket.
+		if (clients.size > 0) monitorBroadcasts.schedule();
 	}
 
 	/**
@@ -4646,6 +4651,7 @@ export async function startSentinelServer(
 					runtime.dispose();
 					for (const client of clients) client.terminate();
 					snapshots.cancel();
+					monitorBroadcasts.cancel();
 					wss.close();
 					server.close();
 				},
