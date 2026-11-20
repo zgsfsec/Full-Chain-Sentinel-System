@@ -7,7 +7,7 @@ import {
 	MessageOutlined,
 	ThunderboltOutlined,
 } from "@ant-design/icons";
-import { Badge, Button, Card, Empty, Skeleton, Tag, Typography } from "antd";
+import { Badge, Button, Card, Skeleton, Tag, Typography } from "antd";
 import { getLanguage, t } from "../i18n.ts";
 import type {
 	SentinelEngine,
@@ -186,21 +186,18 @@ export function DashboardPage({
 						<Skeleton active paragraph={{ rows: 4 }} />
 					) : recent.length === 0 ? (
 						<div className="dashboard__empty">
-							<MessageOutlined className="dashboard__empty-icon" aria-hidden="true" />
-							<Empty
-								image={false}
-								description={
-									<>
-										<strong>{t("暂无会话")}</strong>
-										<p>
-											{tx(
-												"在对话中输入目标和测试范围，执行过程与证据会保存在当前项目。",
-												"Enter a target and testing scope in a conversation. Execution history and evidence are saved to this project.",
-											)}
-										</p>
-									</>
-								}
-							/>
+							<span className="dashboard__empty-icon" aria-hidden="true">
+								<MessageOutlined />
+							</span>
+							<div className="dashboard__empty-copy">
+								<h3>{t("暂无会话")}</h3>
+								<p>
+									{tx(
+										"在对话中输入目标和测试范围，执行过程与证据会保存在当前项目。",
+										"Enter a target and testing scope in a conversation. Execution history and evidence are saved to this project.",
+									)}
+								</p>
+							</div>
 							<Button disabled={loading} onClick={() => onNavigate(projectRunning ? "chat" : "projects")}>
 								{projectRunning ? tx("进入对话", "Open conversations") : tx("管理项目", "Manage projects")}
 							</Button>
