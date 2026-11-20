@@ -812,7 +812,7 @@ export async function startSentinelServer(
 	/** Findings of the active project, pushed when one is submitted or reviewed. */
 	function broadcastVulns(): void {
 		const view = runtime.listVulns();
-		broadcast({ type: "vulns", items: view.items, stats: view.stats });
+		broadcast({ type: "vulns", items: view.items, stats: view.stats, unfiltered: true });
 	}
 
 	/** The POC library, pushed when the operator imports or deletes templates. */

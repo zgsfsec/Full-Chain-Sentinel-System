@@ -2063,7 +2063,7 @@ export type SentinelServerMessage =
 	| { type: "subagent_run"; run: SentinelSubagentRun }
 	| { type: "subagent_event"; runId: string; event: SentinelSubagentEvent }
 	| { type: "subagent_result"; action: string; id: string; ok: boolean; error?: string }
-	| { type: "vulns"; items: SentinelVulnSummary[]; stats: SentinelVulnStats }
+	| { type: "vulns"; items: SentinelVulnSummary[]; stats: SentinelVulnStats; unfiltered?: true }
 	| { type: "vuln"; vuln: SentinelVulnerability }
 	| { type: "vuln_result"; action: string; id?: string; ok: boolean; error?: string }
 	| { type: "vuln_delete_preview"; count: number; evidence: number; notes: number }

@@ -1337,8 +1337,14 @@ export function App() {
 					if (!message.ok && message.error) pushError(message.error);
 					break;
 				case "vulns":
-					setVulnItems(message.items);
 					setVulnStats(message.stats);
+					if (message.unfiltered && pageRef.current === "vulns") {
+						// Live broadcasts contain every finding. Re-query the active filter
+						// instead of replacing the filtered table with that full list.
+						send({ type: "list_vulns", filters: vulnFiltersRef.current });
+					} else {
+						setVulnItems(message.items);
+					}
 					// A filtered or late list is not evidence that the selected record was deleted.
 					break;
 				case "vuln":
