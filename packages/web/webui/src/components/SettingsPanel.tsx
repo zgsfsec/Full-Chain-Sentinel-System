@@ -41,6 +41,7 @@ import type {
 import { ModelRolePicker } from "./ModelRolePicker.tsx";
 import { GatekeeperPanel } from "./GatekeeperPanel.tsx";
 import { RemoteModelPicker } from "./RemoteModelPicker.tsx";
+import { catalogThinkingSettings, EMPTY_MODEL_THINKING, type ModelThinkingDraft } from "./model-thinking-draft.ts";
 import {
 	capabilityChips,
 	hostOf,
@@ -55,7 +56,7 @@ import {
 	UsageTags,
 } from "./model-ui.tsx";
 
-interface Draft {
+interface Draft extends ModelThinkingDraft {
 	/** Set when editing an existing entry. */
 	id?: string;
 	name: string;
@@ -69,8 +70,6 @@ interface Draft {
 	contextWindow: string;
 	maxTokens: string;
 	reasoning: boolean;
-	defaultThinkingLevel: SentinelThinkingLevel;
-	availableThinkingLevels: SentinelThinkingLevel[];
 	imageInput: boolean;
 	costInput: string;
 	costOutput: string;
@@ -90,8 +89,7 @@ const EMPTY_DRAFT: Draft = {
 	contextWindow: "",
 	maxTokens: "",
 	reasoning: false,
-	defaultThinkingLevel: "medium",
-	availableThinkingLevels: ["off", "minimal", "low", "medium", "high"],
+	...EMPTY_MODEL_THINKING,
 	imageInput: true,
 	costInput: "",
 	costOutput: "",
@@ -117,6 +115,8 @@ function draftOf(entry: SentinelModelEntryView): Draft {
 		availableThinkingLevels: entry.reasoning
 			? (entry.availableThinkingLevels ?? EMPTY_DRAFT.availableThinkingLevels)
 			: EMPTY_DRAFT.availableThinkingLevels,
+		thinkingLevelMap: entry.thinkingLevelMap,
+		compat: entry.compat,
 		imageInput: entry.input.includes("image"),
 		costInput: entry.cost === null ? "" : rateText(entry.cost.input),
 		costOutput: entry.cost === null ? "" : rateText(entry.cost.output),
@@ -134,8 +134,7 @@ function applyDefaults(draft: Draft, defaults: SentinelBuiltinModelDefaults): Dr
 		contextWindow: String(defaults.contextWindow),
 		maxTokens: String(defaults.maxTokens),
 		reasoning: defaults.reasoning,
-		defaultThinkingLevel: "medium",
-		availableThinkingLevels: EMPTY_DRAFT.availableThinkingLevels,
+		...catalogThinkingSettings(defaults),
 		imageInput: defaults.input.includes("image"),
 		costInput: rateText(defaults.cost.input),
 		costOutput: rateText(defaults.cost.output),
@@ -183,8 +182,7 @@ function clearCapabilities(draft: Draft): Draft {
 		contextWindow: "",
 		maxTokens: "",
 		reasoning: false,
-		defaultThinkingLevel: "medium",
-		availableThinkingLevels: EMPTY_DRAFT.availableThinkingLevels,
+		...EMPTY_MODEL_THINKING,
 		imageInput: true,
 		costInput: "",
 		costOutput: "",
@@ -251,6 +249,8 @@ function capabilitiesOf(draft: Draft): { capabilities: SentinelModelCapabilities
 			...(output.value !== undefined ? { maxTokens: output.value } : {}),
 			reasoning: draft.reasoning,
 			...(draft.reasoning ? { defaultThinkingLevel: draft.defaultThinkingLevel } : {}),
+			...(draft.thinkingLevelMap !== undefined ? { thinkingLevelMap: draft.thinkingLevelMap } : {}),
+			...(draft.compat !== undefined ? { compat: draft.compat } : {}),
 			input: draft.imageInput ? ["text", "image"] : ["text"],
 			...(cost ? { cost } : {}),
 			...(promptCache ? { promptCache } : {}),
@@ -411,6 +411,21 @@ export function SettingsPanel({
 			const preset = presets?.find((candidate) => candidate.modelId === entry.modelId.trim());
 			setCustomModel(!preset);
 			if (preset && entry.name === preset.name) autoNameRef.current = entry.name;
+			// Older form saves discarded the catalog mapping. Repair the draft
+			// without replacing manually entered prices, limits or explicit maps.
+			if (preset && entry.thinkingLevelMap === undefined) {
+				setDraft((current) => {
+					if (
+						!current || current.id !== entry.id || current.modelId !== entry.modelId ||
+						current.api !== preset.api || current.baseUrl !== entry.baseUrl ||
+						current.thinkingLevelMap !== undefined
+					) return current;
+					return {
+						...current,
+						...catalogThinkingSettings(preset, current),
+					};
+				});
+			}
 		});
 	}, [channelOptions, drawerOpen]);
 
@@ -1295,7 +1310,7 @@ export function SettingsPanel({
 												<Form.Item label={t("协议")}>
 													<Select
 														value={draft.api}
-														onChange={(value) => setDraft({ ...draft, api: value })}
+														onChange={(value) => setDraft({ ...draft, ...EMPTY_MODEL_THINKING, api: value })}
 														options={[
 															...MODEL_API_OPTIONS.map((option) => ({
 																value: option.id,
@@ -1311,7 +1326,7 @@ export function SettingsPanel({
 													<Input
 														aria-label={t("模型 ID")}
 														value={draft.modelId}
-														onChange={(event) => setDraft({ ...draft, modelId: event.target.value })}
+														onChange={(event) => setDraft({ ...draft, ...EMPTY_MODEL_THINKING, modelId: event.target.value })}
 														onBlur={autoFillNewEntry}
 														placeholder="deepseek-chat / glm-4.7 / qwen3-coder…"
 														spellCheck={false}
@@ -1386,7 +1401,7 @@ export function SettingsPanel({
 															<Input
 																value={draft.modelId}
 																onChange={(event) =>
-																	setDraft({ ...draft, modelId: event.target.value })
+																	setDraft({ ...draft, ...EMPTY_MODEL_THINKING, modelId: event.target.value })
 																}
 																onBlur={autoFillNewEntry}
 																placeholder={t("例如 my-finetune-001")}
@@ -1421,7 +1436,7 @@ export function SettingsPanel({
 											}}
 											modelId={draft.modelId}
 											onSelect={(modelId) => {
-												setDraft({ ...draft, modelId, name: nameAfterSelection(draft, modelId) });
+												setDraft({ ...draft, ...EMPTY_MODEL_THINKING, modelId, name: nameAfterSelection(draft, modelId) });
 												setCustomModel(true);
 												setDefaultsMatches(null);
 												setDefaultsNote("");

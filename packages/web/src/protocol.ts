@@ -1,5 +1,6 @@
 /** Wire protocol shared by the Full Chain Sentinel web console server and browser client. */
 
+import type { Api, Model, ThinkingLevelMap } from "@earendil-works/pi-ai";
 import type {
 	AgentSessionEvent,
 	ImageContent,
@@ -179,6 +180,9 @@ export interface SentinelModelCapabilities {
 	reasoning?: boolean;
 	/** New sessions use this model-specific default, stored in SDK settings. */
 	defaultThinkingLevel?: ThinkingLevel;
+	/** Omitted preserves advanced settings; null clears a previous model's template. */
+	thinkingLevelMap?: ThinkingLevelMap | null;
+	compat?: Model<Api>["compat"] | null;
 	input?: Array<"text" | "image">;
 	cost?: SentinelModelCostRates;
 	promptCache?: SentinelModelPromptCache;
@@ -214,6 +218,8 @@ export interface SentinelModelEntryView {
 	reasoning: boolean;
 	defaultThinkingLevel?: ThinkingLevel;
 	availableThinkingLevels?: ThinkingLevel[];
+	thinkingLevelMap?: ThinkingLevelMap;
+	compat?: Model<Api>["compat"];
 	input: Array<"text" | "image">;
 	cost: SentinelModelCostRates | null;
 	promptCache: SentinelModelPromptCache | null;
@@ -246,6 +252,10 @@ export interface SentinelBuiltinModelDefaults {
 	contextWindow: number;
 	maxTokens: number;
 	reasoning: boolean;
+	defaultThinkingLevel: ThinkingLevel;
+	availableThinkingLevels: ThinkingLevel[];
+	thinkingLevelMap: ThinkingLevelMap | null;
+	compat: Model<Api>["compat"] | null;
 	input: Array<"text" | "image">;
 	cost: SentinelModelCostRates;
 	promptCache: SentinelModelPromptCache | null;

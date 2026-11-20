@@ -51,6 +51,10 @@ describe("built-in model defaults", () => {
 				contextWindow: 128000,
 				maxTokens: 16000,
 				reasoning: true,
+				defaultThinkingLevel: "medium",
+				availableThinkingLevels: ["off", "minimal", "low", "medium", "high"],
+				thinkingLevelMap: null,
+				compat: null,
 				input: ["text", "image"],
 				cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.2 },
 				promptCache: { short: 300 },
@@ -128,6 +132,15 @@ describe("built-in model defaults", () => {
 			providerId === "vendor" ? "Vendor Inc." : providerId,
 		);
 		expect(match?.providerName).toBe("Vendor Inc.");
+	});
+
+	test("uses the matching endpoint path before another channel on the same host", () => {
+		const models = [
+			model({ id: "reasoner", provider: "a-go", baseUrl: "https://opencode.ai/zen/go/v1" }),
+			model({ id: "reasoner", provider: "z-zen", baseUrl: "https://opencode.ai/zen/v1" }),
+		];
+		expect(matchBuiltinModelDefaults(models, "reasoner", "https://opencode.ai/zen/v1/")[0].provider).toBe("z-zen");
+		expect(matchBuiltinModelDefaults(models, "reasoner", "https://opencode.ai/zen/go/v1")[0].provider).toBe("a-go");
 	});
 });
 

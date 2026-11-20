@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import {
 	createAgentSession,
 	createExtensionRuntime,
@@ -10,7 +11,9 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { completeAuxiliaryModel, resolveAuxiliaryModel } from "../src/auxiliary-model.ts";
 import { modelsJsonPath, readProviderModelConfig } from "../src/model-config.ts";
+import { listBuiltinChannelModels } from "../src/model-defaults.ts";
 import {
 	addLibraryEntry,
 	duplicateLibraryEntry,
@@ -20,6 +23,8 @@ import {
 } from "../src/model-library.ts";
 import { readModelThinkingLevel } from "../src/model-thinking.ts";
 import type { SentinelModelCapabilities } from "../src/protocol.ts";
+import { catalogThinkingSettings, EMPTY_MODEL_THINKING } from "../webui/src/components/model-thinking-draft.ts";
+import { modelStream } from "./model-stream-fixtures.ts";
 
 let dir = "";
 const input = { name: "Reasoner", baseUrl: "http://127.0.0.1:9/v1", apiKey: "", modelId: "reasoner" };
@@ -157,4 +162,90 @@ test("leaves corrupt SDK settings intact and reports the save failure", () => {
 		addLibraryEntry(dir, { ...input, capabilities: { reasoning: true, defaultThinkingLevel: "high" } }),
 	).toThrow();
 	expect(readFileSync(join(dir, "settings.json"), "utf-8")).toBe("broken JSON");
+});
+
+test("keeps catalog thinking strengths through the editor, saves, copies and real SDK requests", async () => {
+	const preset = listBuiltinChannelModels(getBuiltinModels("opencode-go"), "opencode-go").find(
+		(model) => model.modelId === "deepseek-v4.1-flash",
+	);
+	expect(preset).toBeDefined();
+	if (!preset) throw new Error("Missing catalog fixture");
+	const draft = catalogThinkingSettings(preset);
+	expect(draft.availableThinkingLevels).toEqual(["low", "high", "max"]);
+	expect(draft.defaultThinkingLevel).toBe("high");
+	// This is the capability payload submitted by the settings drawer.
+	const capabilities: SentinelModelCapabilities = {
+		api: preset.api,
+		reasoning: preset.reasoning,
+		thinkingLevelMap: draft.thinkingLevelMap,
+		compat: draft.compat,
+		defaultThinkingLevel: "max",
+	};
+	const entry = addLibraryEntry(dir, { ...input, modelId: preset.modelId, capabilities });
+	expect(libraryView(dir).entries[0]).toMatchObject({
+		defaultThinkingLevel: "max",
+		availableThinkingLevels: ["low", "high", "max"],
+	});
+	const copy = duplicateLibraryEntry(dir, entry.id);
+	expect(libraryView(dir).entries.find((model) => model.id === copy.id)).toMatchObject({
+		defaultThinkingLevel: "max",
+		availableThinkingLevels: ["low", "high", "max"],
+	});
+	const config = resolveAuxiliaryModel(dir, "main");
+	if (!config) throw new Error("Missing saved model");
+	const payloads: Record<string, unknown>[] = [];
+	await completeAuxiliaryModel(config, {
+		systemPrompt: "test",
+		input: "test",
+		signal: AbortSignal.timeout(10000),
+		fetch: async (_url, options) => {
+			payloads.push(JSON.parse(String(options?.body)) as Record<string, unknown>);
+			return modelStream("openai-completions", "ok");
+		},
+	});
+	expect(payloads).toHaveLength(1);
+	expect(payloads[0]).toMatchObject({ model: preset.modelId, reasoning_effort: "max", thinking: { type: "enabled" } });
+	expect(payloads[0].max_tokens).toBeDefined();
+	expect(payloads[0].max_completion_tokens).toBeUndefined();
+	// Choosing a different, uncatalogued model must not retain DeepSeek's map or protocol switches.
+	updateLibraryEntry(dir, entry.id, {
+		...input,
+		capabilities: { reasoning: true, thinkingLevelMap: null, compat: null, defaultThinkingLevel: "medium" },
+	});
+	expect(readProviderModelConfig(dir, entry.id)?.capabilities?.thinkingLevelMap).toBeUndefined();
+	expect(readProviderModelConfig(dir, entry.id)?.capabilities?.compat).toBeUndefined();
+	expect(libraryView(dir).entries[0].availableThinkingLevels).toEqual(EMPTY_MODEL_THINKING.availableThinkingLevels);
+});
+
+test("repairs an old editor draft without losing a supported default or custom protocol switches", () => {
+	const preset = listBuiltinChannelModels(getBuiltinModels("opencode-go"), "opencode-go").find(
+		(model) => model.modelId === "deepseek-v4.1-flash",
+	);
+	if (!preset) throw new Error("Missing catalog fixture");
+	const repaired = catalogThinkingSettings(preset, {
+		...EMPTY_MODEL_THINKING,
+		defaultThinkingLevel: "high",
+		compat: { supportsStrictMode: false },
+	});
+	expect(repaired.availableThinkingLevels).toEqual(["low", "high", "max"]);
+	expect(repaired.defaultThinkingLevel).toBe("high");
+	expect(repaired.compat).toMatchObject({ thinkingFormat: "deepseek", supportsStrictMode: false });
+	expect(
+		catalogThinkingSettings(preset, { ...EMPTY_MODEL_THINKING, defaultThinkingLevel: "off" }).defaultThinkingLevel,
+	).toBe("high");
+});
+
+test.each([
+	{ reasoning: true, thinkingLevelMap: { max: 123 } },
+	{ reasoning: true, compat: { thinkingFormat: "invalid" } },
+])("rejects malformed catalog settings before changing an entry", (raw) => {
+	const entry = addLibraryEntry(dir, input);
+	const before = readFileSync(modelsJsonPath(dir), "utf-8");
+	expect(() =>
+		updateLibraryEntry(dir, entry.id, {
+			...input,
+			capabilities: raw as unknown as SentinelModelCapabilities,
+		}),
+	).toThrow(/Invalid/);
+	expect(readFileSync(modelsJsonPath(dir), "utf-8")).toBe(before);
 });

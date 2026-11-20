@@ -1,5 +1,6 @@
 /** Client-side view of the Full Chain Sentinel wire protocol (mirrors packages/web/src/protocol.ts). */
 
+import type { Api, Model, ThinkingLevelMap } from "@earendil-works/pi-ai";
 import type { CodeVulnTag } from "../../src/code-vuln-tags.ts";
 import type { CodeReproductionResult } from "../../src/code-reproduction.ts";
 import type { UiLanguage } from "../../src/i18n-messages.ts";
@@ -160,6 +161,8 @@ export interface SentinelModelCapabilities {
 	maxTokens?: number;
 	reasoning?: boolean;
 	defaultThinkingLevel?: SentinelThinkingLevel;
+	thinkingLevelMap?: ThinkingLevelMap | null;
+	compat?: Model<Api>["compat"] | null;
 	input?: Array<"text" | "image">;
 	cost?: SentinelModelCostRates;
 	promptCache?: SentinelModelPromptCache;
@@ -190,6 +193,8 @@ export interface SentinelModelEntryView {
 	reasoning: boolean;
 	defaultThinkingLevel?: SentinelThinkingLevel;
 	availableThinkingLevels?: SentinelThinkingLevel[];
+	thinkingLevelMap?: ThinkingLevelMap;
+	compat?: Model<Api>["compat"];
 	input: Array<"text" | "image">;
 	cost: SentinelModelCostRates | null;
 	promptCache: SentinelModelPromptCache | null;
@@ -219,6 +224,10 @@ export interface SentinelBuiltinModelDefaults {
 	contextWindow: number;
 	maxTokens: number;
 	reasoning: boolean;
+	defaultThinkingLevel: SentinelThinkingLevel;
+	availableThinkingLevels: SentinelThinkingLevel[];
+	thinkingLevelMap: ThinkingLevelMap | null;
+	compat: Model<Api>["compat"] | null;
 	input: Array<"text" | "image">;
 	cost: SentinelModelCostRates;
 	promptCache: SentinelModelPromptCache | null;

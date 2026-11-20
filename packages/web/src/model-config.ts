@@ -19,6 +19,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { dirname } from "node:path";
 import { clampThinkingLevel, getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-coding-agent";
+import { cleanModelAdvancedSettings } from "./model-advanced.ts";
 import { isModelThinkingLevel, readModelThinkingLevel, writeModelThinkingLevel } from "./model-thinking.ts";
 import type {
 	SentinelModelCapabilities,
@@ -114,6 +115,10 @@ function readCapabilities(
 	const maxTokens = positiveNumber(model.maxTokens);
 	if (maxTokens !== undefined) capabilities.maxTokens = maxTokens;
 	if (typeof model.reasoning === "boolean") capabilities.reasoning = model.reasoning;
+	if (model.thinkingLevelMap !== undefined) {
+		capabilities.thinkingLevelMap = model.thinkingLevelMap as SentinelModelCapabilities["thinkingLevelMap"];
+	}
+	if (model.compat !== undefined) capabilities.compat = model.compat as SentinelModelCapabilities["compat"];
 	const input = readInput(model.input);
 	if (input) capabilities.input = input;
 	const cost = readCost(model.cost);
@@ -217,8 +222,7 @@ export function writeProviderModelConfig(
 	// Old hand-written files may declare the protocol on the model instead of the
 	// provider; keep it if the form does not supply one.
 	const previousModelApi = typeof previousModel.api === "string" ? previousModel.api : undefined;
-	// Start from the old entry so fields the form does not own (thinkingLevelMap,
-	// samplingParams, compat, inputLimits) survive every save.
+	// Preserve advanced fields unless the editor explicitly supplies a template.
 	const nextModel: Record<string, unknown> = { ...previousModel, id: config.modelId, name: config.modelId };
 	delete nextModel.api;
 	const capabilities = config.capabilities;
@@ -228,6 +232,11 @@ export function writeProviderModelConfig(
 		throw new Error("Invalid default thinking level");
 	}
 	if (capabilities) {
+		const advanced = cleanModelAdvancedSettings(capabilities);
+		for (const field of ["thinkingLevelMap", "compat"] as const) {
+			if (advanced[field] === null) delete nextModel[field];
+			else if (advanced[field] !== undefined) nextModel[field] = advanced[field];
+		}
 		const contextWindow = positiveNumber(capabilities.contextWindow);
 		if (contextWindow !== undefined) nextModel.contextWindow = contextWindow;
 		else delete nextModel.contextWindow;

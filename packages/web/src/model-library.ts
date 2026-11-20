@@ -18,6 +18,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { t } from "./i18n.ts";
+import { cleanModelAdvancedSettings } from "./model-advanced.ts";
 import {
 	DEFAULT_MODEL_API,
 	NO_AUTH_PLACEHOLDER_KEY,
@@ -339,6 +340,8 @@ export function libraryView(agentDir: string): SentinelModelLibraryView {
 			contextWindow: capabilities?.contextWindow ?? null,
 			maxTokens: capabilities?.maxTokens ?? null,
 			reasoning: capabilities?.reasoning === true,
+			...(capabilities?.thinkingLevelMap ? { thinkingLevelMap: capabilities.thinkingLevelMap } : {}),
+			...(capabilities?.compat ? { compat: capabilities.compat } : {}),
 			...(config
 				? readProviderThinkingSettings(agentDir, entry.id)
 				: { defaultThinkingLevel: "off" as const, availableThinkingLevels: ["off" as const] }),
@@ -436,6 +439,7 @@ function cleanCapabilities(raw: SentinelModelCapabilities | undefined): Sentinel
 	}
 	return {
 		api,
+		...cleanModelAdvancedSettings(raw),
 		...(contextWindow !== undefined ? { contextWindow } : {}),
 		...(maxTokens !== undefined ? { maxTokens } : {}),
 		reasoning: raw.reasoning === true,

@@ -7,7 +7,7 @@
  * ever produces form values: nothing is written until the model is saved.
  */
 
-import type { Api, Model } from "@earendil-works/pi-ai";
+import { type Api, clampThinkingLevel, getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import type { SentinelBuiltinChannel, SentinelBuiltinModelDefaults, SentinelBuiltinModelPreset } from "./protocol.ts";
 
 /** Same-id models from every provider; enough to show the common hosts. */
@@ -116,6 +116,10 @@ function defaultsOf(
 		contextWindow: model.contextWindow,
 		maxTokens: model.maxTokens,
 		reasoning: model.reasoning,
+		defaultThinkingLevel: clampThinkingLevel(model, "medium"),
+		availableThinkingLevels: getSupportedThinkingLevels(model),
+		thinkingLevelMap: model.thinkingLevelMap ?? null,
+		compat: model.compat ?? null,
 		input: [...model.input],
 		cost: {
 			input: model.cost.input,
@@ -157,14 +161,16 @@ export function matchBuiltinModelDefaults(
 	const wanted = canonicalModelId(modelId);
 	if (!wanted) return [];
 	const wantedHost = hostOf(baseUrl);
+	const wantedEndpoint = baseUrl.trim().replace(/\/+$/u, "");
 
-	const exact: Array<{ defaults: SentinelBuiltinModelDefaults; hostMatch: boolean }> = [];
+	const exact: Array<{ defaults: SentinelBuiltinModelDefaults; hostMatch: boolean; endpointMatch: boolean }> = [];
 	const seen = new Set<string>();
 	for (const model of models) {
 		if (canonicalModelId(model.id) !== wanted) continue;
 		if (model.provider.startsWith("zg-") || seen.has(model.provider)) continue;
 		seen.add(model.provider);
 		exact.push({
+			endpointMatch: wantedEndpoint.length > 0 && model.baseUrl.replace(/\/+$/u, "") === wantedEndpoint,
 			hostMatch: wantedHost !== null && hostOf(model.baseUrl) === wantedHost,
 			defaults: defaultsOf(model, providerName, false),
 		});
@@ -172,7 +178,9 @@ export function matchBuiltinModelDefaults(
 	if (exact.length > 0) {
 		exact.sort(
 			(a, b) =>
-				Number(b.hostMatch) - Number(a.hostMatch) || a.defaults.providerName.localeCompare(b.defaults.providerName),
+				Number(b.endpointMatch) - Number(a.endpointMatch) ||
+				Number(b.hostMatch) - Number(a.hostMatch) ||
+				a.defaults.providerName.localeCompare(b.defaults.providerName),
 		);
 		return exact.slice(0, MAX_MATCHES).map((match) => match.defaults);
 	}
