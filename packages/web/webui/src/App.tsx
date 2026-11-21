@@ -3242,6 +3242,9 @@ export function App() {
 									onToggleIos={(next) => send({ type: "ios_set_enabled", enabled: next })}
 									credentialsEnabled={snapshot?.credentialsEnabled ?? false}
 									onToggleCredentials={(next) => send({ type: "credentials_set_enabled", enabled: next })}
+									reportsEnabled={snapshot?.reportsEnabled ?? false}
+									reportsReadOnly={sessions.some((item) => item.id === snapshot?.activeSessionId && item.engine !== undefined)}
+									onToggleReports={(next) => send({ type: "reports_set_enabled", enabled: next })}
 									apiModels={
 										snapshot?.project
 											? apiModels.filter((item) => item.projectId === snapshot.project?.id)
@@ -3593,6 +3596,10 @@ export function App() {
 							commanderEvents={commanderEvents}
 							taskEvents={engineTaskEvents}
 							onOpenTaskEvents={(taskId) => send({ type: "engine_task_events", taskId })}
+							onOpenTaskSession={(taskId) => {
+								send({ type: "engine_open_task_session", taskId });
+								openPage("chat");
+							}}
 							onOpenCommanderEvents={(engineId) => send({ type: "engine_commander_events", id: engineId })}
 							hasProject={snapshot?.project !== null && snapshot?.project !== undefined}
 							judgeAvailable={modelLibrary?.resolved.judge != null}

@@ -1487,6 +1487,8 @@ export interface SentinelStateSnapshot {
 	/** Whether the viewed conversation mounts the iOS toolset (per session). */
 	iosEnabled: boolean;
 	credentialsEnabled: boolean;
+	/** Whether the viewed conversation has opted into report submission and evidence tools. */
+	reportsEnabled: boolean;
 	/** Supervision of the viewed conversation; null when it was never armed. */
 	supervisor: SentinelSupervisorView | null;
 	/** Global supervision settings shown under 设置 → 模型. */
@@ -2009,6 +2011,7 @@ export type SentinelClientMessage =
 	| { type: "ios_device_remove"; id: string }
 	| { type: "ios_set_enabled"; enabled: boolean }
 	| { type: "credentials_set_enabled"; enabled: boolean }
+	| { type: "reports_set_enabled"; enabled: boolean }
 	| { type: "credentials_verify"; projectId: string; refs: { id: string; revision: string }[] }
 	| { type: "ios_set_listen"; host: string; port: number }
 	| { type: "list_api_models"; filters?: SentinelApiModelFilters }

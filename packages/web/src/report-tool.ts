@@ -5,6 +5,7 @@ import type { ReportProvenance } from "./report-types.ts";
 import type { ReportStore } from "./reports.ts";
 
 export function createReportTool(options: {
+	enabled: () => boolean;
 	store: ReportStore;
 	provenance: () => ReportProvenance | undefined;
 	workDir: string;
@@ -13,6 +14,7 @@ export function createReportTool(options: {
 	return defineTool({
 		name: "report_submit",
 		label: "Submit report",
+		defaultActive: false,
 		description:
 			"Archive a completed Markdown report with local images, linked files, and the associated session/task vulnerability evidence for ZIP download. Provide either markdown (relative files use /work) or path (relative files use the Markdown file's directory). Use attachments for additional scripts, raw requests/responses and evidence files. Accepts only project-local paths. Does not terminate the task.",
 		promptSnippet: "Submit the completed task's Markdown report and images to the project's report center",
@@ -55,6 +57,7 @@ export function createReportTool(options: {
 			params,
 		): Promise<AgentToolResult<{ ok: boolean; id?: string; imageCount?: number; error?: string }>> {
 			try {
+				if (!options.enabled()) throw new Error("请先在当前对话启用报告中心");
 				const provenance = options.provenance();
 				if (!provenance) throw new Error("尚未选择项目，无法提交报告。");
 				const report = await submitReport({

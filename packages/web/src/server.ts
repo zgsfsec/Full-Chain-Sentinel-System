@@ -3750,6 +3750,10 @@ export async function startSentinelServer(
 					runtime.setCredentialsEnabled(message.enabled);
 					return;
 				}
+				case "reports_set_enabled": {
+					runtime.setReportsEnabled(message.enabled);
+					return;
+				}
 				case "credentials_verify": {
 					const report = await ensureEnvironment();
 					if (!report.ok) {

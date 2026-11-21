@@ -143,7 +143,7 @@ test("outside files, symlink escapes, external URLs, oversized bodies and non-im
 
 test("tool uses its session provenance and returns an error instead of claiming a failed submission succeeded", async () => {
 	let context: typeof provenance | undefined = provenance;
-	const tool = createReportTool({ store, provenance: () => context, workDir });
+	const tool = createReportTool({ enabled: () => true, store, provenance: () => context, workDir });
 	const unusedContext = {} as ExtensionToolContext;
 	const success = await tool.execute(
 		"tool1",

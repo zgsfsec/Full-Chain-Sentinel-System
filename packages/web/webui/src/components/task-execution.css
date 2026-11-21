@@ -1,0 +1,215 @@
+.task-execution {
+	min-width: 0;
+	margin-top: 20px;
+	border: 1px solid var(--ant-color-border-secondary);
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.task-execution__heading,
+.task-execution__toolbar,
+.task-execution__counts {
+	display: flex;
+	align-items: center;
+	gap: 8px 12px;
+	flex-wrap: wrap;
+}
+
+.task-execution__heading {
+	justify-content: space-between;
+	padding: 12px 14px 8px;
+}
+
+.task-execution__counts,
+.task-execution__footnote {
+	font-size: 12px;
+}
+
+.task-execution__toolbar {
+	padding: 0 14px 12px;
+	border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+.task-execution__toolbar > .ant-input-affix-wrapper {
+	flex: 1;
+	width: auto;
+	min-width: 150px;
+}
+
+.task-execution__feed {
+	max-height: 440px;
+	min-height: 140px;
+	padding: 12px 14px;
+	overflow: auto;
+	overscroll-behavior: contain;
+	scrollbar-gutter: stable;
+}
+
+.task-execution__feed:focus-visible,
+.task-execution__step > summary:focus-visible {
+	outline: 2px solid var(--ant-color-primary);
+	outline-offset: -2px;
+}
+
+.task-execution__earlier {
+	margin-bottom: 12px;
+}
+
+.task-execution__turn + .task-execution__turn {
+	margin-top: 16px;
+}
+
+.task-execution__round {
+	margin-bottom: 6px;
+	color: var(--ant-color-text-tertiary);
+	font-size: 12px;
+}
+
+.task-execution__step {
+	border-left: 2px solid var(--ant-color-border-secondary);
+}
+
+.task-execution__step.is-error {
+	border-left-color: var(--ant-color-error);
+}
+
+.task-execution__step.is-running {
+	border-left-color: var(--ant-color-info);
+}
+
+.task-execution__step > summary {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	padding: 10px;
+	list-style: none;
+	cursor: pointer;
+	font-size: 12px;
+}
+
+.task-execution__step > summary:hover,
+.task-execution__step[open] > summary {
+	background: var(--ant-color-fill-quaternary);
+}
+
+.task-execution__step > summary::-webkit-details-marker {
+	display: none;
+}
+
+.task-execution__step > summary::before {
+	content: "";
+	flex: none;
+	width: 5px;
+	height: 5px;
+	border-top: 1px solid var(--ant-color-text-tertiary);
+	border-right: 1px solid var(--ant-color-text-tertiary);
+	transform: rotate(45deg);
+}
+
+.task-execution__step[open] > summary::before {
+	transform: rotate(135deg);
+}
+
+.task-execution time,
+.task-execution__duration {
+	flex: none;
+	color: var(--ant-color-text-tertiary);
+	font-variant-numeric: tabular-nums;
+}
+
+.task-execution__label {
+	max-width: 130px;
+	font-weight: 500;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.task-execution__preview {
+	flex: 1;
+	min-width: 0;
+	color: var(--ant-color-text-secondary);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.task-execution__step .ant-tag {
+	flex: none;
+	margin: 0;
+}
+
+.task-execution__detail {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	min-width: 0;
+	padding: 4px 12px 14px 24px;
+	overflow-wrap: anywhere;
+}
+
+.task-execution__detail pre {
+	margin: 4px 0 0;
+	padding: 10px 12px;
+	max-height: 280px;
+	max-width: 100%;
+	overflow: auto;
+	background: var(--ant-color-fill-quaternary);
+	border-radius: 6px;
+	color: var(--ant-color-text);
+	font: 12px/1.65 var(--mono);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.task-execution__detail .markdown-body {
+	min-width: 0;
+	font-size: 13px;
+}
+
+.task-execution__detail table {
+	display: block;
+	max-width: 100%;
+	overflow-x: auto;
+}
+
+.task-execution__note {
+	display: flex;
+	gap: 10px;
+	padding: 8px 12px;
+	color: var(--ant-color-text-secondary);
+	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+
+.task-execution__note.is-error {
+	color: var(--ant-color-error);
+}
+
+.task-execution__footnote {
+	padding: 8px 14px;
+	border-top: 1px solid var(--ant-color-border-secondary);
+	color: var(--ant-color-text-tertiary);
+}
+
+@media (max-width: 600px) {
+	.task-execution__step > summary {
+		flex-wrap: wrap;
+	}
+
+	.task-execution__preview {
+		order: 1;
+		flex-basis: 100%;
+		padding-left: 13px;
+	}
+
+	.task-execution__toolbar > .ant-input-affix-wrapper {
+		order: 1;
+		flex-basis: 100%;
+	}
+
+	.task-execution__duration {
+		margin-left: auto;
+	}
+}

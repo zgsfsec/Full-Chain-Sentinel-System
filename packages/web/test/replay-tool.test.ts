@@ -32,6 +32,7 @@ let ensured = 0;
 
 function context(overrides: Partial<ReplayToolContext> = {}): ReplayToolContext {
 	return {
+		enabled: () => true,
 		container: () => "sentinel-test",
 		workDir: () => root,
 		guard: async (tool, summary, payload) => {
@@ -85,8 +86,48 @@ test("the toolset is the evidence capture plus the read-only history", () => {
 	expect([...REPLAY_TOOL_NAMES]).toEqual(["replay_capture", "replay_flows"]);
 	const tools = createReplayTools(context());
 	expect(tools.map((definition) => definition.name)).toEqual([...REPLAY_TOOL_NAMES]);
-	// Mounted without asking: no per-conversation switch, like the modeling tools.
-	expect(tools.every((definition) => definition.defaultActive === true)).toBe(true);
+	expect(tools.every((definition) => definition.defaultActive === false)).toBe(true);
+});
+
+test("disabled report tools refuse calls before service startup, approval or network requests", async () => {
+	for (const name of REPLAY_TOOL_NAMES) {
+		const result = await tool(context({ enabled: () => false }), name).execute(
+			"disabled",
+			{ purpose: "留证", raw: "GET / HTTP/1.1\r\nHost: fixture.test\r\n\r\n" },
+			undefined,
+			undefined,
+			{} as never,
+		);
+		expect(result.isError).toBe(true);
+		expect(blocks(result).text).toContain("启用报告中心");
+	}
+	expect(ensured).toBe(0);
+	expect(guarded).toHaveLength(0);
+	expect(replaydRequest).not.toHaveBeenCalled();
+	expect(replaydArtifact).not.toHaveBeenCalled();
+});
+
+test("disabling reports while approval is pending prevents the packet from being sent", async () => {
+	let enabled = true;
+	const result = await tool(
+		context({
+			enabled: () => enabled,
+			guard: async (_tool, _summary, packet) => {
+				enabled = false;
+				return packet;
+			},
+		}),
+		"replay_capture",
+	).execute(
+		"disabled-during-approval",
+		{ purpose: "留证", raw: "GET / HTTP/1.1\r\nHost: fixture.test\r\n\r\n" },
+		undefined,
+		undefined,
+		{} as never,
+	);
+	expect(result.isError).toBe(true);
+	expect(blocks(result).text).toContain("启用报告中心");
+	expect(replaydRequest).not.toHaveBeenCalled();
 });
 
 /** A successful capture response, minus what each test overrides. */

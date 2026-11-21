@@ -12,7 +12,7 @@
  * goal. Every step is mirrored to the engine store for the 工程页 task view.
  */
 
-import type { AgentSessionEvent, SessionManager } from "@earendil-works/pi-coding-agent";
+import { type AgentSessionEvent, LOOP_GUARD_CUSTOM_TYPE, type SessionManager } from "@earendil-works/pi-coding-agent";
 import {
 	advanceGoal,
 	blockGoal,
@@ -26,6 +26,7 @@ import {
 	finishRound,
 	GOAL_MESSAGE_CUSTOM_TYPE,
 	GOAL_STATE_CUSTOM_TYPE,
+	pauseGoal,
 	readGoalState,
 	recordBlocker,
 	recordRoundProgress,
@@ -429,6 +430,15 @@ export class EngineWorker {
 	private afterRoundSettled(aborted: boolean): void {
 		if (this.stopped() || !this.goal || !this.session) return;
 		const session = this.session;
+		const recovery = aborted ? stutterRecovery(session.messages) : undefined;
+		if (recovery === "pending") {
+			// The extension queued its nudge before this callback; the SDK starts it
+			// after all settled listeners return. Keep this round and worker slot:
+			// settling here would detach a session that is about to resume. Recovery
+			// is part of the same round, including its usage and tool-call counters.
+			this.hooks.onProgress();
+			return;
+		}
 		const at = Date.now();
 		const usage = diffUsage(usageOf(session.getSessionStats()), this.roundUsageStart);
 		const round = this.goal.rounds[this.goal.rounds.length - 1];
@@ -462,7 +472,14 @@ export class EngineWorker {
 			return;
 		}
 		if (aborted) {
-			this.settle("aborted", t("任务被中止"), this.currentUsage());
+			if (recovery === "exhausted") {
+				const note = t("输出重复，自动恢复次数已用尽");
+				this.goal = pauseGoal(goal, "loop-guard", note, at);
+				this.persistGoal();
+				this.settle("failed", t("{note}（可用 continue_task 在原会话上续跑）", { note }), this.currentUsage());
+			} else {
+				this.settle("aborted", t("任务被中止"), this.currentUsage());
+			}
 			return;
 		}
 		if (this.overTokenLimit()) {
@@ -607,6 +624,35 @@ function lastAssistantErrorMessage(messages: readonly unknown[]): string | undef
 	const last = [...messages].reverse().find((message) => (message as { role?: string }).role === "assistant");
 	const error = (last as { errorMessage?: unknown } | undefined)?.errorMessage;
 	return typeof error === "string" && error.trim() ? error.trim() : undefined;
+}
+
+/** The exhausted notice is appended synchronously; recoverable nudges are deferred until after settled. */
+function stutterRecovery(messages: readonly unknown[]): "pending" | "exhausted" | undefined {
+	let exhausted = false;
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const raw = messages[index];
+		if (typeof raw !== "object" || raw === null) continue;
+		const message = raw as {
+			role?: string;
+			content?: unknown;
+			customType?: string;
+			details?: unknown;
+			stopReason?: string;
+		};
+		if (message.role === "user") return undefined;
+		if (message.role === "assistant") {
+			return message.stopReason === "aborted" && messageText(message).includes("[输出因重复被中止，尾部已截断]")
+				? exhausted
+					? "exhausted"
+					: "pending"
+				: undefined;
+		}
+		if (message.role === "custom" && message.customType === LOOP_GUARD_CUSTOM_TYPE) {
+			const details = message.details as { kind?: string; exhausted?: boolean } | undefined;
+			if (details?.kind === "stutter" && details.exhausted === true) exhausted = true;
+		}
+	}
+	return undefined;
 }
 
 export function errorText(error: unknown): string {

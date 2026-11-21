@@ -1,10 +1,14 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentSessionEvent, SessionManager } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { type AgentSessionEvent, createLoopGuardExtension, type SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, test, vi } from "vitest";
+import { createHarness } from "../../coding-agent/test/suite/harness.ts";
 import { type EngineHooks, EngineManager, type RuntimeAcquireTaskSession } from "../src/engine.ts";
 import { EngineStore } from "../src/engine-store.ts";
+import { readGoalState } from "../src/goal.ts";
+import { createGoalTools } from "../src/goal-tool.ts";
 import type { SentinelEngine, SentinelEngineTaskStatus } from "../src/protocol.ts";
 import type { EngineWorker, WorkerSession } from "../src/worker.ts";
 
@@ -144,8 +148,7 @@ test("an aborted event still finalizes the task when its live event hook throws"
 	expect(entry.workers.has(task.id)).toBe(false);
 });
 
-// Full-Chain-Sentinel-System #6: the reported loop-guard abort must release the slot.
-test("a loop-guard abort persists aborted and releases the next worker slot", async () => {
+test("a loop-guard abort keeps the worker slot while recovery is pending", async () => {
 	const first = fakeSession();
 	const second = fakeSession();
 	first.session.prompt = async () => {
@@ -165,13 +168,110 @@ test("a loop-guard abort persists aborted and releases the next worker slot", as
 	};
 	const acquire = vi.fn<RuntimeAcquireTaskSession>().mockResolvedValueOnce(first).mockResolvedValue(second);
 	const { internals, entry, addTask } = setup(acquire);
-	const aborted = addTask();
+	const recovering = addTask();
 	const queued = addTask();
-	await internals.startTask(entry, aborted.id);
-	expect(internals.store.getTask(aborted.id)).toMatchObject({ status: "aborted", endedAt: expect.any(Number) });
+	await internals.startTask(entry, recovering.id);
+	expect(internals.store.getTask(recovering.id)).toMatchObject({ status: "running", endedAt: null });
+	expect(internals.store.getTask(queued.id)?.status).toBe("queued");
+	expect(entry.workers.get(recovering.id)?.isRunning).toBe(true);
+	expect(acquire).toHaveBeenCalledOnce();
+});
+
+test.each([1, 3, 4])("%i stutters recover under the real worker or stop at the guard's limit", async (trips) => {
+	const next = fakeSession();
+	let taskHarness: Awaited<ReturnType<typeof createHarness>> | undefined;
+	const { internals, entry, addTask } = setup(async (input) => {
+		if (input.taskSessionId === "next") return next;
+		const harness = await createHarness({
+			extensionFactories: [
+				createLoopGuardExtension(),
+				(pi) => {
+					for (const tool of createGoalTools(input.goalPort)) pi.registerTool(tool);
+				},
+			],
+		});
+		taskHarness = harness;
+		cleanups.push(harness.cleanup);
+		const taskId = input.taskId;
+		harness.setResponses([
+			...Array.from({ length: trips }, () => fauxAssistantMessage(`分析如下：\n${"Kingston.\n\n".repeat(40)}`)),
+			(context) => {
+				expect(JSON.stringify(context.messages)).toContain("【输出重复】");
+				expect(internals.store.getTask(taskId)?.status).toBe("running");
+				expect(entry.workers.get(taskId)?.isRunning).toBe(true);
+				expect(internals.store.getTask(queued.id)?.status).toBe("queued");
+				expect(readGoalState(harness.sessionManager.getBranch())).toMatchObject({
+					status: "active",
+					roundsUsed: 0,
+					noProgressStreak: 0,
+				});
+				return fauxAssistantMessage(
+					fauxToolCall("goal_complete", {
+						summary: "恢复后完成",
+						evidence: ["隔离测试结果"],
+						findings: { submitted: 0, note: "测试目标无漏洞" },
+					}),
+					{ stopReason: "toolUse" },
+				);
+			},
+			fauxAssistantMessage("恢复后完成。"),
+		]);
+		return { session: harness.session, manager: harness.sessionManager, release: () => {} };
+	});
+	const task = addTask();
+	const queued = addTask();
+	internals.store.updateTask(queued.id, { sessionId: "next" });
+	await internals.startTask(entry, task.id);
+	if (trips === 4) {
+		expect(internals.store.getTask(task.id)).toMatchObject({
+			status: "failed",
+			summary: expect.stringContaining("输出重复，自动恢复次数已用尽"),
+		});
+		expect(taskHarness?.getPendingResponseCount()).toBe(2);
+		expect(readGoalState(taskHarness?.sessionManager.getBranch() ?? [])).toMatchObject({
+			status: "paused",
+			pauseReason: "loop-guard",
+			roundsUsed: 0,
+		});
+	} else {
+		expect(internals.store.getTask(task.id)).toMatchObject({ status: "done", summary: "恢复后完成" });
+		expect(taskHarness?.getPendingResponseCount()).toBe(0);
+	}
+	expect(entry.workers.has(task.id)).toBe(false);
 	expect(internals.store.getTask(queued.id)?.status).toBe("running");
-	expect(entry.workers.has(aborted.id)).toBe(false);
-	expect(acquire).toHaveBeenCalledTimes(2);
+});
+
+test("an operator can abort a real worker during loop-guard recovery", async () => {
+	let recoveryStarted: () => void = () => {};
+	const recovering = new Promise<void>((resolve) => {
+		recoveryStarted = resolve;
+	});
+	const { manager, internals, entry, addTask } = setup(async () => {
+		const harness = await createHarness({ extensionFactories: [createLoopGuardExtension()] });
+		cleanups.push(harness.cleanup);
+		harness.setResponses([
+			fauxAssistantMessage(`分析如下：\n${"Kingston.\n\n".repeat(40)}`),
+			async (_context, options) => {
+				recoveryStarted();
+				await new Promise<void>((resolve) => {
+					options?.signal?.addEventListener("abort", () => resolve(), { once: true });
+				});
+				return fauxAssistantMessage("已停止", { stopReason: "aborted" });
+			},
+		]);
+		return { session: harness.session, manager: harness.sessionManager, release: () => {} };
+	});
+	const task = addTask();
+	const started = internals.startTask(entry, task.id);
+	await recovering;
+	expect(internals.store.getTask(task.id)?.status).toBe("running");
+	expect(await manager.abortTask(task.id, "operator stop during recovery")).toEqual({ ok: true });
+	await started;
+	expect(internals.store.getTask(task.id)).toMatchObject({
+		status: "aborted",
+		summary: expect.stringContaining("operator stop during recovery"),
+	});
+	expect(entry.workers.has(task.id)).toBe(false);
 });
 
 // Full-Chain-Sentinel-System #6: an already orphaned row must be recoverable without a restart.

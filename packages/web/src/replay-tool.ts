@@ -1,11 +1,9 @@
 /**
  * The agent's hands on replayd, the in-container packet replay service.
  *
- * Two tools, mounted in every console session (the same rule as the business
- * modeling tools: declared and active by default, never handed to an engineering
- * task's worker or to a sub-agent). There is no per-conversation switch: the
- * screenshot tool states its own purpose in `purpose`, and the approval card is
- * what decides whether a packet goes out.
+ * Two tools, activated by the conversation's report-center switch and never
+ * handed to an engineering task's worker or a sub-agent. The screenshot tool
+ * states its purpose in `purpose`; sending still follows the approval chain.
  *
  * What they are for:
  *
@@ -40,11 +38,13 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type ReplaydStatus, replaydArtifact, replaydRequest } from "./replayd.ts";
 
-/** Every tool name this feature registers. Mounted in every console session. */
+/** Every tool name controlled by the conversation's report-center switch. */
 export const REPLAY_TOOL_NAMES: readonly string[] = ["replay_capture", "replay_flows"];
 
 /** What the runtime provides; the container and the approval chain stay behind it. */
 export interface ReplayToolContext {
+	/** The issuing conversation's report-center switch, independent of the viewed session. */
+	enabled: () => boolean;
 	/** The active project's container. */
 	container: () => string;
 	/** Host work directory; screenshots are saved under it. */
@@ -197,7 +197,7 @@ export function createReplayTools(ctx: ReplayToolContext): ToolDefinition[] {
 	const capture = defineTool({
 		name: "replay_capture",
 		label: "Capture a packet exchange as report evidence",
-		defaultActive: true,
+		defaultActive: false,
 		description:
 			"Evidence capture for the report, not a way to send packets. It sends the request and returns a PNG of replayd's own Repeater window: the request on the left, the response in the middle and the Beijing-time evidence panel on the right, with your highlights — the one image a report or a judge needs. Call it ONLY when the operator wants a screenshot for the report (or a confirmed finding needs a picture), and say why in `purpose`. For exploring, iterating and verifying, send the request with curl through bash instead: the operator already approves those, and a screenshot takes seconds and a browser. Also returns the status line, the response headers and the evidence watermark as text, so the result is usable without looking at the image. Goes through the approval chain and the operator can edit the packet first.",
 		promptSnippet: "Capture a packet exchange as a screenshot for the report",
@@ -252,6 +252,7 @@ export function createReplayTools(ctx: ReplayToolContext): ToolDefinition[] {
 			params,
 			signal,
 		): Promise<AgentToolResult<{ ok: boolean; flowId?: string; path?: string }>> {
+			if (!ctx.enabled()) return failure("请先在当前对话启用报告中心");
 			// Checked before the service is touched: a call that cannot be accepted must
 			// not push a 20 MB binary into the container first.
 			const purpose = (params.purpose ?? "").trim();
@@ -283,6 +284,7 @@ export function createReplayTools(ctx: ReplayToolContext): ToolDefinition[] {
 			} catch (error) {
 				return failure(String(error));
 			}
+			if (!ctx.enabled()) return failure("请先在当前对话启用报告中心");
 			if (raw.trim() === "") return failure("审批被拒绝：请求报文为空");
 			const highlight =
 				params.highlightRequest || params.highlightResponse
@@ -357,7 +359,7 @@ export function createReplayTools(ctx: ReplayToolContext): ToolDefinition[] {
 	const flows = defineTool({
 		name: "replay_flows",
 		label: "List captured and replayed HTTP flows",
-		defaultActive: true,
+		defaultActive: false,
 		description:
 			"List the HTTP flows replayd has recorded in this project's container: everything the MITM proxy captured and every replay, newest first, with host/method/status filters. Read-only, so it does not go through the approval chain. Use it to look up a flowId returned by the other tools, or to see what a page requested through the proxy.",
 		promptSnippet: "List the captured/replayed HTTP flows of this project",
@@ -370,6 +372,7 @@ export function createReplayTools(ctx: ReplayToolContext): ToolDefinition[] {
 			),
 		}),
 		async execute(_toolCallId, params, signal): Promise<AgentToolResult<{ ok: boolean; total?: number }>> {
+			if (!ctx.enabled()) return failure("请先在当前对话启用报告中心");
 			const ready = await service(ctx);
 			if ("error" in ready) return failure(ready.error);
 			const limit = Math.min(Math.max(params.limit ?? 20, 1), 200);

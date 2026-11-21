@@ -50,6 +50,7 @@ import type { UploadedFile } from "../uploads.ts";
 import { Page } from "../ui/Page.tsx";
 import { EngineTargetFiles } from "./EngineTargetFiles.tsx";
 import { CommanderFeed } from "./EngineCommander.tsx";
+import { TaskExecution } from "./TaskExecution.tsx";
 import type {
 	SentinelDoctrineView,
 	SentinelEngine,
@@ -125,10 +126,6 @@ function formatUsage(total: number | null | undefined): string {
 	if (total < 1000) return String(total);
 	if (total < 1_000_000) return `${(total / 1000).toFixed(1)}k`;
 	return `${(total / 1_000_000).toFixed(1)}M`;
-}
-
-function formatClock(at: number): string {
-	return new Date(at).toLocaleTimeString("zh-CN", { hour12: false });
 }
 
 const SCHEDULE_PHASE_LABELS: Record<SentinelEngineSchedule["phase"], string> = {
@@ -307,6 +304,7 @@ export interface EnginePageProps {
 	commanderEvents: Record<string, SentinelSubagentEvent[]>;
 	taskEvents: Record<string, SentinelSubagentEvent[]>;
 	onOpenTaskEvents: (taskId: string) => void;
+	onOpenTaskSession: (taskId: string) => void;
 	onOpenCommanderEvents: (engineId: string) => void;
 	hasProject: boolean;
 	project: SentinelProjectInfo | null;
@@ -567,7 +565,7 @@ export function EnginePage(props: EnginePageProps) {
 						onClose={() => setOpenTaskId(null)}
 						onAbort={(taskId) => send({ type: "engine_abort_task", taskId })}
 						onOpenInChat={(taskId) => {
-							send({ type: "engine_open_task_session", taskId });
+							props.onOpenTaskSession(taskId);
 							setOpenTaskId(null);
 						}}
 					/>
@@ -1057,32 +1055,7 @@ function TaskModal(props: {
 			<Text strong>{t("任务指令（指挥官原文）")}</Text>
 			<pre className="enginehub-pre">{task.objective}</pre>
 
-			<Text strong>{t("执行过程 · {count} 步", { count: props.events.length })}</Text>
-			<div className="enginehub-events">
-				{props.events.slice(-30).map((event) => (
-					<div key={event.seq} className="enginehub-event">
-						<Space size={8} wrap>
-							<Text type="secondary">{formatClock(event.at)}</Text>
-							{event.kind === "text" ? (
-								<Text>{(event.text ?? "").slice(0, 160)}</Text>
-							) : event.kind === "thinking" ? (
-								<Text type="secondary">{t("思考 · {count} 字", { count: (event.text ?? "").length })}</Text>
-							) : event.kind === "tool_start" ? (
-								<Text code>{event.toolName}</Text>
-							) : event.kind === "tool_end" ? (
-								<Tag color={event.isError ? "red" : "green"} variant="filled">
-									{event.toolName}
-								</Tag>
-							) : (
-								<Text type="secondary">{event.note ?? event.status ?? ""}</Text>
-							)}
-						</Space>
-						{event.kind === "tool_end" && (event.output ?? "").trim() ? (
-							<pre className="enginehub-pre">{event.output}</pre>
-						) : null}
-					</div>
-				))}
-			</div>
+			<TaskExecution key={task.id} events={props.events} status={task.status} />
 		</Modal>
 	);
 }

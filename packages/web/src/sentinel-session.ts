@@ -295,7 +295,7 @@ import type {
 	SentinelWebSearchConfigView,
 	SentinelWebSearchKeyInput,
 } from "./protocol.ts";
-import { createReplayTools, type ReplayToolContext } from "./replay-tool.ts";
+import { createReplayTools, REPLAY_TOOL_NAMES, type ReplayToolContext } from "./replay-tool.ts";
 import { ensureReplayd, type ReplaydStatus } from "./replayd.ts";
 import { createReportTool } from "./report-tool.ts";
 import { ReportStore, reportsDbPath } from "./reports.ts";
@@ -304,6 +304,7 @@ import { readSessionDroid, SESSION_DROID_CUSTOM_TYPE } from "./session-droid.ts"
 import { readSessionIos, SESSION_IOS_CUSTOM_TYPE } from "./session-ios.ts";
 import { readSessionMode, SESSION_MODE_CUSTOM_TYPE } from "./session-mode.ts";
 import { readSessionPreset, SESSION_PRESET_CUSTOM_TYPE } from "./session-preset.ts";
+import { readSessionReports, SESSION_REPORTS_CUSTOM_TYPE } from "./session-reports.ts";
 import {
 	readSessionStatus,
 	SESSION_STATUS_CUSTOM_TYPE,
@@ -461,6 +462,8 @@ interface ManagedSession {
 	iosOn: boolean;
 	credentialsOn: boolean;
 	credentialAccess: SessionCredentialAccess;
+	/** Ordinary conversations opt in; engineering workers retain their report delivery workflow. */
+	reportsOn: boolean;
 	/**
 	 * The preset agent this session was created with, read from the branch. null
 	 * means the plain default agent. The body is not cached: it is read from disk
@@ -903,6 +906,7 @@ export class SentinelRuntime {
 			droidOn: task ? false : readSessionDroid(manager.getBranch()),
 			iosOn: task ? false : readSessionIos(manager.getBranch()),
 			credentialsOn: task ? task.credentials?.scope === "project" : readSessionCredentials(manager.getBranch()),
+			reportsOn: task ? true : readSessionReports(manager.getBranch()),
 			credentialAccess: new SessionCredentialAccess({
 				enabled: () => managed.credentialsOn,
 				projectId: project?.id ?? null,
@@ -1001,6 +1005,7 @@ export class SentinelRuntime {
 		};
 		const customTools: ToolDefinition[] = [
 			createReportTool({
+				enabled: () => managed.reportsOn,
 				store: this.reports,
 				workDir: cwd,
 				container,
@@ -1081,8 +1086,8 @@ export class SentinelRuntime {
 			...(task ? [] : createIosCaptureTools(this.createIosToolContext(managed))),
 			...(task ? [] : createIosDecryptTools(this.createIosToolContext(managed))),
 			...(task ? [] : createFridaTools(this.createDroidToolContext(managed))),
-			// The report-evidence toolset is declared and active in every console
-			// session (like the modeling tools), and never handed to a task worker.
+			// Report screenshots and replay history follow the conversation's report
+			// switch; engineering workers do not receive these tools.
 			...(task ? [] : createReplayTools(this.createReplayToolContext(managed))),
 			...(task
 				? []
@@ -1207,6 +1212,7 @@ export class SentinelRuntime {
 		this.applyDroidTools(managed);
 		this.applyIosTools(managed);
 		this.applyCredentialTools(managed);
+		this.applyReportTools(managed);
 		if (task) {
 			// Task sessions live under their engine's collapsible group in the
 			// sidebar, which already states the ownership — the name is just the
@@ -3012,6 +3018,7 @@ export class SentinelRuntime {
 
 	private createReplayToolContext(managed: ManagedSession): ReplayToolContext {
 		return {
+			enabled: () => managed.reportsOn,
 			container: () => managed.container,
 			workDir: () => managed.cwd,
 			guard: (tool, summary, payload) => this.guardReplayCommand(managed, tool, summary, payload),
@@ -3264,6 +3271,28 @@ export class SentinelRuntime {
 		const wanted = managed.credentialsOn
 			? [...active, ...CREDENTIAL_TOOL_NAMES.filter((name) => !active.includes(name))]
 			: active.filter((name) => !CREDENTIAL_TOOL_NAMES.includes(name));
+		if (wanted.length !== active.length || wanted.some((name, index) => name !== active[index]))
+			managed.session.setActiveToolsByName(wanted);
+	}
+
+	/** Update only the viewed ordinary conversation, without prompting or rebuilding it. */
+	setReportsEnabled(enabled: boolean): void {
+		if (typeof enabled !== "boolean") throw new Error("报告中心开关格式错误");
+		const active = this.active;
+		if (!active || active.taskSession) throw new Error("请先选择项目中的普通对话");
+		if (active.reportsOn === enabled) return;
+		active.manager.appendCustomEntry(SESSION_REPORTS_CUSTOM_TYPE, { enabled, at: Date.now() });
+		active.reportsOn = enabled;
+		this.applyReportTools(active);
+		this.hooks.onStateChange();
+	}
+
+	private applyReportTools(managed: ManagedSession): void {
+		const active = managed.session.getActiveToolNames();
+		const names = ["report_submit", ...(managed.taskSession ? [] : REPLAY_TOOL_NAMES)];
+		const wanted = managed.reportsOn
+			? [...active, ...names.filter((name) => !active.includes(name))]
+			: active.filter((name) => !names.includes(name));
 		if (wanted.length !== active.length || wanted.some((name, index) => name !== active[index]))
 			managed.session.setActiveToolsByName(wanted);
 	}
@@ -4484,6 +4513,10 @@ export class SentinelRuntime {
 			entryId,
 			summarize ? { summarize: true, forkFromUser: true } : { forkFromUser: true },
 		);
+		if (!active.taskSession) {
+			active.reportsOn = readSessionReports(active.manager.getBranch());
+			this.applyReportTools(active);
+		}
 		this.hooks.onStateChange();
 	}
 
@@ -4724,6 +4757,7 @@ export class SentinelRuntime {
 			droidEnabled: active?.droidOn ?? false,
 			iosEnabled: active?.iosOn ?? false,
 			credentialsEnabled: active?.credentialsOn ?? false,
+			reportsEnabled: active?.reportsOn ?? false,
 			supervisor: this.activeKey ? this.supervisor.view(this.activeKey) : null,
 			supervisorConfig: readSupervisorConfig(this.agentDir),
 			gatekeeper,
