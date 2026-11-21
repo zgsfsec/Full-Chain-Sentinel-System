@@ -14,6 +14,30 @@ export const EMPTY_MODEL_THINKING: ModelThinkingDraft = {
 	compat: null,
 };
 
+export const ALL_THINKING_LEVELS: SentinelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** Explicit nulls disable SDK defaults; extended levels require an explicit mapping. */
+export function customThinkingSettings(
+	current: ModelThinkingDraft,
+	selected: SentinelThinkingLevel[],
+): ModelThinkingDraft {
+	const availableThinkingLevels = ALL_THINKING_LEVELS.filter((level) => selected.includes(level));
+	const thinkingLevelMap: NonNullable<ModelThinkingDraft["thinkingLevelMap"]> = {};
+	for (const level of ALL_THINKING_LEVELS) {
+		thinkingLevelMap[level] = availableThinkingLevels.includes(level)
+			? (current.thinkingLevelMap?.[level] ?? (level === "off" ? "none" : level))
+			: null;
+	}
+	return {
+		...current,
+		availableThinkingLevels,
+		thinkingLevelMap,
+		defaultThinkingLevel: availableThinkingLevels.includes(current.defaultThinkingLevel)
+			? current.defaultThinkingLevel
+			: (availableThinkingLevels[0] ?? "off"),
+	};
+}
+
 /** The catalog and the SDK, rather than a fixed UI list, define valid strengths. */
 export function catalogThinkingSettings(
 	defaults: SentinelBuiltinModelDefaults,

@@ -23,7 +23,12 @@ import {
 } from "../src/model-library.ts";
 import { readModelThinkingLevel } from "../src/model-thinking.ts";
 import type { SentinelModelCapabilities } from "../src/protocol.ts";
-import { catalogThinkingSettings, EMPTY_MODEL_THINKING } from "../webui/src/components/model-thinking-draft.ts";
+import {
+	ALL_THINKING_LEVELS,
+	catalogThinkingSettings,
+	customThinkingSettings,
+	EMPTY_MODEL_THINKING,
+} from "../webui/src/components/model-thinking-draft.ts";
 import { modelStream } from "./model-stream-fixtures.ts";
 
 let dir = "";
@@ -233,6 +238,52 @@ test("repairs an old editor draft without losing a supported default or custom p
 	expect(
 		catalogThinkingSettings(preset, { ...EMPTY_MODEL_THINKING, defaultThinkingLevel: "off" }).defaultThinkingLevel,
 	).toBe("high");
+});
+
+test("saves custom relay strengths and sends its mapped value through the SDK without a catalog model", async () => {
+	const draft = customThinkingSettings(EMPTY_MODEL_THINKING, ["low", "high", "xhigh", "max"]);
+	const capabilities: SentinelModelCapabilities = {
+		reasoning: true,
+		defaultThinkingLevel: "max",
+		thinkingLevelMap: { ...draft.thinkingLevelMap, max: "maximum" },
+	};
+	const entry = addLibraryEntry(dir, { ...input, modelId: "private-relay-alias", capabilities });
+	expect(libraryView(dir).entries[0]).toMatchObject({
+		availableThinkingLevels: ["low", "high", "xhigh", "max"],
+		defaultThinkingLevel: "max",
+		thinkingLevelMap: { off: null, minimal: null, medium: null, max: "maximum" },
+	});
+	const copy = duplicateLibraryEntry(dir, entry.id);
+	expect(libraryView(dir).entries.find((model) => model.id === copy.id)).toMatchObject({
+		availableThinkingLevels: ["low", "high", "xhigh", "max"],
+		defaultThinkingLevel: "max",
+		thinkingLevelMap: { max: "maximum" },
+	});
+	const config = resolveAuxiliaryModel(dir, "main");
+	if (!config) throw new Error("Missing custom relay");
+	const payloads: Record<string, unknown>[] = [];
+	await completeAuxiliaryModel(config, {
+		systemPrompt: "test",
+		input: "test",
+		signal: AbortSignal.timeout(10000),
+		fetch: async (_url, options) => {
+			payloads.push(JSON.parse(String(options?.body)) as Record<string, unknown>);
+			return modelStream("openai-completions", "ok");
+		},
+	});
+	expect(payloads[0]).toMatchObject({ model: "private-relay-alias", reasoning_effort: "maximum" });
+});
+
+test("custom selections disable standard SDK defaults and keep a supported default", () => {
+	const extended = customThinkingSettings(EMPTY_MODEL_THINKING, ALL_THINKING_LEVELS);
+	expect(extended.thinkingLevelMap).toMatchObject({ off: "none", xhigh: "xhigh", max: "max" });
+	const reduced = customThinkingSettings({ ...extended, defaultThinkingLevel: "max" }, ["max", "low"]);
+	expect(reduced.availableThinkingLevels).toEqual(["low", "max"]);
+	expect(reduced.defaultThinkingLevel).toBe("max");
+	const withoutMax = customThinkingSettings(reduced, ["low"]);
+	expect(withoutMax.defaultThinkingLevel).toBe("low");
+	expect(withoutMax.thinkingLevelMap).toMatchObject({ off: null, max: null });
+	expect(customThinkingSettings(withoutMax, []).availableThinkingLevels).toEqual([]);
 });
 
 test.each([

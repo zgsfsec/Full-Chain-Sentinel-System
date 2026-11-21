@@ -36,11 +36,11 @@ import type {
 	SentinelModelRoleName,
 	SentinelResolvedModelView,
 	SentinelTestResult,
-	SentinelThinkingLevel,
 } from "../types.ts";
 import { ModelRolePicker } from "./ModelRolePicker.tsx";
 import { GatekeeperPanel } from "./GatekeeperPanel.tsx";
 import { RemoteModelPicker } from "./RemoteModelPicker.tsx";
+import { ThinkingLevelEditor } from "./ThinkingLevelEditor.tsx";
 import { catalogThinkingSettings, EMPTY_MODEL_THINKING, type ModelThinkingDraft } from "./model-thinking-draft.ts";
 import {
 	capabilityChips,
@@ -255,7 +255,13 @@ function capabilitiesOf(draft: Draft): { capabilities: SentinelModelCapabilities
 			...(cost ? { cost } : {}),
 			...(promptCache ? { promptCache } : {}),
 		},
-		error: sizeError ?? costError ?? short.error ?? long.error ?? null,
+		error: sizeError ?? costError ?? short.error ?? long.error ?? (draft.reasoning
+			? draft.availableThinkingLevels.length === 0
+				? (getLanguage() === "en" ? "Select at least one thinking level." : "至少选择一个支持的思考等级。")
+				: draft.availableThinkingLevels.some((level) => draft.thinkingLevelMap?.[level]?.trim() === "")
+					? (getLanguage() === "en" ? "Request values cannot be blank." : "思考等级的请求值不能为空。")
+					: null
+			: null),
 	};
 }
 
@@ -335,6 +341,8 @@ export function SettingsPanel({
 	const channelTouchedRef = useRef(false);
 	/** An edit infers its channel from the endpoint exactly once. */
 	const inferenceRef = useRef(false);
+	/** Existing entries may not match a built-in channel by exact endpoint. */
+	const thinkingRepairRef = useRef("");
 	const modelCacheRef = useRef(new Map<string, SentinelBuiltinModelPreset[]>());
 	/** Name that came from a model, so switching models replaces it but a typed name survives. */
 	const autoNameRef = useRef<string | null>(null);
@@ -429,6 +437,29 @@ export function SettingsPanel({
 		});
 	}, [channelOptions, drawerOpen]);
 
+	/** Repair old saved entries directly from the catalog, even when their endpoint is not a channel preset. */
+	useEffect(() => {
+		if (!drawerOpen || !draft?.id || !draft.reasoning) return;
+		const entry = library?.entries.find((candidate) => candidate.id === draft.id);
+		if (!entry || entry.thinkingLevelMap != null) return;
+		const lookupKey = `${entry.id}|${entry.modelId}|${entry.baseUrl}`;
+		if (thinkingRepairRef.current === lookupKey) return;
+		thinkingRepairRef.current = lookupKey;
+		void onLookupDefaults(entry.modelId.trim(), entry.baseUrl.trim()).then((matches) => {
+			const preset = matches?.find(
+				(candidate) => !candidate.approximate && candidate.reasoning && candidate.api === entry.api,
+			);
+			if (!preset) return;
+			setDraft((current) => {
+				if (
+					!current || current.id !== entry.id || current.modelId !== entry.modelId ||
+					current.baseUrl !== entry.baseUrl || current.api !== entry.api || !current.reasoning || current.thinkingLevelMap != null
+				) return current;
+				return { ...current, ...catalogThinkingSettings(preset, current) };
+			});
+		});
+	}, [drawerOpen, draft?.id, library, onLookupDefaults]);
+
 	/** A failed catalog must not strand the form: custom always works. */
 	useEffect(() => {
 		if (!drawerOpen || channelOptions !== null || !channelsError || channelTouchedRef.current) return;
@@ -479,6 +510,7 @@ export function SettingsPanel({
 		channelRef.current = null;
 		channelTouchedRef.current = false;
 		inferenceRef.current = false;
+		thinkingRepairRef.current = "";
 		autoNameRef.current = null;
 		// A filtered list from the last search cannot infer this entry's channel.
 		setChannelOptions(null);
@@ -542,6 +574,7 @@ export function SettingsPanel({
 				// The operator may have typed a different model while the lookup was
 				// in flight; those numbers belong to the old one.
 				if (!current || `${current.modelId.trim()}|${current.baseUrl.trim()}` !== lookupKey) return current;
+				if (auto && current.thinkingLevelMap != null) return current;
 				return applyDefaults(current, defaults);
 			});
 			setDefaultsNote(t("已按内置库「{provider}」填充，可继续修改。", { provider: defaults.providerName }));
@@ -1475,20 +1508,10 @@ export function SettingsPanel({
 												{t("支持思考 / 推理")}
 											</Checkbox>
 											{draft.reasoning ? (
-												<Form.Item
-													label={getLanguage() === "en" ? "Default thinking level" : "默认思考强度"}
-													extra={getLanguage() === "en" ? "Applies to new sessions; adjustable within each session." : "用于新会话，会话中仍可单独调整。"}
-												>
-													<Select<SentinelThinkingLevel>
-														aria-label={getLanguage() === "en" ? "Default thinking level" : "默认思考强度"}
-														value={draft.defaultThinkingLevel}
-														onChange={(level) => setDraft({ ...draft, defaultThinkingLevel: level })}
-														options={draft.availableThinkingLevels.map((level) => ({
-															value: level,
-															label: `${t({ off: "关闭", minimal: "最低", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最大" }[level])} (${level})`,
-														}))}
-													/>
-												</Form.Item>
+												<ThinkingLevelEditor
+													value={draft}
+													onChange={(next) => setDraft((current) => current ? { ...current, ...next } : current)}
+												/>
 											) : null}
 											<Checkbox
 												checked={draft.imageInput}
