@@ -159,8 +159,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Credential clients: reuse SSH, curl, NetExec and Impacket from the core layer.
 # Install clients only, without recommended packages, database servers, desktop
 # runtimes or the much larger mongosh bundle. PyMongo provides MongoDB auth/ping;
-# dnspython supports mongodb+srv addresses. Keep this layer last to reuse the
-# existing toolbox cache when adding credential support.
+# dnspython supports mongodb+srv addresses.
 RUN apt-get update && apt-get install -y --no-install-recommends \
 		sshpass \
 		ldap-utils \
@@ -172,6 +171,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 		snmp \
 		python3-pymongo \
 		python3-dnspython \
+	&& apt-get clean \
+	&& rm -rf /var/lib/apt/lists/*
+
+# Intranet clients: reuse NetExec, Impacket, SSH and LDAP already installed above.
+# Keep this layer last to preserve the existing toolbox cache. These Kali packages
+# support amd64/arm64; no BloodHound UI, graph database or recommended packages.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+		krb5-user \
+		smbclient \
+		evil-winrm \
+		bloodhound.py \
+		nfs-common \
+		rsync \
+	&& for tool in kinit klist smbclient rpcclient evil-winrm bloodhound-python showmount nfsstat rpcinfo rsync; do \
+		command -v "$tool" >/dev/null || exit 1; \
+	done \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
