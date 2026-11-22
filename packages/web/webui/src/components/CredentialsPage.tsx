@@ -85,7 +85,7 @@ function ProjectCredentials({ projectId, refreshToken = 0, verificationDisabledR
 		extra={<><Button icon={<ReloadOutlined />} onClick={refresh}>{tx("刷新", "Refresh")}</Button><Button icon={<ImportOutlined />} onClick={() => { setImportOpen(true); setPreview(null); setImportError(""); }}>{tx("批量导入", "Import")}</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{tx("添加凭据", "Add credential")}</Button></>}>
 		<div className="credentials-body">
 			{error && <Alert type="error" title={error} showIcon />}
-			<Flex className="credentials-summary" gap={24} wrap><span>项目凭据 <b>{items.length}</b></span><span>可用 <b>{items.filter((item) => item.status === "usable").length}</b></span><span>未验证 <b>{items.filter((item) => item.status === "unverified").length}</b></span><span>验证失败 <b>{failed.length}</b></span><Typography.Text type="secondary">加密保存 · 按需读取</Typography.Text></Flex>
+			<Flex className="credentials-summary" gap={24} wrap><span>项目凭据 <b>{items.length}</b></span><span>可用 <b>{items.filter((item) => item.status === "usable").length}</b></span><span>未验证 <b>{items.filter((item) => item.status === "unverified").length}</b></span><span>验证失败 <b>{failed.length}</b></span></Flex>
 			<Flex gap={8} wrap align="center" className="credentials-toolbar">
 				<Input.Search aria-label="搜索凭据" placeholder="搜索名称、目标、类型或账号" value={search} onChange={(event) => setSearch(event.target.value)} allowClear style={{ width: 260 }} />
 				<Select aria-label="筛选分组" placeholder="全部分组" value={group} onChange={setGroup} allowClear style={{ width: 160 }} options={CREDENTIAL_GROUPS.map((value) => ({ value, label: value }))} />
