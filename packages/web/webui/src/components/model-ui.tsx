@@ -15,6 +15,7 @@ export const ROLE_ORDER: SentinelModelRoleName[] = [
 	"supervisor",
 	"commander",
 	"monitor",
+	"workprocess",
 ];
 
 export const ROLE_LABELS: Record<SentinelModelRoleName, string> = {
@@ -24,6 +25,7 @@ export const ROLE_LABELS: Record<SentinelModelRoleName, string> = {
 	supervisor: t("监督模型"),
 	commander: t("指挥端点"),
 	monitor: t("监测模型"),
+	workprocess: "工作链路模型",
 };
 
 export const ROLE_HINTS: Record<SentinelModelRoleName, string> = {
@@ -33,6 +35,7 @@ export const ROLE_HINTS: Record<SentinelModelRoleName, string> = {
 	supervisor: t("建议使用按量付费 API；观察模式每 20 次调用或异常时总结；介入模式只给建议，不阻断工具调用"),
 	commander: t("建议使用按量付费 API；工程模式的指挥官；跟随主模型时共用主模型端点"),
 	monitor: t("开源情报判断每个新提交是否为安全修复；改完下一次检查生效"),
+	workprocess: "根据对话和工程记录分析目标、步骤与转向原因；每个对象单独手动开启",
 };
 
 export const ROLE_SHORT: Record<SentinelModelRoleName, string> = {
@@ -42,6 +45,7 @@ export const ROLE_SHORT: Record<SentinelModelRoleName, string> = {
 	supervisor: t("介入判断"),
 	commander: t("工程指挥"),
 	monitor: t("提交定级"),
+	workprocess: "过程重建",
 };
 
 export const MODEL_API_OPTIONS = [

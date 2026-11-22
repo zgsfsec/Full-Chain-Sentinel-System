@@ -13,6 +13,7 @@ import { addLibraryEntry, setLibraryRole, updateLibraryEntry } from "../src/mode
 import { VulnReviewer } from "../src/reviewer.ts";
 import { callSupervisorModel } from "../src/supervisor.ts";
 import { VulnerabilityStore } from "../src/vulnerabilities.ts";
+import { completeWorkProcess } from "../src/work-process.ts";
 import { modelStream } from "./model-stream-fixtures.ts";
 
 interface RequestRecord {
@@ -76,6 +77,32 @@ function endpoint() {
 const APIS = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"] as const;
 
 describe("auxiliary SDK calls", () => {
+	test.each(APIS)("work process honors configured output limits and exposes truncation through %s", async (api) => {
+		for (const maxTokens of [24000, 512]) {
+			const id = configure(api, maxTokens);
+			setLibraryRole(dir, "workprocess", id);
+			respond = () => modelStream(api, '{"nodes":', "length");
+			const reply = await completeWorkProcess(dir)("input", new AbortController().signal);
+			expect(reply).toMatchObject({ finishReason: "length", usage: { total: 30 }, model: "test-model" });
+			const body = requests[requests.length - 1].body;
+			switch (api) {
+				case "openai-completions":
+					expect(body.max_tokens ?? body.max_completion_tokens).toBe(maxTokens);
+					break;
+				case "openai-responses":
+					expect(body.max_output_tokens).toBe(maxTokens);
+					break;
+				case "anthropic-messages":
+					expect(body.max_tokens).toBe(maxTokens);
+					break;
+				case "google-generative-ai":
+					expect(body.generationConfig).toMatchObject({ maxOutputTokens: maxTokens });
+					break;
+			}
+		}
+		expect(requests).toHaveLength(2);
+	});
+
 	test.each(APIS)("uses %s protocol, authentication, JSON mode and cache-inclusive usage", async (api) => {
 		configure(api);
 		respond = () => modelStream(api, '{"ok":true}');

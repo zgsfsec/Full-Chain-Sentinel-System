@@ -103,6 +103,10 @@ import { SubscriptionScheduler } from "./subscription-scheduler.ts";
 import { createTerminal } from "./terminal.ts";
 import { readUiConfig, writeUiConfig } from "./ui-config.ts";
 import { buildWireGuardConfig } from "./wireguard.ts";
+import { completeWorkProcess, WorkProcesses } from "./work-process.ts";
+import { handleWorkProcessApi } from "./work-process-api.ts";
+import { RecordedWorkProcessSources } from "./work-process-source.ts";
+import { WorkProcessStore } from "./work-process-store.ts";
 import type { WorkerSession } from "./worker.ts";
 
 interface AcquiredTaskSession {
@@ -623,6 +627,29 @@ export async function startSentinelServer(
 	 * terminal state is an engine: the manager polls and judges, and the hook
 	 * below turns a confirmed fix into an engine the operator can watch.
 	 */
+	const workProcesses = agentDir
+		? new WorkProcesses(
+				new WorkProcessStore(join(agentDir, "work-process.db")),
+				new RecordedWorkProcessSources({
+					agentDir,
+					projects: () =>
+						listProjects(agentDir).projects.map((project) => ({
+							id: project.id,
+							name: project.name,
+							cwd: project.workDir,
+						})),
+					engines: () => engines?.listEngines() ?? [],
+					commanderEvents: (id) => engines?.commanderEvents(id) ?? [],
+					taskEvents: (id) => engines?.taskEvents(id) ?? [],
+					active: () => ({
+						id: runtime.currentSessionId,
+						projectId: runtime.currentProject?.id ?? null,
+						running: runtime.snapshot().runningSessions,
+					}),
+				}),
+				completeWorkProcess(agentDir),
+			)
+		: undefined;
 	const securityChecks =
 		agentDir && engines
 			? new SecurityChecks(
@@ -1676,6 +1703,17 @@ export async function startSentinelServer(
 				void servePluginIcon(runtime, request, response);
 				return;
 			}
+			if (path === "/api/work-processes" || path.startsWith("/api/work-processes/")) {
+				void handleWorkProcessApi(
+					request,
+					response,
+					workProcesses,
+					() =>
+						(!authEnabled || hasValidSession(currentAuth(), request)) &&
+						!consentFor(currentAuth()?.username ?? null).required,
+				);
+				return;
+			}
 			if (path.startsWith("/api/intelligence/")) {
 				void handleIntelligenceApi(
 					request,
@@ -2108,7 +2146,10 @@ export async function startSentinelServer(
 					return;
 				}
 				case "delete_session": {
+					const projectId = runtime.currentProject?.id;
+					const session = (await runtime.listSessions()).find((entry) => entry.path === message.path);
 					await runtime.deleteSession(message.path);
+					if (projectId && session) workProcesses?.delete({ projectId, kind: "session", id: session.id });
 					await broadcastSessions();
 					return;
 				}
@@ -3079,6 +3120,7 @@ export async function startSentinelServer(
 					// The project's container is gone: its engines cannot run and
 					// their task sessions die with the project, so cascade.
 					if (engines) await engines.purgeProject(message.id);
+					workProcesses?.purgeProject(message.id);
 					codeMonitors?.removeByProject(message.id);
 					intelligenceStore?.purgeProject(message.id);
 					credentials?.purgeProject(message.id);
@@ -4261,7 +4303,9 @@ export async function startSentinelServer(
 					return;
 				case "engine_delete":
 					if (engines) {
+						const engine = engines.getEngine(message.id);
 						await engines.deleteEngine(message.id);
+						if (engine) workProcesses?.delete({ projectId: engine.projectId, kind: "engine", id: engine.id });
 						broadcastEngines();
 					}
 					return;
@@ -4596,6 +4640,7 @@ export async function startSentinelServer(
 	}
 
 	await runtime.init();
+	workProcesses?.start();
 	intelligence?.start();
 
 	return await new Promise((resolvePromise) => {
@@ -4640,6 +4685,7 @@ export async function startSentinelServer(
 				url: consoleUrl(),
 				environment,
 				close: () => {
+					workProcesses?.close();
 					codeMonitors?.stop();
 					projectStorage?.dispose();
 					if (storageUpdateTimer) clearTimeout(storageUpdateTimer);

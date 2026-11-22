@@ -44,6 +44,7 @@ export type SentinelPageId =
 	| "engine"
 	| "gates"
 	| "supervisor"
+	| "work-process"
 	| "settings.model"
 	| "settings.supervisor"
 	| "settings.notify"
@@ -178,7 +179,7 @@ export interface SentinelModelConfig {
 }
 
 /** The jobs a model can be assigned to. */
-export type SentinelModelRoleName = "main" | "judge" | "reviewer" | "supervisor" | "commander" | "monitor";
+export type SentinelModelRoleName = "main" | "judge" | "reviewer" | "supervisor" | "commander" | "monitor" | "workprocess";
 
 /** One row of the model library. The key itself never leaves the server. */
 export interface SentinelModelEntryView {
@@ -262,6 +263,7 @@ export interface SentinelModelLibraryView {
 		supervisor: string;
 		commander: string;
 		monitor: string;
+		workprocess: string;
 	};
 	reviewerAuto: boolean;
 	resolved: {
@@ -271,6 +273,7 @@ export interface SentinelModelLibraryView {
 		supervisor: SentinelResolvedModelView | null;
 		commander: SentinelResolvedModelView | null;
 		monitor: SentinelResolvedModelView | null;
+		workprocess: SentinelResolvedModelView | null;
 	};
 }
 

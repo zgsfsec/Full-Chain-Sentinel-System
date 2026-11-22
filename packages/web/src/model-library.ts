@@ -55,6 +55,7 @@ export const SENTINEL_MODEL_ROLE_NAMES: SentinelModelRoleName[] = [
 	"supervisor",
 	"commander",
 	"monitor",
+	"workprocess",
 ];
 export const SENTINEL_MODEL_ROLE_LABELS: Record<SentinelModelRoleName, string> = {
 	get main() {
@@ -74,6 +75,9 @@ export const SENTINEL_MODEL_ROLE_LABELS: Record<SentinelModelRoleName, string> =
 	},
 	get monitor() {
 		return t("监测模型");
+	},
+	get workprocess() {
+		return "工作链路模型";
 	},
 };
 
@@ -96,6 +100,7 @@ export interface SentinelModelLibrary {
 		supervisor: SentinelRoleRef;
 		commander: SentinelRoleRef;
 		monitor: SentinelRoleRef;
+		workprocess: SentinelRoleRef;
 	};
 	/** When off, submissions are not queued for the reviewer at all. */
 	reviewerAuto: boolean;
@@ -199,6 +204,7 @@ export function normalizeModelLibrary(value: unknown): SentinelModelLibrary {
 			supervisor: roleRef(rawRoles.supervisor, { kind: "follow-main" }),
 			commander,
 			monitor: roleRef(rawRoles.monitor, { kind: "follow-main" }),
+			workprocess: roleRef(rawRoles.workprocess, { kind: "follow-main" }),
 		},
 		reviewerAuto: typeof source.reviewerAuto === "boolean" ? source.reviewerAuto : true,
 	};
@@ -272,6 +278,7 @@ export function migrateModelLibrary(agentDir: string): SentinelModelLibrary {
 				? { kind: "model", id: SENTINEL_COMMANDER_PROVIDER_ID }
 				: { kind: "follow-main" },
 			monitor: { kind: "follow-main" },
+			workprocess: { kind: "follow-main" },
 		},
 		reviewerAuto: true,
 	});
@@ -359,6 +366,7 @@ export function libraryView(agentDir: string): SentinelModelLibraryView {
 			supervisor: library.roles.supervisor.kind === "model" ? library.roles.supervisor.id : FOLLOW_MAIN,
 			commander: library.roles.commander.kind === "model" ? library.roles.commander.id : FOLLOW_MAIN,
 			monitor: library.roles.monitor.kind === "model" ? library.roles.monitor.id : FOLLOW_MAIN,
+			workprocess: library.roles.workprocess.kind === "model" ? library.roles.workprocess.id : FOLLOW_MAIN,
 		},
 		reviewerAuto: library.reviewerAuto,
 		resolved: {
@@ -368,6 +376,7 @@ export function libraryView(agentDir: string): SentinelModelLibraryView {
 			supervisor: toResolvedModelView(resolveLibraryRole(agentDir, "supervisor")),
 			commander: toResolvedModelView(resolveLibraryRole(agentDir, "commander")),
 			monitor: toResolvedModelView(resolveLibraryRole(agentDir, "monitor")),
+			workprocess: toResolvedModelView(resolveLibraryRole(agentDir, "workprocess")),
 		},
 	};
 }
