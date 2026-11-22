@@ -5,8 +5,9 @@ import { getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import * as sdk from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { REPLAY_TOOL_NAMES } from "../src/replay-tool.ts";
+import { ReportTemplateStore } from "../src/report-templates.ts";
 import { SentinelRuntime } from "../src/sentinel-session.ts";
-import { readSessionReports, SESSION_REPORTS_CUSTOM_TYPE } from "../src/session-reports.ts";
+import { readSessionReports, readSessionReportTemplate, SESSION_REPORTS_CUSTOM_TYPE } from "../src/session-reports.ts";
 import { writeTestModel } from "./model-fixtures.ts";
 
 const reportNames = ["report_submit", ...REPLAY_TOOL_NAMES];
@@ -189,6 +190,13 @@ test("branch navigation restores the branch's report switch and loadout", async 
 });
 
 test("engineering workers retain report submission without inheriting the console's screenshot tools", async () => {
+	const templates = new ReportTemplateStore(root);
+	try {
+		const template = templates.create("仅总报告", "## 不应进入子任务");
+		templates.setDefault(projectA.id, template.id);
+	} finally {
+		templates.close();
+	}
 	await runtime.init();
 	const worker = await runtime.acquireTaskSession({
 		project: projectA,
@@ -210,7 +218,61 @@ test("engineering workers retain report submission without inheriting the consol
 		},
 	});
 	expect(worker.session.getActiveToolNames()).toContain("report_submit");
+	expect(readSessionReportTemplate(worker.manager.getBranch())).toBeUndefined();
 	for (const name of REPLAY_TOOL_NAMES)
 		expect(worker.session.getAllTools().map((tool) => tool.name)).not.toContain(name);
 	worker.release();
+});
+
+test("conversations keep frozen templates through edits, deletion, toggling, switching projects and reopening", async () => {
+	const templates = new ReportTemplateStore(root);
+	try {
+		const template = templates.create("会话模板", "## 固定章节\n\n<!-- 按实际证据填写 -->");
+		templates.setDefault(projectA.id, template.id);
+		const created = vi.spyOn(sdk, "createAgentSession");
+		await runtime.init();
+		const { session } = await created.mock.results[0].value;
+		const send = vi.spyOn(session.agent, "prompt").mockResolvedValue(undefined);
+		const prompt = () =>
+			getCurrentSystemPrompt(send.mock.calls.at(-1)![0] as unknown as sdk.AgentSession["messages"]);
+		runtime.setReportsEnabled(true);
+		expect(runtime.snapshot().reportTemplate?.id).toBe(template.id);
+		const path = runtime.currentSessionPath!;
+		session.sessionManager.appendMessage({ role: "user", content: "保存会话", timestamp: Date.now() });
+		templates.update(template.id, template.revision, "新版", "## 新版章节");
+		templates.delete(template.id);
+		await session.prompt("生成报告");
+		expect(prompt()).toContain(template.markdown);
+		expect(prompt()).toContain("保留章节标题及顺序");
+		expect(prompt()).not.toContain("## 新版章节");
+		runtime.setReportsEnabled(false);
+		await session.prompt("讨论结论");
+		expect(prompt()).not.toContain("<report-template>");
+		runtime.setReportsEnabled(true);
+		expect(runtime.snapshot().reportTemplate?.name).toBe(template.name);
+		const submit = created.mock.calls[0][0]!.customTools!.find((tool) => tool.name === "report_submit")!;
+		await submit.execute(
+			"template-report",
+			{ title: "结果", markdown: "## 固定章节\n无确认漏洞" },
+			undefined,
+			undefined,
+			{} as never,
+		);
+		expect(runtime.reports.list(projectA.id).items[0].reportTemplate?.markdown).toBe(template.markdown);
+		await runtime.switchProject(projectB);
+		expect(runtime.snapshot().reportTemplate).toBeNull();
+		await runtime.switchProject(projectA);
+		await runtime.switchSession(path);
+		expect(runtime.snapshot().reportTemplate?.id).toBe(template.id);
+		runtime.dispose();
+		runtime = createRuntime();
+		await runtime.init();
+		await runtime.switchSession(path);
+		expect(runtime.snapshot().reportTemplate?.id).toBe(template.id);
+		runtime.setReportsEnabled(true, null);
+		expect(runtime.snapshot().reportTemplate).toBeNull();
+		expect(() => runtime.setReportsEnabled(true, "deleted")).toThrow("不存在");
+	} finally {
+		templates.close();
+	}
 });

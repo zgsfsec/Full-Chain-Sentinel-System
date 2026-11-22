@@ -297,6 +297,7 @@ import type {
 } from "./protocol.ts";
 import { createReplayTools, REPLAY_TOOL_NAMES, type ReplayToolContext } from "./replay-tool.ts";
 import { ensureReplayd, type ReplaydStatus } from "./replayd.ts";
+import { resolveReportTemplate } from "./report-templates.ts";
 import { createReportTool } from "./report-tool.ts";
 import { ReportStore, reportsDbPath } from "./reports.ts";
 import { readSessionCredentials, SESSION_CREDENTIALS_CUSTOM_TYPE } from "./session-credentials.ts";
@@ -304,7 +305,12 @@ import { readSessionDroid, SESSION_DROID_CUSTOM_TYPE } from "./session-droid.ts"
 import { readSessionIos, SESSION_IOS_CUSTOM_TYPE } from "./session-ios.ts";
 import { readSessionMode, SESSION_MODE_CUSTOM_TYPE } from "./session-mode.ts";
 import { readSessionPreset, SESSION_PRESET_CUSTOM_TYPE } from "./session-preset.ts";
-import { readSessionReports, SESSION_REPORTS_CUSTOM_TYPE } from "./session-reports.ts";
+import {
+	readSessionReports,
+	readSessionReportTemplate,
+	SESSION_REPORT_TEMPLATE_CUSTOM_TYPE,
+	SESSION_REPORTS_CUSTOM_TYPE,
+} from "./session-reports.ts";
 import {
 	readSessionStatus,
 	SESSION_STATUS_CUSTOM_TYPE,
@@ -1018,6 +1024,7 @@ export class SentinelRuntime {
 						source: task ? "engine" : goal ? "goal" : "session",
 						sessionId: manager.getSessionId(),
 						sessionName: manager.getSessionName(),
+						reportTemplate: task ? null : readSessionReportTemplate(manager.getBranch()),
 						...(goal ? { goalId: goal.id } : {}),
 						...(task ? { engineId: task.engineId, taskId: task.taskId, taskName: task.taskTitle } : {}),
 					};
@@ -3276,11 +3283,21 @@ export class SentinelRuntime {
 	}
 
 	/** Update only the viewed ordinary conversation, without prompting or rebuilding it. */
-	setReportsEnabled(enabled: boolean): void {
+	setReportsEnabled(enabled: boolean, templateId?: string | null): void {
 		if (typeof enabled !== "boolean") throw new Error("报告中心开关格式错误");
 		const active = this.active;
 		if (!active || active.taskSession) throw new Error("请先选择项目中的普通对话");
-		if (active.reportsOn === enabled) return;
+		if (templateId !== undefined && templateId !== null && typeof templateId !== "string")
+			throw new Error("报告模板选择格式错误");
+		if (
+			enabled &&
+			(templateId !== undefined || readSessionReportTemplate(active.manager.getBranch()) === undefined)
+		) {
+			if (active.session.isStreaming) throw new Error("会话正在运行，请结束或中止后再选择报告模板");
+			if (!active.projectId) throw new Error("请先选择项目");
+			const template = resolveReportTemplate(this.agentDir, active.projectId, templateId);
+			active.manager.appendCustomEntry(SESSION_REPORT_TEMPLATE_CUSTOM_TYPE, template);
+		}
 		active.manager.appendCustomEntry(SESSION_REPORTS_CUSTOM_TYPE, { enabled, at: Date.now() });
 		active.reportsOn = enabled;
 		this.applyReportTools(active);
@@ -4758,6 +4775,12 @@ export class SentinelRuntime {
 			iosEnabled: active?.iosOn ?? false,
 			credentialsEnabled: active?.credentialsOn ?? false,
 			reportsEnabled: active?.reportsOn ?? false,
+			reportTemplate: active
+				? (() => {
+						const template = readSessionReportTemplate(active.manager.getBranch());
+						return template ? { id: template.id, name: template.name, revision: template.revision } : null;
+					})()
+				: null,
 			supervisor: this.activeKey ? this.supervisor.view(this.activeKey) : null,
 			supervisorConfig: readSupervisorConfig(this.agentDir),
 			gatekeeper,

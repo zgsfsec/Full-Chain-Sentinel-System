@@ -6,6 +6,7 @@ import { CredentialStore } from "../src/credential-store.ts";
 import { parseCredential } from "../src/credential-types.ts";
 import { EngineManager } from "../src/engine.ts";
 import { EngineStore } from "../src/engine-store.ts";
+import { ReportTemplateStore } from "../src/report-templates.ts";
 import { securityCheckCategories } from "../src/security-check-categories.ts";
 import { parseSecurityCheckMarkdown, parseSecurityCheckRepository } from "../src/security-check-input.ts";
 import { SecurityCheckStore } from "../src/security-check-store.ts";
@@ -169,6 +170,11 @@ test("editing a source while downloading invalidates its stale sync result", asy
 
 test("multiple rules submit one ordinary engine with frozen inputs, project credentials and idempotency", async () => {
 	const dir = root();
+	const templates = new ReportTemplateStore(dir);
+	cleanups.push(() => templates.close());
+	const defaultTemplate = templates.create("默认报告", "## 默认结构");
+	const chosenTemplate = templates.create("检查报告", "## 检查结论");
+	templates.setDefault("p", defaultTemplate.id);
 	const project = { id: "p", name: "P", cwd: dir, container: "fixture" };
 	writeFileSync(
 		join(dir, "projects.json"),
@@ -214,6 +220,7 @@ test("multiple rules submit one ordinary engine with frozen inputs, project cred
 		requirements: "",
 		input: {
 			name: "检查",
+			reportTemplateId: chosenTemplate.id,
 			targets: "",
 			doctrines: ["security-check"],
 			presetIds: [],
@@ -223,6 +230,7 @@ test("multiple rules submit one ordinary engine with frozen inputs, project cred
 		},
 	};
 	const submitted = await service.submit(body);
+	expect(manager.getEngine(submitted.engineId)?.reportTemplate?.id).toBe(chosenTemplate.id);
 	expect(manager.listEngines()).toHaveLength(1);
 	expect(await service.submit(structuredClone(body))).toEqual(submitted);
 	const snapshot = manager.getSubmission(submitted.engineId);

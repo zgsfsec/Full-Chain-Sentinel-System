@@ -1,5 +1,7 @@
 /** Task-stage guidance built from the current loadout, including custom SYSTEM.md sessions. */
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { reportTemplatePrompt } from "./report-templates.ts";
+import { readSessionReportTemplate } from "./session-reports.ts";
 
 // Each route names only its required tools, so inactive capabilities cannot leak
 // into the workflow when the operator changes a session's loadout.
@@ -113,12 +115,16 @@ const TOOL_WORKFLOW_ROUTES: readonly { tools: readonly string[]; guideline: stri
 
 export function createToolWorkflowExtension(): ExtensionFactory {
 	return (pi) => {
-		pi.on("before_agent_start", (event) => {
+		pi.on("before_agent_start", (event, ctx) => {
 			const options = event.systemPromptOptions;
 			if (options.forceSystemPrompt !== undefined) return;
 			const selected = new Set(options.selectedTools);
 			const available = pi.getAllTools().filter((tool) => selected.has(tool.name));
 			const names = new Set(available.map((tool) => tool.name));
+			if (names.has("report_submit")) {
+				const template = reportTemplatePrompt(readSessionReportTemplate(ctx.sessionManager.getBranch()));
+				if (template) options.sections.report_template = template;
+			}
 			const rules: string[] = [];
 			if (names.has("asset_list"))
 				rules.push("任务开始或续跑：先用 asset_list 按本次目标筛选已有资产与测试记录，复用证据并避免重复侦察。");

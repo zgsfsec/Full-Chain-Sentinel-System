@@ -1,0 +1,9 @@
+.report-composer-control { vertical-align: middle; }
+.report-composer-control.is-enabled > .ant-btn { background: var(--ant-color-fill-quaternary); border-color: var(--ant-color-border); color: var(--ant-color-text); }
+.report-composer-control__status { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--ant-color-success); }
+.report-composer-control .report-composer-control__settings { width: 24px; padding-inline: 0; color: var(--ant-color-text-tertiary); }
+.report-composer-control__settings .anticon { font-size: 10px; }
+.report-composer-settings { display: flex; flex-direction: column; gap: 10px; width: min(280px, calc(100vw - 56px)); }
+.report-composer-settings__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.report-composer-settings__heading > .ant-typography:last-child { font-size: 12px; }
+.report-composer-settings .report-composer-settings__hint { font-size: 12px; line-height: 1.6; }

@@ -42,6 +42,7 @@ import type { UploadFile } from "antd";
 import type { CredentialView } from "../../../src/credential-types.ts";
 import type { SecurityCheckRuleSummary } from "../../../src/security-check-types.ts";
 import { securityCheckRequest } from "../security-check-api.ts";
+import { ReportTemplateSelect } from "./ReportTemplateSelect.tsx";
 import { EngineTabs, SecurityCheckRules } from "./SecurityChecksPage.tsx";
 import { SecurityCheckCredentials } from "./SecurityCheckCredentials.tsx";
 import { engineTargetText } from "../engine-targets.ts";
@@ -1269,6 +1270,7 @@ function CreateEngineForm(props: {
 	onCancel(): void;
 	onSubmit(input: {
 		name: string;
+		reportTemplateId?: string | null;
 		targets: string;
 		doctrines: string[];
 		presetIds: string[];
@@ -1301,6 +1303,7 @@ function CreateEngineForm(props: {
 	const [presetQuery, setPresetQuery] = useState("");
 	/** A task may run without a preset; allowing it is the default. */
 	const [presetOptional, setPresetOptional] = useState(true);
+	const [reportTemplateId, setReportTemplateId] = useState<string | null | undefined>();
 	const [concurrency, setConcurrency] = useState(3);
 	const [roundLimit, setRoundLimit] = useState(5);
 	const [maxRetries, setMaxRetries] = useState(1);
@@ -1396,6 +1399,7 @@ function CreateEngineForm(props: {
 		if (!props.securityCheck && !selectedDoctrine) return;
 		const input = {
 			name: name.trim(),
+			reportTemplateId,
 			targets: engineTargetText(targets, attachments, props.project?.id ?? ""),
 			doctrines: props.securityCheck ? ["security-check"] : selectedDoctrine ? [selectedDoctrine.id] : [],
 			presetIds: selectedPresets,
@@ -1578,6 +1582,7 @@ function CreateEngineForm(props: {
 						{step === settingsStep ? (
 							<>
 								{props.securityCheck && agentSettings}
+								{props.project ? <Form layout="vertical"><Form.Item label={getLanguage() === "en" ? "Final report template" : "工程总报告模板"} extra={getLanguage() === "en" ? "Applies to the final report. Task reports keep their existing format." : "仅用于工程总报告，子任务报告沿用当前格式。"}><ReportTemplateSelect key={props.project.id} projectId={props.project.id} value={reportTemplateId} onChange={setReportTemplateId} disabled={submitting} /></Form.Item></Form> : null}
 								<Space size={8} className="enginewiz-section">
 									<Text strong>{t("启动方式")}</Text>
 									<Text type="secondary">{t("时区 {timezone}", { timezone: browserTimezone() })}</Text>

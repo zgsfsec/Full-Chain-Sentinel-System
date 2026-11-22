@@ -1,6 +1,6 @@
 import { ArrowLeftOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import { ProTable, type ProColumns } from "@ant-design/pro-components";
-import { Alert, App, Button, Empty, Flex, Image, Input, Segmented, Select, Skeleton, Space, Tag, Typography } from "antd";
+import { Alert, App, Button, Empty, Flex, Image, Input, Segmented, Select, Skeleton, Space, Tabs, Tag, Typography } from "antd";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -8,6 +8,7 @@ import type { ReportDetail, ReportPage, ReportSource, ReportSummary } from "../.
 import { getLanguage } from "../i18n.ts";
 import { readJson } from "../read-json.ts";
 import { Page } from "../ui/Page.tsx";
+import { ReportTemplatesPanel } from "./ReportTemplatesPanel.tsx";
 import "./ReportCenterPage.css";
 
 const tx = (zh: string, en: string) => getLanguage() === "en" ? en : zh;
@@ -48,7 +49,10 @@ export function ReportCenterPage({ projectId, refreshToken = 0 }: {
 }) {
 	return <Page title={tx("报告中心", "Reports")}
 		description={tx("按当前项目归档报告、截图、漏洞报文和脚本，容器停止后仍可查阅。", "Reports, screenshots, vulnerability packets and scripts for the current project, retained after containers stop.")}>
-		{projectId ? <ProjectReports key={projectId} projectId={projectId} refreshToken={refreshToken} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tx("请先在全局选择项目，再查看报告。", "Select a project in the global navigation to view reports.")} />}
+		<Tabs items={[
+			{ key: "reports", label: tx("项目报告", "Project reports"), children: projectId ? <ProjectReports key={projectId} projectId={projectId} refreshToken={refreshToken} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tx("请先在全局选择项目，再查看报告。", "Select a project in the global navigation to view reports.")} /> },
+			{ key: "templates", label: tx("报告模板", "Report templates"), children: <ReportTemplatesPanel projectId={projectId} refreshToken={refreshToken} /> },
+		]} />
 	</Page>;
 }
 

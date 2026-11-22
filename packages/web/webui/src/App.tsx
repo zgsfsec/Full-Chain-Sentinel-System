@@ -3243,8 +3243,9 @@ export function App() {
 									credentialsEnabled={snapshot?.credentialsEnabled ?? false}
 									onToggleCredentials={(next) => send({ type: "credentials_set_enabled", enabled: next })}
 									reportsEnabled={snapshot?.reportsEnabled ?? false}
+									reportTemplate={snapshot?.reportTemplate}
 									reportsReadOnly={sessions.some((item) => item.id === snapshot?.activeSessionId && item.engine !== undefined)}
-									onToggleReports={(next) => send({ type: "reports_set_enabled", enabled: next })}
+									onToggleReports={(next, templateId) => send({ type: "reports_set_enabled", enabled: next, templateId })}
 									apiModels={
 										snapshot?.project
 											? apiModels.filter((item) => item.projectId === snapshot.project?.id)

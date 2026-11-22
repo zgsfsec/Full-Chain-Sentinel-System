@@ -6,6 +6,7 @@ import type { CodeReproductionResult } from "../../src/code-reproduction.ts";
 import type { UiLanguage } from "../../src/i18n-messages.ts";
 import type { SentinelNotifyConfig, SentinelNotifyStatus, SentinelNotifyTarget } from "../../src/notify-types.ts";
 import type { ProjectStorageUsage } from "../../src/project-storage-types.ts";
+import type { ReportTemplateSnapshot } from "../../src/report-types.ts";
 import { t } from "./i18n.ts";
 
 export type SentinelMode = "review" | "ai" | "auto";
@@ -1489,6 +1490,7 @@ export interface SentinelStateSnapshot {
 	credentialsEnabled: boolean;
 	/** Whether the viewed conversation has opted into report submission and evidence tools. */
 	reportsEnabled: boolean;
+	reportTemplate?: Pick<ReportTemplateSnapshot, "id" | "name" | "revision"> | null;
 	/** Supervision of the viewed conversation; null when it was never armed. */
 	supervisor: SentinelSupervisorView | null;
 	/** Global supervision settings shown under 设置 → 模型. */
@@ -2011,7 +2013,7 @@ export type SentinelClientMessage =
 	| { type: "ios_device_remove"; id: string }
 	| { type: "ios_set_enabled"; enabled: boolean }
 	| { type: "credentials_set_enabled"; enabled: boolean }
-	| { type: "reports_set_enabled"; enabled: boolean }
+	| { type: "reports_set_enabled"; enabled: boolean; templateId?: string | null }
 	| { type: "credentials_verify"; projectId: string; refs: { id: string; revision: string }[] }
 	| { type: "ios_set_listen"; host: string; port: number }
 	| { type: "list_api_models"; filters?: SentinelApiModelFilters }
@@ -2998,6 +3000,7 @@ export interface SentinelEngineTask {
 }
 
 export interface SentinelEngine {
+	reportTemplate?: ReportTemplateSnapshot | null;
 	id: string;
 	submissionSource?: string;
 	projectId: string;
@@ -3082,6 +3085,7 @@ export interface SentinelSessionPresetView {
 }
 
 export interface SentinelEngineCreateInput {
+	reportTemplateId?: string | null;
 	name: string;
 	targets: string;
 	doctrines: string[];

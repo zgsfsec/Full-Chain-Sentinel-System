@@ -67,6 +67,7 @@ import type {
 	SentinelPreset,
 	SentinelProjectInfo,
 } from "./protocol.ts";
+import { reportTemplatePrompt, resolveReportTemplate } from "./report-templates.ts";
 import type { TaskSessionOptions } from "./sentinel-session.ts";
 import {
 	EngineWorker,
@@ -349,6 +350,7 @@ export class EngineManager {
 		}
 		const schedule = input.schedule ? normalizeSchedule(input.schedule, Date.now()) : null;
 		const stored = this.store.createEngine({
+			reportTemplate: resolveReportTemplate(this.agentDir, project.id, input.reportTemplateId),
 			projectId: project.id,
 			projectName: project.name,
 			name,
@@ -1786,6 +1788,7 @@ export class EngineManager {
 		);
 		const stored = this.store.createEngine({
 			projectId: engine.projectId,
+			reportTemplate: engine.reportTemplate,
 			projectName: engine.projectName,
 			name: engine.name,
 			targets: engine.targets,
@@ -2079,6 +2082,12 @@ export function buildCommanderBrief(
 		"- 全部目标处理完后，用 engine_done 提交 markdown 总报告：逐目标结论、发现汇总（漏洞中枢编号）、失败清单与原因、建议操作员复核的事项。",
 		"- 侦察能下放就下放：你的价值在编排与决策，不在等待。",
 		"",
+		...(engine.reportTemplate
+			? [
+					"以下模板仅用于 engine_done 工程总报告，不传给子任务，不改变子任务报告格式。",
+					reportTemplatePrompt(engine.reportTemplate),
+				]
+			: []),
 		"工具权限与使用纪律：",
 		permissions.read
 			? "- read 已启用：主动读取与拆解任务有关的目标附件、项目文件和已有证据，形成自包含的任务指令；只能读取，不能修改。"

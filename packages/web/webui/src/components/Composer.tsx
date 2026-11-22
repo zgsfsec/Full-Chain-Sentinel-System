@@ -2,7 +2,6 @@ import {
 	ArrowUpOutlined,
 	BellOutlined,
 	CloseOutlined,
-	FileTextOutlined,
 	KeyOutlined,
 	PaperClipOutlined,
 	PictureOutlined,
@@ -10,6 +9,7 @@ import {
 } from "@ant-design/icons";
 import { Alert, Button, Input, Progress, Segmented, Space, Tooltip, Typography } from "antd";
 import { useEffect, useRef, useState } from "react";
+import type { ReportTemplateSummary } from "../../../src/report-types.ts";
 import { getLanguage, t } from "../i18n.ts";
 import { formatSize, formatTokens } from "../transcript.ts";
 import type {
@@ -27,6 +27,7 @@ import type {
 import { attachmentManifest, planAttachments, staleUploads, type UploadedFile, uploadFile } from "../uploads.ts";
 import { ApiModelIcon, DroidIcon, IosIcon, SubagentIcon, SupervisorIcon, TargetIcon } from "./icons.tsx";
 import { ModelingMenu } from "./ModelingMenu.tsx";
+import { ReportComposerControl } from "./ReportComposerControl.tsx";
 import { PresetMenu, type PresetMenuAnchor, presetMenuPosition } from "./PresetMenu.tsx";
 import { SupervisorStartMenu, type SupervisorLaunchMode } from "./SupervisorStartMenu.tsx";
 import { supervisorStrategyKey } from "../supervisor-strategy.ts";
@@ -117,6 +118,7 @@ export function Composer({
 	credentialsEnabled,
 	onToggleCredentials,
 	reportsEnabled,
+	reportTemplate,
 	reportsReadOnly,
 	onToggleReports,
 	apiModels,
@@ -172,9 +174,10 @@ export function Composer({
 	credentialsEnabled: boolean;
 	onToggleCredentials: (next: boolean) => void;
 	reportsEnabled: boolean;
+	reportTemplate?: Pick<ReportTemplateSummary, "id" | "name" | "revision"> | null;
 	/** Engineering task conversations retain their engine-controlled report workflow. */
 	reportsReadOnly: boolean;
-	onToggleReports: (next: boolean) => void;
+	onToggleReports: (next: boolean, templateId?: string | null) => void;
 	/**
 	 * The modeling records already attached to this conversation (带建模数据).
 	 * While set, `api_model_read` is mounted and the picker shows them instead of
@@ -551,21 +554,7 @@ export function Composer({
 					<Button size="small" type={credentialsEnabled ? "primary" : "default"} icon={<KeyOutlined />} disabled={!hasProject} onClick={() => onToggleCredentials(!credentialsEnabled)} title={credentialsEnabled ? "当前对话可读取、保存、更新并主动验证项目凭据，点击关闭" : "允许当前对话中的 Agent 管理、主动验证并上报当前项目凭据，无需逐条授权"}>
 						{t("凭据中心")}{credentialsEnabled ? <Text>✓</Text> : null}
 					</Button>
-					<Button
-						size="small"
-						type={reportsEnabled ? "primary" : "default"}
-						icon={<FileTextOutlined />}
-						aria-pressed={reportsEnabled}
-						disabled={!hasProject || reportsReadOnly}
-						onClick={() => onToggleReports(!reportsEnabled)}
-						title={!hasProject ? t("请先创建或选择一个项目") : reportsReadOnly
-							? (getLanguage() === "en" ? "Engineering tasks use their engine's report workflow" : "工程任务沿用工程的自动报告流程")
-							: reportsEnabled
-								? (getLanguage() === "en" ? "Report submission and evidence screenshots are enabled for this conversation. Click to disable." : "当前对话已启用报告提交、证据截图和截图历史查询，点击关闭")
-								: (getLanguage() === "en" ? "Enable report submission and evidence screenshots for this conversation" : "为当前对话启用报告提交、证据截图和截图历史查询")}
-					>
-						{getLanguage() === "en" ? "Reports" : "报告中心"}{reportsEnabled ? <Text>✓</Text> : null}
-					</Button>
+					<ReportComposerControl projectId={hasProject ? projectId : null} enabled={reportsEnabled} template={reportTemplate} readOnly={reportsReadOnly} streaming={streaming} blocked={blocked} onChange={onToggleReports} />
 					{goalDisabledReason ? <Text type="secondary">{goalDisabledReason}</Text> : null}
 				</Space>
 				{presetMenu ? (

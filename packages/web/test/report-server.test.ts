@@ -11,6 +11,12 @@ test("report list, detail, images, downloads and deletion require login and cons
 	try {
 		const id = "00000000-0000-0000-0000-000000000000";
 		const routes = [
+			{ path: "/templates", method: "GET" },
+			{ path: "/templates", method: "POST" },
+			{ path: "/templates/default", method: "PUT" },
+			{ path: `/templates/${id}`, method: "GET" },
+			{ path: `/templates/${id}`, method: "PUT" },
+			{ path: `/templates/${id}`, method: "DELETE" },
 			{ path: "", method: "GET" },
 			{ path: `/${id}`, method: "GET" },
 			{ path: `/${id}/images/${id}`, method: "GET" },

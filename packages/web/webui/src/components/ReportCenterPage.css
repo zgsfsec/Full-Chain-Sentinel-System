@@ -1,4 +1,5 @@
-.report-center { display: grid; gap: 16px; min-width: 0; }
+.report-center { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.report-template-default { padding: 16px; border: 1px solid var(--ant-color-border-secondary, #e4e4e7); border-radius: 8px; background: var(--ant-color-bg-container, #fff); }
 .report-title-button.ant-btn { display: block; max-width: 100%; height: auto; padding: 0; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .report-reader { min-width: 0; }
 .report-reader__toolbar { margin-bottom: 20px; }

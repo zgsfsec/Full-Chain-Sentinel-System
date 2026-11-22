@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { buildReportBundle } from "./report-bundle.ts";
 import { portableReportMarkdown, validateReportEdit } from "./report-content.ts";
+import { handleReportTemplateApi } from "./report-template-api.ts";
 import type { ReportSource } from "./report-types.ts";
 import type { ReportStore } from "./reports.ts";
 
@@ -19,6 +20,10 @@ export async function handleReportApi(
 ): Promise<void> {
 	try {
 		const url = new URL(request.url ?? "/", "http://localhost");
+		if (url.pathname === "/api/reports/templates" || url.pathname.startsWith("/api/reports/templates/")) {
+			await handleReportTemplateApi(request, response, store.agentDir, projectExists, authorized);
+			return;
+		}
 		const projectId = url.searchParams.get("projectId") ?? "";
 		if (!projectId || !projectExists(projectId)) {
 			json(response, { error: "请选择一个存在的项目。" }, 409);

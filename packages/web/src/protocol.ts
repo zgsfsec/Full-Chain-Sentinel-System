@@ -17,6 +17,7 @@ import type { SentinelNotifyConfig, SentinelNotifyStatus, SentinelNotifyTarget }
 import type { SentinelPermissionPreset, SentinelPermissionSet, SentinelPermissionsConfig } from "./permissions.ts";
 import type { SentinelPluginManifest } from "./plugin-manifest.ts";
 import type { ProjectStorageUsage } from "./project-storage-types.ts";
+import type { ReportTemplateSnapshot } from "./report-types.ts";
 import type { SentinelSessionListEntry, SentinelSessionStatus } from "./session-status.ts";
 
 /**
@@ -1519,6 +1520,7 @@ export interface SentinelEngineTask {
 
 /** An engineering run: a commander plus its targets, tasks, and report. */
 export interface SentinelEngine {
+	reportTemplate?: ReportTemplateSnapshot | null;
 	id: string;
 	submissionSource?: string;
 	projectId: string;
@@ -1880,6 +1882,7 @@ export interface SentinelStateSnapshot {
 	credentialsEnabled: boolean;
 	/** Whether the viewed conversation has opted into report submission and evidence tools. */
 	reportsEnabled: boolean;
+	reportTemplate?: Pick<ReportTemplateSnapshot, "id" | "name" | "revision"> | null;
 	/** Supervision of the viewed conversation; null when it was never armed. */
 	supervisor: SentinelSupervisorView | null;
 	/** Global supervision settings shown under 设置 → 模型. */
@@ -2296,7 +2299,7 @@ export type SentinelClientMessage =
 	| { type: "ios_device_remove"; id: string }
 	| { type: "ios_set_enabled"; enabled: boolean }
 	| { type: "credentials_set_enabled"; enabled: boolean }
-	| { type: "reports_set_enabled"; enabled: boolean }
+	| { type: "reports_set_enabled"; enabled: boolean; templateId?: string | null }
 	| { type: "credentials_verify"; projectId: string; refs: { id: string; revision: string }[] }
 	/** Close a record from the page, for a run whose session is no longer loaded. */
 	| { type: "end_api_model"; id: string }
@@ -3192,6 +3195,8 @@ export interface SentinelSessionPresetView {
 
 /** Operator input when creating an engineering run. */
 export interface SentinelEngineCreateInput {
+	/** Omitted follows the project default; null explicitly selects no template. */
+	reportTemplateId?: string | null;
 	name: string;
 	/** One target per line, `target [note]`; blank lines dropped. */
 	targets: string;

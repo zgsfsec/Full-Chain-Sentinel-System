@@ -1,7 +1,28 @@
 /** Project-scoped reports shared by the agent tools, HTTP API and console. */
 export type ReportSource = "session" | "goal" | "engine";
 
+export interface ReportTemplateSummary {
+	id: string;
+	name: string;
+	revision: string;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface ReportTemplate extends ReportTemplateSummary {
+	markdown: string;
+}
+
+/** Frozen when a conversation or engine applies a template. */
+export type ReportTemplateSnapshot = Pick<ReportTemplate, "id" | "name" | "revision" | "markdown">;
+
+export interface ReportTemplateList {
+	items: ReportTemplateSummary[];
+	defaultTemplateId: string | null;
+}
+
 export interface ReportProvenance {
+	reportTemplate?: ReportTemplateSnapshot | null;
 	projectId: string;
 	projectName: string;
 	source: ReportSource;

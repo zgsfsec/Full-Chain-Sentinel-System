@@ -26,6 +26,7 @@ import type {
 	SentinelEngineTaskStatus,
 	SentinelGoalUsage,
 } from "./protocol.ts";
+import type { ReportTemplateSnapshot } from "./report-types.ts";
 import { openSqliteDatabase, type SqliteDatabase } from "./sqlite.ts";
 
 const MAX_EVENT_BYTES = 64 * 1024;
@@ -93,6 +94,7 @@ CREATE TABLE IF NOT EXISTS engine_submissions (
 `;
 
 interface EngineRow {
+	report_template: string | null;
 	id: string;
 	submission_source?: string | null;
 	project_id: string;
@@ -156,6 +158,9 @@ export class EngineStore {
 		this.addContinuationColumn();
 		this.addScheduleColumns();
 		const columns = this.db.prepare("PRAGMA table_info(engines)").all() as Array<{ name: string }>;
+		if (!columns.some((column) => column.name === "report_template")) {
+			this.db.exec("ALTER TABLE engines ADD COLUMN report_template TEXT");
+		}
 		if (!columns.some((column) => column.name === "reproduction")) {
 			this.db.exec("ALTER TABLE engines ADD COLUMN reproduction TEXT");
 		}
@@ -232,6 +237,7 @@ export class EngineStore {
 	}
 
 	createEngine(input: {
+		reportTemplate?: ReportTemplateSnapshot | null;
 		projectId: string;
 		projectName: string;
 		name: string;
@@ -257,6 +263,7 @@ export class EngineStore {
 			}
 		}
 		const engine: SentinelEngine = {
+			reportTemplate: input.reportTemplate ?? null,
 			id: `engine-${randomUUID()}`,
 			submissionSource: input.submission?.source,
 			projectId: input.projectId,
@@ -306,6 +313,9 @@ export class EngineStore {
 					.prepare("INSERT INTO engine_submissions VALUES (?,?,?,?)")
 					.run(engine.id, input.submission.source, input.submission.key, JSON.stringify(input.submission));
 			}
+			this.db
+				.prepare("UPDATE engines SET report_template = ? WHERE id = ?")
+				.run(engine.reportTemplate ? JSON.stringify(engine.reportTemplate) : null, engine.id);
 			this.db.exec("COMMIT");
 		} catch (error) {
 			this.db.exec("ROLLBACK");
@@ -581,6 +591,7 @@ export class EngineStore {
 
 function engineFromRow(row: EngineRow, tasks: SentinelEngineTask[]): SentinelEngine {
 	return {
+		reportTemplate: row.report_template ? (JSON.parse(row.report_template) as ReportTemplateSnapshot) : null,
 		id: row.id,
 		submissionSource: row.submission_source ?? undefined,
 		projectId: row.project_id,

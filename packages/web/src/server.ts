@@ -586,6 +586,7 @@ export async function startSentinelServer(
 								source: "engine",
 								engineId: engine.id,
 								engineName: engine.name,
+								reportTemplate: engine.reportTemplate,
 							},
 							key: `engine:${engine.id}:${createHash("sha256").update(markdown).digest("hex")}`,
 							title: `${engine.name.slice(0, 110)} 总报告`,
@@ -3751,7 +3752,7 @@ export async function startSentinelServer(
 					return;
 				}
 				case "reports_set_enabled": {
-					runtime.setReportsEnabled(message.enabled);
+					runtime.setReportsEnabled(message.enabled, message.templateId);
 					return;
 				}
 				case "credentials_verify": {

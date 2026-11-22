@@ -24,6 +24,12 @@ function engineInput(value: unknown): SentinelEngineCreateInput {
 	}
 	if (input.gateMode !== "auto" && input.gateMode !== "ai") throw new Error("执行模式无效");
 	if (typeof input.presetOptional !== "boolean") throw new Error("预设 Agent 配置无效");
+	if (
+		input.reportTemplateId !== undefined &&
+		input.reportTemplateId !== null &&
+		typeof input.reportTemplateId !== "string"
+	)
+		throw new Error("报告模板选择格式错误");
 	let schedule: SentinelEngineCreateInput["schedule"];
 	if (input.schedule !== undefined) {
 		const s = checkObject(input.schedule);
@@ -43,6 +49,7 @@ function engineInput(value: unknown): SentinelEngineCreateInput {
 	}
 	return {
 		name: checkString(input.name, "工程名称", 256),
+		reportTemplateId: input.reportTemplateId,
 		targets: checkString(input.targets, "目标", 256 * 1024, true),
 		doctrines: ["security-check"],
 		presetIds: stringList(input.presetIds, "预设 Agent"),
