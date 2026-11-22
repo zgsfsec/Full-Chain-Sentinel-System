@@ -3752,7 +3752,7 @@ export class SentinelRuntime {
 	 * reasoning was enabled would keep the old thinking levels and context window.
 	 */
 	private async syncMainModel(active: ManagedSession): Promise<void> {
-		if (active.session.isStreaming) return;
+		if (active.session.isStreaming || active.session.isCompacting) return;
 		const resolved = resolveLibraryRole(this.agentDir, "main");
 		if (!resolved || !this.modelRuntime) return;
 		const model = this.modelRuntime.getModel(resolved.entryId, resolved.config.modelId);
@@ -4645,8 +4645,13 @@ export class SentinelRuntime {
 	}
 
 	/** Point a role at an entry (or at 主模型). Takes effect on the next use of the role. */
-	setModelRole(role: SentinelModelRoleName, target: string | null): SentinelModelLibraryView {
+	async setModelRole(role: SentinelModelRoleName, target: string | null): Promise<SentinelModelLibraryView> {
 		setLibraryRole(this.agentDir, role, target);
+		if (role === "main" && this.active) {
+			const active = this.active;
+			await this.ensureModelRuntime();
+			await this.syncMainModel(active);
+		}
 		this.hooks.onStateChange();
 		return libraryView(this.agentDir);
 	}

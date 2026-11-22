@@ -333,16 +333,24 @@
 	flex: none;
 	min-width: 0;
 	margin: 0 14px 14px;
-	border: 1px solid var(--ant-color-border);
+	border: 1px solid var(--ant-color-border-secondary);
 	border-radius: 8px;
+	background: var(--ant-color-bg-container);
 }
 
 .engine-commander__composer:focus-within {
-	border-color: var(--ant-color-primary);
+	border-color: var(--ant-color-border);
 }
 
-.engine-commander__composer textarea.ant-input {
+.engine-commander__composer textarea.ant-input,
+.engine-commander__composer textarea.ant-input:hover,
+.engine-commander__composer textarea.ant-input:focus {
+	padding: 10px 12px;
+	border: 0;
+	border-radius: 0;
+	outline: none;
 	box-shadow: none;
+	background: transparent;
 	font: inherit;
 }
 

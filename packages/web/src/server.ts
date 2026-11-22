@@ -2183,7 +2183,7 @@ export async function startSentinelServer(
 					engines?.markModelsDirty();
 					return;
 				case "set_model_role":
-					sendTo(socket, { type: "model_library", library: runtime.setModelRole(message.role, message.target) });
+					broadcast({ type: "model_library", library: await runtime.setModelRole(message.role, message.target) });
 					broadcastSnapshot();
 					return;
 				case "set_reviewer_auto":

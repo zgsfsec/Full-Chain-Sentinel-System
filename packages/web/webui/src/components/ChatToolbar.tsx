@@ -25,13 +25,16 @@ import { useEffect, useState } from "react";
 import { t } from "../i18n.ts";
 import type {
 	SentinelMode,
+	SentinelModelLibraryView,
 	SentinelProjectInfo,
 	SentinelSessionPresetView,
 	SentinelSessionStatus,
 	SentinelThinkingLevel,
+	SentinelStateSnapshot,
 } from "../types.ts";
 import { SENTINEL_MODE_LABELS, SENTINEL_MODES } from "../types.ts";
 import { SESSION_STATUS_LABELS } from "./SessionStatusControl.tsx";
+import { ChatModelPicker } from "./ChatModelPicker.tsx";
 
 const { Text } = Typography;
 
@@ -75,6 +78,11 @@ export function ChatToolbar({
 	subagentRunning,
 	thinkingLevel,
 	availableThinkingLevels,
+	modelLibrary,
+	currentModel,
+	connected,
+	onSetMainModel,
+	onManageModels,
 	branchOpen,
 	filesOpen,
 	subagentsOpen,
@@ -107,6 +115,11 @@ export function ChatToolbar({
 	subagentRunning: number;
 	thinkingLevel: SentinelThinkingLevel;
 	availableThinkingLevels: SentinelThinkingLevel[];
+	modelLibrary: SentinelModelLibraryView | null;
+	currentModel: SentinelStateSnapshot["model"];
+	connected: boolean;
+	onSetMainModel: (entryId: string) => void;
+	onManageModels: () => void;
 	branchOpen: boolean;
 	filesOpen: boolean;
 	subagentsOpen: boolean;
@@ -189,7 +202,9 @@ export function ChatToolbar({
 
 			<Divider orientation="vertical" className="chat-toolbar__divider" />
 
-			<div className="chat-toolbar__group">
+			<div className="chat-toolbar__group chat-toolbar__group--model">
+				<ChatModelPicker library={modelLibrary} currentModel={currentModel} connected={connected}
+					onSelect={onSetMainModel} onManage={onManageModels} />
 				<Tooltip title={t("模型的推理强度（仅对本次会话生效）")}>
 					<span className="chat-toolbar__field">
 						<Text type="secondary">{t("思考")}</Text>

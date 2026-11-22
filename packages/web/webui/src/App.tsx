@@ -3005,6 +3005,11 @@ export function App() {
 								subagentRunning={subagentRunning}
 								thinkingLevel={snapshot?.thinkingLevel ?? "off"}
 								availableThinkingLevels={snapshot?.availableThinkingLevels ?? []}
+								modelLibrary={modelLibrary}
+								currentModel={snapshot?.model ?? null}
+								connected={connected}
+								onSetMainModel={(target) => send({ type: "set_model_role", role: "main", target })}
+								onManageModels={() => openPage("settings.model")}
 								branchOpen={branchOpen}
 								filesOpen={filesOpen}
 								subagentsOpen={subagentsOpen}
@@ -3213,7 +3218,9 @@ export function App() {
 									hasProject={snapshot?.project !== null && snapshot?.project !== undefined}
 									supportsImageInput={
 										modelLibrary?.entries
-											.find((entry) => entry.id === modelLibrary.resolved.main?.entryId)
+											.find((entry) => streaming
+												? entry.id === snapshot?.model?.provider && entry.modelId === snapshot.model.id
+												: entry.id === modelLibrary.resolved.main?.entryId)
 											?.input.includes("image") ?? false
 									}
 									projectId={snapshot?.project?.id ?? null}
