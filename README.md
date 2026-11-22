@@ -1,6 +1,6 @@
 # 全链哨兵 Full Chain Sentinel System
 
-**简体中文** | [English](README.en.md) · **版本 2.3.2**
+**简体中文** | [English](README.en.md) · **版本 2.3.4**
 
 知攻善防实验室出品，基于 [pi](https://github.com/earendil-works/pi) 的授权渗透测试 Agent。通过中英文 Web 控制台，统一管理 Web、小程序与移动端测试、项目环境、审批和证据。
 
@@ -60,7 +60,7 @@ Windows 解压 `sentinel-web-windows-x64.zip` 后，在 PowerShell 运行 `.\sen
 
 ## 核心能力
 
-以下截图来自当前 **v2.3.0 源码运行的完整控制台**，使用独立本地项目、真实后端与 Docker 容器。尚未配置模型、没有记录或未接入设备的页面按实际状态展示。[截图来源与更新方式](images/screenshots/README.md)。
+以下截图来自源码运行的完整控制台，使用独立本地项目、真实后端与 Docker 容器。报告模板相关截图更新至 **v2.3.4**，其余截图保留各自记录的版本；没有记录或未接入设备的页面按实际状态展示。[截图来源与更新方式](images/screenshots/README.md)。
 
 ### 1. 项目概览
 
@@ -284,7 +284,20 @@ Windows 解压 `sentinel-web-windows-x64.zip` 后，在 PowerShell 运行 `.\sen
 
 跟随全局项目，统一归档普通会话、自主目标、工程任务和工程总报告。Agent 完成实质测试任务时主动提交 Markdown 报告与证据图片，普通问答不生成报告；工程总报告归档成功后再结束工程。
 
-支持搜索、来源筛选、Markdown 渲染与源文查看、图片放大、下载和删除。点击「编辑」后，左侧修改标题与 Markdown，右侧实时预览，支持保存、取消、草稿恢复和修改冲突提示。已有图片独立保存，容器停止、重建或删除后仍可查看；含图片的报告下载为包含正文与图片的 ZIP，无图片时下载 Markdown。
+支持搜索、来源筛选、Markdown 渲染与源文查看、图片放大、下载和删除。点击「编辑」后，左侧修改标题与 Markdown，右侧实时预览，支持保存、取消、草稿恢复和修改冲突提示。正文、图片、附件与关联漏洞证据可下载为完整 ZIP 报告包，也可单独下载 Markdown；已归档材料在容器停止、重建或删除后仍可使用。
+
+**自定义报告模板**：在「报告模板」页签新建、编辑、预览和复制纯 Markdown 模板，所有项目共用，可设置项目默认模板。对话启用「报告中心」后，点击按钮右侧小箭头选择模板；新建工程时可单独选择总报告模板，子任务沿用原格式。Agent 保留模板章节与顺序，按实际证据填写；不选模板时自由生成，不提供内置模板。应用时保存模板快照，后续修改或删除模板不影响已有任务和报告。
+
+<details>
+<summary>查看报告与模板截图</summary>
+
+![全局模板管理与项目默认模板](images/screenshots/report-templates.jpg)
+
+![Markdown 模板编辑与实时预览](images/screenshots/report-template-editor.jpg)
+
+![对话中的紧凑报告入口与模板设置](images/screenshots/chat-report-template.jpg)
+
+</details>
 
 编辑器保留已有归档图片，暂不上传新图片。完整提交方式、图片限制与数据清理规则见[报告中心使用说明](docs/report-center.md)。
 
@@ -312,7 +325,7 @@ Windows 解压 `sentinel-web-windows-x64.zip` 后，在 PowerShell 运行 `.\sen
 | 安卓与 iOS 设备接入 | [移动端指南](docs/mobile.md) |
 | 代理切换、网关与旧项目迁移 | [项目网关](packages/web/docs/project-gateway.md) |
 | 资产上报、关联漏洞与导出 | [资产库](docs/asset-library.md) |
-| 报告提交、图片归档、实时编辑与下载 | [报告中心](docs/report-center.md) |
+| 报告模板、证据归档、实时编辑与完整报告包 | [报告中心](docs/report-center.md) |
 | 安装本地 / 远端插件 | [插件中心](docs/plugin-center.md) |
 | 开发插件与插件前端 | [插件开发](docs/plugin-authoring.md) · [插件前端](docs/plugin-ui.md) |
 | 仓库结构、构建与测试 | [开发指南](docs/development.md) |

@@ -243,6 +243,39 @@
       "width": 1600,
       "height": 1000,
       "sha256": "c82e3f3cd0c89ad55012b5c99dafa8502c0b8b4a07da5cbff796bf71ddc1cd85"
+    },
+    {
+      "file": "report-templates.jpg",
+      "navigation": "报告中心 → 报告模板",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "170e3fcf8fd81eb3ad084357d4510d8f0ad7802c49de93e69735a74c99e8551a",
+      "version": "2.3.4",
+      "capturedOn": "2026-11-22",
+      "sourceCommit": "3ab4d1b958aabf5f8e485997fcaead1ea599dcf5",
+      "sourceNotes": "Version metadata updated to 2.3.4 and Web console rebuilt; isolated demo project and template, no model calls or assessment results."
+    },
+    {
+      "file": "report-template-editor.jpg",
+      "navigation": "报告中心 → 报告模板 → 编辑",
+      "width": 1600,
+      "height": 1200,
+      "sha256": "2e118e2ef49277b0ee7540f04984246ff04934ad3a5a7db3a57810f97d53271e",
+      "version": "2.3.4",
+      "capturedOn": "2026-11-22",
+      "sourceCommit": "3ab4d1b958aabf5f8e485997fcaead1ea599dcf5",
+      "sourceNotes": "Version metadata updated to 2.3.4 and Web console rebuilt; isolated demo project and template, no model calls or assessment results."
+    },
+    {
+      "file": "chat-report-template.jpg",
+      "navigation": "对话 → 报告中心 → 模板设置",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "2cb25384ad908ba657874c47041e52f680fed8e132272d75f21b85606d3c4817",
+      "version": "2.3.4",
+      "capturedOn": "2026-11-22",
+      "sourceCommit": "3ab4d1b958aabf5f8e485997fcaead1ea599dcf5",
+      "sourceNotes": "Version metadata updated to 2.3.4 and Web console rebuilt; isolated demo project and template, no model calls or assessment results."
     }
   ]
 }

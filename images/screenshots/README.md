@@ -4,6 +4,18 @@
 
 本目录存放当前控制台的真实浏览器截图，供首页与使用、部署、移动端指南共用。
 
+## 2.3.4 报告模板截图
+
+- 截图日期：2026-11-22（Asia/Shanghai），版本 2.3.4；代码基准为 `3ab4d1b958aabf5f8e485997fcaead1ea599dcf5`，加上本次版本元数据与前端资源重建。
+- 使用 `npm --prefix packages/web run build` 生成的完整控制台，由正式 `startSentinelServer` 监听 `http://127.0.0.1:17888`；没有拼装局部组件、修改 DOM 或伪造 API。
+- 独立临时配置目录，演示账号和授权记录通过应用自带的初始化函数预置，浏览器实际登录后截图。项目「README 报告模板演示」通过正式项目创建逻辑生成，使用真实 Kali 工作容器与网关；原有控制台、项目与用户数据未用于截图。
+- `report-templates.jpg` 展示全局模板列表和项目默认选择；`report-template-editor.jpg` 展示 Markdown 编辑与实时预览；`chat-report-template.jpg` 展示对话中的紧凑报告按钮与模板设置浮层。
+- 「Web 安全测试报告（演示）」通过页面新建并保存，仅包含章节与填写要求，是文档演示内容，不是内置模板或测试结果。没有调用模型、生成对话回复或提交漏洞与报告；对话中的模型未配置提示按实际状态保留。
+- 浏览器为 Codex 内置浏览器。列表与对话视口 1600 × 1000，编辑器 1600 × 1200。图片直接保存为 JPEG，尺寸与 SHA-256 记录在 [manifest.json](manifest.json) 的对应条目中。
+- 截图后清理本次独立服务、演示容器与临时数据。其余图片保留下面记录的历史来源与版本，不代表重新截取。
+
+## 2.3.0 基础截图
+
 - 截图日期：2026-11-06（Asia/Shanghai）。
 - 控制台版本：2.3.0；源码基准：`c5a9b37c87eac3576e73c82b78a9cd4fe803536d`，采用当前黑白界面与统一表格样式。
 - `setup.png` 在 `af211ff` 重新截取，展示浅色登录与初始化布局；该图片的源码基准单独记录在清单对应条目的 `sourceCommit` 中。
@@ -32,6 +44,7 @@
 | [asset-discovery.png](asset-discovery.png) | 设置 → 资产测绘 | 1600 × 1000 |
 | [assets.png](assets.png) | 资产与工具 → 资产库 | 1600 × 1000 |
 | [chat.png](chat.png) | 工作台 → 对话 | 1600 × 1000 |
+| [chat-report-template.jpg](chat-report-template.jpg) | 对话 → 报告中心 → 模板设置（2.3.4） | 1600 × 1000 |
 | [code-intel-create.png](code-intel-create.png) | 情报 → 开源情报 → 新增监控 | 1600 × 1400 |
 | [code-intel.png](code-intel.png) | 情报 → 开源情报 | 1600 × 1000 |
 | [consent.png](consent.png) | 首次访问 → 授权与风险承诺 | 1600 × 1000 |
@@ -55,6 +68,8 @@
 | [project-create.png](project-create.png) | 项目 → 新建项目 | 1600 × 1000 |
 | [projects.png](projects.png) | 工作台 → 项目 | 1600 × 1000 |
 | [proxies.png](proxies.png) | 系统 → 代理 | 1600 × 1000 |
+| [report-templates.jpg](report-templates.jpg) | 报告中心 → 报告模板（2.3.4） | 1600 × 1000 |
+| [report-template-editor.jpg](report-template-editor.jpg) | 报告中心 → 报告模板 → 编辑（2.3.4） | 1600 × 1200 |
 | [setup.png](setup.png) | 首次访问 → 创建管理员账号 | 1600 × 1000 |
 | [supervision.png](supervision.png) | 执行与审计 → 监督 | 1600 × 1000 |
 | [vulnerabilities.png](vulnerabilities.png) | 资产与工具 → 漏洞 | 1600 × 1000 |

@@ -1,6 +1,6 @@
 # Full Chain Sentinel System
 
-**English** | [简体中文](README.md) · **Version 2.3.2**
+**English** | [简体中文](README.md) · **Version 2.3.4**
 
 An authorized penetration-testing agent by Zhigong Shanfang Lab, built on [pi](https://github.com/earendil-works/pi). A bilingual web console brings Web, mini-program, and mobile testing together with project environments, approval, and evidence management.
 
@@ -60,7 +60,7 @@ Describe your authorized scope and target in the conversation. Approval mode is 
 
 ## Capabilities
 
-The screenshots below come from the complete console running the current **v2.3.0 source**, using a separate local project and the real backend and Docker containers. Unconfigured models, empty records, and disconnected devices are shown as captured. [Capture details](images/screenshots/README.md).
+The screenshots below show the complete console running from source, using separate local projects and the real backend and Docker containers. Report template screenshots have been updated to **v2.3.4**; other captures retain their recorded versions. Empty records and disconnected devices are shown as captured. [Capture details](images/screenshots/README.md).
 
 ### 1. Project overview
 
@@ -284,7 +284,20 @@ Open the conversation’s Files panel to upload or preview artifacts and downloa
 
 Archive reports from conversations, persistent goals, engagement tasks, and engagement summaries under the globally selected project. Agents are instructed to submit Markdown reports and evidence images after substantive testing; ordinary questions do not generate reports. An engagement finishes after its final report is successfully archived.
 
-Search reports, filter by source, view rendered Markdown or source, zoom images, download, and delete. Edit the title and Markdown on the left with a live preview on the right; save or cancel changes, recover drafts, and detect conflicting edits. Archived images remain available after containers stop, are recreated, or are deleted. Reports with images download as ZIP archives containing Markdown and images; reports without images download as Markdown.
+Search reports, filter by source, view rendered Markdown or source, zoom images, download, and delete. Edit the title and Markdown on the left with a live preview on the right; save or cancel changes, recover drafts, and detect conflicting edits. Download a complete ZIP bundle containing Markdown, images, attachments, and linked finding evidence, or download Markdown separately. Archived materials remain available after containers stop, are recreated, or are deleted.
+
+**Custom report templates:** create, edit, preview, and copy plain Markdown templates in the Report templates tab. Templates are shared across projects, with an optional default per project. Enable Reports in a conversation and use its arrow button to choose a template, or select a final-report template when creating an engagement. Task reports keep their existing format. The agent preserves section order and writes from actual evidence. No built-in templates are provided; without a template, the agent chooses the structure. Applying a template saves a snapshot, so later edits or deletion do not change existing tasks and reports.
+
+<details>
+<summary>View report and template screenshots</summary>
+
+![Shared templates and project default](images/screenshots/report-templates.jpg)
+
+![Markdown template editor and live preview](images/screenshots/report-template-editor.jpg)
+
+![Compact report controls and template settings in a conversation](images/screenshots/chat-report-template.jpg)
+
+</details>
 
 The editor preserves existing archived images and does not currently upload new images. See the [report center guide](docs/report-center.md) (Chinese) for submission, image limits, and data deletion rules.
 
@@ -306,7 +319,7 @@ See the [feature reference](docs/features.en.md), [usage guide](docs/usage.en.md
 | Android and iOS devices | [Mobile setup](docs/mobile.en.md) |
 | Proxy switching, gateways, project migration | [Project gateway](packages/web/docs/project-gateway.md) (Chinese) |
 | Asset reporting, linked findings, exports | [Asset library](docs/asset-library.md) (Chinese) |
-| Report submission, archived images, live editing, downloads | [Report center](docs/report-center.md) (Chinese) |
+| Report templates, archived evidence, live editing, complete bundles | [Report center](docs/report-center.md) (Chinese) |
 | Local and remote plugins | [Plugin center](docs/plugin-center.md) (Chinese) |
 | Plugin development and frontend | [Authoring](docs/plugin-authoring.md) · [Plugin UI](docs/plugin-ui.md) (Chinese) |
 | Repository structure, builds, tests | [Development](docs/development.en.md) |
