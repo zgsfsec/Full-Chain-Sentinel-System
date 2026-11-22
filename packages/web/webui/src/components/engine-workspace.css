@@ -432,6 +432,20 @@
 	gap: 12px;
 }
 
+.engine-report-preview {
+	max-height: 65vh;
+	overflow: auto;
+	color: var(--ant-color-text);
+	line-height: 1.8;
+}
+
+.engine-report-preview .markdown-body table {
+	display: block;
+	max-width: 100%;
+	overflow-x: auto;
+	color: inherit;
+}
+
 @container engine-workspace (max-width: 720px) {
 	.engine-workspace__body {
 		overflow-y: auto;

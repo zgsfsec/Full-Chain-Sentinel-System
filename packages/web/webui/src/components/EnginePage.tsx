@@ -51,6 +51,7 @@ import type { UploadedFile } from "../uploads.ts";
 import { Page } from "../ui/Page.tsx";
 import { EngineTargetFiles } from "./EngineTargetFiles.tsx";
 import { CommanderFeed } from "./EngineCommander.tsx";
+import { MarkdownText } from "./MessageView.tsx";
 import { TaskExecution } from "./TaskExecution.tsx";
 import type {
 	SentinelDoctrineView,
@@ -597,7 +598,9 @@ export function EnginePage(props: EnginePageProps) {
 						</Space>
 					}
 				>
-					<pre className="report-preview">{report?.markdown ?? ""}</pre>
+					<div className="engine-report-preview">
+						<MarkdownText text={report?.markdown ?? ""} />
+					</div>
 				</Modal>
 			</Page>
 		);
