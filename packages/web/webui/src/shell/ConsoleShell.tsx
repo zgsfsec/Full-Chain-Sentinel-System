@@ -7,6 +7,7 @@
 
 import {
 	ArrowLeftOutlined,
+	ApartmentOutlined,
 	CloudDownloadOutlined,
 	GithubOutlined,
 	LogoutOutlined,
@@ -45,6 +46,9 @@ import { SENTINEL_MODE_LABELS } from "../types.ts";
 import { consoleThemes } from "../ui/theme.ts";
 import { useThemeMode } from "../ui/theme-mode.ts";
 import { ThemeToggle } from "../ui/ThemeToggle.tsx";
+import { WorkProcessPage } from "../components/WorkProcessPage.tsx";
+import { PageBoundary } from "../components/PageBoundary.tsx";
+import type { WorkProcessKind, WorkProcessRef } from "../../../src/work-process-types.ts";
 import {
 	NAV_GROUPS,
 	PAGE_TITLES,
@@ -137,6 +141,8 @@ export function ConsoleShell({
 	const compact = screens.md === false;
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [globalNavigation, setGlobalNavigation] = useState(false);
+	const [workTarget, setWorkTarget] = useState<WorkProcessRef | null>(null);
+	const [workKind, setWorkKind] = useState<WorkProcessKind>("session");
 	const update = useVersionCheck();
 	const hasConversations = page === "chat" && sessionPanel !== undefined;
 	const showConversations = hasConversations && !globalNavigation;
@@ -145,6 +151,7 @@ export function ConsoleShell({
 	useEffect(() => {
 		setGlobalNavigation(false);
 	}, [page]);
+	useEffect(() => { setWorkTarget(null); }, [activeProject?.id]);
 
 	const badgeFor = (entry: MenuEntry): ReactNode => {
 		if (entry.page === "settings.model" && !modelConfigured) {
@@ -192,6 +199,7 @@ export function ConsoleShell({
 	}));
 
 	const onMenuClick: MenuProps["onClick"] = ({ key }) => {
+		if (key === "work-process") setWorkTarget(null);
 		setGlobalNavigation(false);
 		onNavigate(key as SentinelPageId);
 		setDrawerOpen(false);
@@ -370,6 +378,17 @@ export function ConsoleShell({
 				) : null}
 			</div>
 			<div className="console-header__right">
+				{page === "chat" && activeProject && sessionPanel?.activeSessionId ? (
+					<Button icon={<ApartmentOutlined />} onClick={() => {
+						setWorkTarget({ projectId: activeProject.id, kind: "session", id: sessionPanel.activeSessionId ?? "" });
+						onNavigate("work-process");
+					}}>{getLanguage() === "en" ? "Work links" : "工作链路"}</Button>
+				) : page === "engine" && activeProject ? (
+					<Dropdown trigger={["click"]} menu={{ items: [{ key: "all", label: getLanguage() === "en" ? "All engineering runs" : "全部工程" }, ...(sessionPanel?.engines ?? []).filter((engine) => engine.projectId === activeProject.id).map((engine) => ({ key: engine.id, label: engine.name }))],
+						onClick: ({ key }) => { setWorkKind("engine"); setWorkTarget(key === "all" ? null : { projectId: activeProject.id, kind: "engine", id: key }); onNavigate("work-process"); } }}>
+						<Button icon={<ApartmentOutlined />}>{getLanguage() === "en" ? "Work links" : "工作链路"}</Button>
+					</Dropdown>
+				) : null}
 				<ThemeToggle />
 				<Badge
 					status={connected ? "success" : "error"}
@@ -443,7 +462,10 @@ export function ConsoleShell({
 			<Layout className="console-main">
 				{header}
 				<Content id="console-main-content" className="console-content" tabIndex={-1} inert={compact && drawerOpen}>
-					<div className="console-page">{children}</div>
+					<div className="console-page">{page === "work-process" ? <PageBoundary onHome={() => onNavigate("dashboard")}><WorkProcessPage
+						key={`${activeProject?.id ?? ""}:${workTarget?.kind ?? workKind}:${workTarget?.id ?? ""}`}
+						projects={projects} activeProjectId={activeProject?.id ?? null} initialTarget={workTarget} initialKind={workKind}
+					/></PageBoundary> : children}</div>
 				</Content>
 			</Layout>
 		</Layout>

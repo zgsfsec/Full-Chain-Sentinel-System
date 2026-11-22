@@ -96,6 +96,7 @@ export const NAV_GROUPS: { group: string; items: MenuEntry[] }[] = [
 			{ page: "engine", label: t("工程"), icon: BuildOutlined },
 			{ page: "gates", label: t("审批"), icon: AuditOutlined },
 			{ page: "supervisor", label: t("监督"), icon: EyeOutlined },
+			{ page: "work-process", label: getLanguage() === "en" ? "Work links" : "工作链路", icon: ApartmentOutlined },
 		],
 	},
 	{
