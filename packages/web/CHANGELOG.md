@@ -199,6 +199,8 @@
 - 发布矩阵补齐 Linux arm64 与 Intel macOS：Release 工作流在 `ubuntu-24.04-arm` 与 `macos-15-intel` 上原生编译，新增 `sentinel-web-linux-arm64.tar.gz`、`sentinel-web-darwin-x64.tar.gz`，与 linux-x64、darwin-arm64、windows-x64 和 APK 一起共 6 个资产
 - 项目的容器现在可以单独停止与启动：项目管理页显示每个项目的容器状态（运行中 / 已停止 / 无容器）并给出对应动作。停止是显式的——被停止的项目不会因为进入项目或跑工具而被自动拉起，必须先点「启动容器」；该项目有运行中的工程任务或会话时服务端拒绝停止并说明原因。
 
+- 监督新增长命令计时触发：工具运行超过可配置等待时间（默认 120 秒）仍未返回时，用命令参数与已有监督状态分析意图；工具提前返回会取消计时。监督只分析并给建议，不中断工具。
+
 ### Changed
 
 - 项目容器的默认网络从 Docker 的 bridge 改为 host，并且 host 模式下不再授予 `NET_ADMIN`：bridge 下容器里的监听端口谁也连不回来、ARP/广播/VPN 网段都看不见，host 模式才是渗透工具需要的网络位置；代价是与宿主机抢端口（控制台的 7777、DroidBridge 网关的 9944）且不再有网络隔离。`NET_ADMIN` 在 host 命名空间里等于能改宿主机的网卡、路由与 iptables，所以只在 bridge 模式下保留；`NET_RAW` 两种模式都保留（扫描器要的原始套接字）

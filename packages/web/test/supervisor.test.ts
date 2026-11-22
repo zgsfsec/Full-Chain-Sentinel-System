@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { addLibraryEntry, setLibraryRole } from "../src/model-library.ts";
 import type {
 	SentinelSupervisorCall,
@@ -18,6 +18,7 @@ import type {
 	SentinelSupervisorView,
 } from "../src/protocol.ts";
 import { Supervisor } from "../src/supervisor.ts";
+import { SUPERVISOR_DEFAULTS, writeSupervisorConfig } from "../src/supervisor-config.ts";
 import { SupervisorStore } from "../src/supervisor-store.ts";
 
 interface FakeEntry {
@@ -48,6 +49,7 @@ let supervisor: Supervisor;
 let entries: FakeEntry[];
 let states: SentinelSupervisorView[];
 let episodes: SentinelSupervisorEpisode[];
+let episodeCalls: SentinelSupervisorCall[][];
 let advice: string[];
 
 function call(index: number): SentinelSupervisorCall {
@@ -90,6 +92,7 @@ beforeEach(() => {
 	entries = [{ type: "custom", customType: "other", data: { ignored: true } }];
 	states = [];
 	episodes = [];
+	episodeCalls = [];
 	advice = [];
 	supervisor = new Supervisor({
 		agentDir,
@@ -98,7 +101,10 @@ beforeEach(() => {
 			onState: (view) => {
 				if (view) states.push(view);
 			},
-			onEpisode: (episode) => episodes.push(episode),
+			onEpisode: (episode, calls) => {
+				episodes.push(episode);
+				episodeCalls.push(calls);
+			},
 			onLog: (_sessionId, _log: SentinelSupervisorLog) => {},
 			onAdvice: () => {},
 			onSendAdvice: (record) => advice.push(record.text),
@@ -133,6 +139,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	supervisor.close();
+	vi.useRealTimers();
 	rmSync(root, { recursive: true, force: true });
 });
 
@@ -212,6 +219,56 @@ test("a batch of calls produces one episode and keeps the rolling state", async 
 	expect(view?.state.phase).toBe("vuln_mapping");
 	expect(view?.state.intent).toBe("枚举接口");
 	expect(states.length).toBeGreaterThan(0);
+});
+
+test("a tool still running at the configured limit triggers an intent analysis", async () => {
+	vi.useFakeTimers();
+	writeSupervisorConfig(agentDir, { ...SUPERVISOR_DEFAULTS, longToolCallMs: 15_000 });
+	supervisor.arm("s1", "observe", "confirm");
+	supervisor.start("s1");
+	supervisor.observeToolStart("s1", {
+		callId: "long-call",
+		toolName: "bash",
+		args: "sleep 600",
+		at: Date.now(),
+	});
+
+	await vi.advanceTimersByTimeAsync(15_000);
+
+	expect(episodes).toHaveLength(1);
+	expect(episodes[0]?.trigger).toBe("long-call");
+	expect(episodeCalls[0]?.[0]?.status).toBe("running");
+	expect(supervisor.view("s1")?.callCount).toBe(0);
+	vi.useRealTimers();
+});
+
+test("a tool that returns before the limit cancels the long-call analysis", async () => {
+	vi.useFakeTimers();
+	writeSupervisorConfig(agentDir, { ...SUPERVISOR_DEFAULTS, longToolCallMs: 15_000 });
+	supervisor.arm("s1", "observe", "confirm");
+	supervisor.start("s1");
+	supervisor.observeToolStart("s1", {
+		callId: "short-call",
+		toolName: "bash",
+		args: "sleep 1",
+		at: Date.now(),
+	});
+	vi.advanceTimersByTime(1_000);
+	supervisor.observeToolCall("s1", {
+		callId: "short-call",
+		toolName: "bash",
+		args: "sleep 1",
+		result: "done",
+		isError: false,
+		durationMs: 1_000,
+		at: Date.now() - 1_000,
+	});
+
+	await vi.advanceTimersByTimeAsync(15_000);
+
+	expect(episodes).toHaveLength(0);
+	expect(supervisor.view("s1")?.callCount).toBe(1);
+	vi.useRealTimers();
 });
 
 function stubLoopingAdvice(): void {

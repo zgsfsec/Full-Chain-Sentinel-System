@@ -89,6 +89,7 @@ const TRIGGER_LABELS: Record<string, string> = {
 	duplicate: t("重复调用"),
 	"no-progress": t("没有新证据"),
 	"error-streak": t("连续报错"),
+	"long-call": t("命令运行过久"),
 	manual: t("手动触发"),
 	settled: t("运行结算"),
 };

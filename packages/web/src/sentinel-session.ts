@@ -1245,19 +1245,31 @@ export class SentinelRuntime {
 			if (managed.key === this.activeKey) this.hooks.onSessionEvent(event);
 			if (event.type === "tool_execution_start") {
 				if (managed.goal) managed.goal.roundToolCalls += 1;
-				if (!task) {
+				if (!task && !event.parentToolCallId) {
 					managed.toolStarts ??= new Map();
+					const at = Date.now();
 					managed.toolStarts.set(event.toolCallId, {
 						toolName: event.toolName,
 						args: event.args,
-						at: Date.now(),
+						at,
 						...(event.parentToolCallId ? { parentToolCallId: event.parentToolCallId } : {}),
 					});
+					if (managed.key === this.activeKey && this.supervisor.statusOf(managed.key) === "running") {
+						this.supervisor.observeToolStart(managed.key, {
+							callId: event.toolCallId,
+							toolName: event.toolName,
+							args: event.args,
+							at,
+						});
+					}
 				}
 			}
 			if (event.type === "tool_execution_end") {
 				const start = managed.toolStarts?.get(event.toolCallId);
 				managed.toolStarts?.delete(event.toolCallId);
+				if (!task && start && !event.parentToolCallId) {
+					this.supervisor.finishToolCall(managed.key, event.toolCallId);
+				}
 				// Supervision follows the conversation on screen only. A background
 				// session keeps its state, but it does not spend supervisor calls.
 				if (

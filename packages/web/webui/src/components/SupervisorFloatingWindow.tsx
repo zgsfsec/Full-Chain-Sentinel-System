@@ -106,11 +106,12 @@ function CallRow({ call, onOpen }: { call: SentinelSupervisorCall; onOpen: (call
 			type="text"
 			size="small"
 			className="svfw-call"
+			disabled={call.status === "running"}
 			onClick={() => onOpen(call.callId)}
-			title={t("查看完整输出")}
+			title={call.status === "running" ? t("命令仍在运行，尚无完整输出") : t("查看完整输出")}
 		>
-			<Tag color={call.status === "error" ? "red" : "green"} variant="filled">
-				{call.tool}
+			<Tag color={call.status === "error" ? "red" : call.status === "running" ? "blue" : "green"} variant="filled">
+				{call.status === "running" ? `${call.tool} · ${t("运行中")}` : call.tool}
 			</Tag>
 			<Text type="secondary" ellipsis className="svfw-call__args">
 				{call.args}

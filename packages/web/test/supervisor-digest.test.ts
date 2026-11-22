@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { digestToolCall, redact } from "../src/supervisor-digest.ts";
+import { digestRunningToolCall, digestToolCall, redact } from "../src/supervisor-digest.ts";
 
 function digest(text: string, overrides: Partial<Parameters<typeof digestToolCall>[0]> = {}) {
 	const seenEndpoints = overrides.seenEndpoints ?? new Set<string>();
@@ -64,6 +64,22 @@ describe("digestToolCall", () => {
 		expect(record.httpStatus).toBeNull();
 		expect(record.signals).toContain("error:connection-error");
 	});
+});
+
+test("running-call summaries redact secrets without treating intended requests as evidence", () => {
+	const { record } = digestRunningToolCall({
+		callId: "call-running",
+		toolName: "bash",
+		args: { command: "curl -H 'Authorization: Bearer super-secret-token' https://target/api" },
+		at: 1_700_000_000_000,
+		durationMs: 30_000,
+		redactSecrets: true,
+	});
+	expect(record.status).toBe("running");
+	expect(record.args).not.toContain("super-secret-token");
+	expect(record.durationMs).toBe(30_000);
+	expect(record.newEvidence).toBe(false);
+	expect(record.newEndpoints).toEqual([]);
 });
 
 test("redact leaves ordinary text alone", () => {

@@ -52,6 +52,15 @@ export interface SupervisorDigestResult {
 	fingerprint: string;
 }
 
+export interface SupervisorRunningToolInput {
+	callId: string;
+	toolName: string;
+	args: unknown;
+	at: number;
+	durationMs: number;
+	redactSecrets: boolean;
+}
+
 function stripAnsi(text: string): string {
 	return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
 }
@@ -223,6 +232,35 @@ export function digestToolCall(input: SupervisorDigestInput): SupervisorDigestRe
 				(FINDING_TOOLS.has(input.toolName) && !input.isError) ||
 				(STATE_CHANGE_TOOLS.has(input.toolName) && !input.isError),
 			signals: signals.slice(0, MAX_SIGNALS),
+		},
+	};
+}
+
+/** Describe a still-running call without treating its arguments as observed evidence. */
+export function digestRunningToolCall(input: SupervisorRunningToolInput): SupervisorDigestResult {
+	const rawArgs = truncate(stableStringify(input.args), MAX_ARGS);
+	const args = input.redactSecrets ? redact(rawArgs) : rawArgs;
+	const fingerprint = createHash("sha256")
+		.update(`${input.toolName}\n${stableStringify(input.args)}`)
+		.digest("hex");
+	return {
+		fingerprint,
+		record: {
+			callId: input.callId,
+			at: input.at,
+			tool: input.toolName,
+			args,
+			status: "running",
+			durationMs: input.durationMs,
+			outputBytes: 0,
+			outputHash: "",
+			outputHead: "",
+			outputTail: "",
+			httpStatus: null,
+			newEndpoints: [],
+			newParams: [],
+			newEvidence: false,
+			signals: [],
 		},
 	};
 }

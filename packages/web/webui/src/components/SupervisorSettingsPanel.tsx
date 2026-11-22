@@ -417,6 +417,19 @@ export function SupervisorSettingsPanel({
 								onChange={(value) => updateSupervisor({ timeoutMs: (value ?? 180) * 1000 })}
 							/>
 						</Col>
+						<Col xs={12} md={8} lg={4}>
+							<Text type="secondary">{t("长命令等待（秒）")}</Text>
+							<InputNumber
+								min={15}
+								max={1800}
+								style={{ width: "100%" }}
+								value={Math.round(supervisorDraft.longToolCallMs / 1000)}
+								onChange={(value) => updateSupervisor({ longToolCallMs: (value ?? 120) * 1000 })}
+							/>
+						</Col>
+						<Col xs={24}>
+							<SettingsNote>{t("命令超过时限仍未返回时，会根据命令和已有记录分析意图；不会中断命令。")}</SettingsNote>
+						</Col>
 					</Row>
 				</div>
 

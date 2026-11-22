@@ -11,6 +11,7 @@ const config: SentinelSupervisorConfig = {
 	duplicateThreshold: 3,
 	noProgressCalls: 10,
 	errorStreak: 3,
+	longToolCallMs: 120_000,
 	timeoutMs: 180_000,
 	redactSecrets: true,
 	defaultStrategy: "steady",
@@ -39,5 +40,7 @@ describe("SupervisorSettingsPanel", () => {
 		expect(html).toContain("红队推进");
 		expect(html).toContain("低噪声");
 		expect(html).toContain("不测危险接口");
+		expect(html).toContain("长命令等待（秒）");
+		expect(html).toContain("命令超过时限仍未返回时");
 	});
 });

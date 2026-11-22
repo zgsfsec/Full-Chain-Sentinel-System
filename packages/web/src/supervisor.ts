@@ -37,7 +37,12 @@ import type {
 	SentinelTestResult,
 } from "./protocol.ts";
 import { isSupervisorStrategy, readSupervisorConfig } from "./supervisor-config.ts";
-import { digestToolCall, type SupervisorDigestInput } from "./supervisor-digest.ts";
+import {
+	digestRunningToolCall,
+	digestToolCall,
+	type SupervisorDigestInput,
+	type SupervisorRunningToolInput,
+} from "./supervisor-digest.ts";
 import {
 	buildAdviceText,
 	buildSupervisorInput,
@@ -133,6 +138,8 @@ interface SupervisorSession {
 	lastError: string | null;
 	running: boolean;
 	pendingTrigger: SentinelSupervisorTrigger | null;
+	pendingLongCalls: Map<string, SupervisorObservation>;
+	runningTools: Map<string, RunningSupervisorTool>;
 	recentCalls: SupervisorObservation[];
 	batchCalls: SupervisorObservation[];
 	seenEndpoints: Set<string>;
@@ -143,6 +150,11 @@ interface SupervisorSession {
 	lastAdviceAt: number;
 	inFlight: AbortController | null;
 	logs: SentinelSupervisorLog[];
+}
+
+interface RunningSupervisorTool {
+	input: Omit<SupervisorRunningToolInput, "redactSecrets" | "durationMs">;
+	timer: ReturnType<typeof setTimeout> | null;
 }
 
 interface ModelReply {
@@ -427,6 +439,8 @@ export class Supervisor {
 			lastError: persisted.lastError ?? null,
 			running: false,
 			pendingTrigger: null,
+			pendingLongCalls: new Map(),
+			runningTools: new Map(),
 			recentCalls: [],
 			batchCalls: [],
 			seenEndpoints: new Set(),
@@ -451,6 +465,7 @@ export class Supervisor {
 	detach(sessionId: string): void {
 		const session = this.sessions.get(sessionId);
 		if (!session) return;
+		this.clearRunningTools(session);
 		session.inFlight?.abort();
 		this.sessions.delete(sessionId);
 	}
@@ -511,6 +526,7 @@ export class Supervisor {
 		session.errorStreak = 0;
 		session.pendingAdvice = null;
 		session.pendingTrigger = null;
+		this.clearRunningTools(session);
 		session.lastAdviceAt = 0;
 		this.persist(session);
 		this.upsert(session);
@@ -633,6 +649,7 @@ export class Supervisor {
 	): void {
 		const session = this.sessions.get(sessionId);
 		if (this.closed || !session || session.status !== "running") return;
+		this.finishToolCall(sessionId, input.callId);
 		const config = readSupervisorConfig(this.agentDir);
 		const digest = digestToolCall({
 			...input,
@@ -640,7 +657,48 @@ export class Supervisor {
 			seenEndpoints: session.seenEndpoints,
 			seenParams: session.seenParams,
 		});
-		this.observe(sessionId, { record: digest.record, fingerprint: digest.fingerprint });
+		const observation = { record: digest.record, fingerprint: digest.fingerprint };
+		if (session.pendingLongCalls.has(input.callId)) session.pendingLongCalls.set(input.callId, observation);
+		this.observe(sessionId, observation);
+	}
+
+	/** Start a one-shot watchdog that analyzes this call only if it stays open. */
+	observeToolStart(sessionId: string, input: Omit<SupervisorRunningToolInput, "redactSecrets" | "durationMs">): void {
+		const session = this.sessions.get(sessionId);
+		if (this.closed || !session || session.status !== "running") return;
+		const config = readSupervisorConfig(this.agentDir);
+		if (!config.enabled) return;
+		this.finishToolCall(sessionId, input.callId);
+		const running: RunningSupervisorTool = { input, timer: null };
+		running.timer = setTimeout(() => {
+			if (this.closed || session.status !== "running" || session.runningTools.get(input.callId) !== running) return;
+			running.timer = null;
+			const currentConfig = readSupervisorConfig(this.agentDir);
+			if (!currentConfig.enabled) return;
+			const digest = digestRunningToolCall({
+				...input,
+				durationMs: Date.now() - input.at,
+				redactSecrets: currentConfig.redactSecrets,
+			});
+			const observation = { record: digest.record, fingerprint: digest.fingerprint };
+			if (session.running) {
+				session.pendingLongCalls.set(input.callId, observation);
+				session.pendingTrigger ??= "long-call";
+				this.emit(session);
+				return;
+			}
+			void this.runEpisode(session, "long-call", [...session.batchCalls, observation]);
+		}, config.longToolCallMs);
+		session.runningTools.set(input.callId, running);
+	}
+
+	/** Cancel a watchdog when the observed tool returns, even if the session is no longer active. */
+	finishToolCall(sessionId: string, callId: string): void {
+		const session = this.sessions.get(sessionId);
+		const running = session?.runningTools.get(callId);
+		if (!session || !running) return;
+		if (running.timer !== null) clearTimeout(running.timer);
+		session.runningTools.delete(callId);
 	}
 
 	observe(sessionId: string, observation: SupervisorObservation): void {
@@ -827,7 +885,10 @@ export class Supervisor {
 
 	close(): void {
 		this.closed = true;
-		for (const session of this.sessions.values()) session.inFlight?.abort();
+		for (const session of this.sessions.values()) {
+			this.clearRunningTools(session);
+			session.inFlight?.abort();
+		}
 		this.sessions.clear();
 		this.store.close();
 	}
@@ -1027,12 +1088,29 @@ export class Supervisor {
 			this.emit(session);
 			// Calls can arrive while the model is answering; they were kept in the
 			// batch, so a fresh batch threshold still gets its own episode.
-			const pending =
-				session.pendingTrigger ??
-				(session.status === "running" ? this.triggerFor(session, readSupervisorConfig(this.agentDir)) : null);
+			const longCallTriggered = session.pendingLongCalls.size > 0;
+			const pending = longCallTriggered
+				? "long-call"
+				: (session.pendingTrigger ??
+					(session.status === "running" ? this.triggerFor(session, readSupervisorConfig(this.agentDir)) : null));
 			session.pendingTrigger = null;
-			if (pending && session.status === "running") void this.runEpisode(session, pending);
+			if (pending && session.status === "running") {
+				const longCalls = [...session.pendingLongCalls.values()];
+				session.pendingLongCalls.clear();
+				const observations = new Map(
+					[...session.batchCalls, ...longCalls].map((entry) => [entry.record.callId, entry]),
+				);
+				void this.runEpisode(session, pending, [...observations.values()]);
+			}
 		}
+	}
+
+	private clearRunningTools(session: SupervisorSession): void {
+		for (const running of session.runningTools.values()) {
+			if (running.timer !== null) clearTimeout(running.timer);
+		}
+		session.runningTools.clear();
+		session.pendingLongCalls.clear();
 	}
 
 	/** Remove only the calls this episode analyzed; calls that arrived during the model call stay. */

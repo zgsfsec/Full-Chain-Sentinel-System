@@ -1595,7 +1595,14 @@ export type SentinelSupervisorStatus = "waiting" | "running" | "stopped" | "erro
 
 export type SentinelSupervisorProgress = "advancing" | "stalled" | "looping" | "unknown";
 
-export type SentinelSupervisorTrigger = "batch" | "duplicate" | "no-progress" | "error-streak" | "manual" | "settled";
+export type SentinelSupervisorTrigger =
+	| "batch"
+	| "duplicate"
+	| "no-progress"
+	| "error-streak"
+	| "long-call"
+	| "manual"
+	| "settled";
 
 export type SentinelSupervisorAdviceStatus = "pending" | "sent" | "ignored";
 
@@ -1619,6 +1626,7 @@ export interface SentinelSupervisorConfig {
 	duplicateThreshold: number;
 	noProgressCalls: number;
 	errorStreak: number;
+	longToolCallMs: number;
 	timeoutMs: number;
 	redactSecrets: boolean;
 	/** Default for a new conversation; the operator can override it before arming. */
@@ -1644,7 +1652,7 @@ export interface SentinelSupervisorCall {
 	at: number;
 	tool: string;
 	args: string;
-	status: "ok" | "error";
+	status: "ok" | "error" | "running";
 	durationMs: number | null;
 	outputBytes: number;
 	outputHash: string;

@@ -2655,6 +2655,11 @@ export const EN_MESSAGES: Record<string, string> = {
 	每个会话的查询次数上限: "Maximum queries per session",
 	每会话上限: "Per-session limit",
 	每批调用数: "Calls per batch",
+	"长命令等待（秒）": "Long command wait (seconds)",
+	"命令超过时限仍未返回时，会根据命令和已有记录分析意图；不会中断命令。":
+		"If a command is still running after this limit, supervision analyzes its intent from the command and prior context. It does not interrupt the command.",
+	命令运行过久: "Long-running command",
+	"命令仍在运行，尚无完整输出": "Command is still running; full output is not available yet",
 	"每条命令先由守门模型判定，拦截时把理由回给 worker。":
 		"The gatekeeper model judges every command first and returns its reason to the worker when blocking.",
 	每次调用都要多花一次模型往返: "Every call costs one extra model round trip",

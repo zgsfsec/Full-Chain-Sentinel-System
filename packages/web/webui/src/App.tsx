@@ -617,6 +617,7 @@ export function App() {
 		duplicateThreshold: 3,
 		noProgressCalls: 10,
 		errorStreak: 3,
+		longToolCallMs: 120000,
 		timeoutMs: 180000,
 		redactSecrets: true,
 		defaultStrategy: "steady",

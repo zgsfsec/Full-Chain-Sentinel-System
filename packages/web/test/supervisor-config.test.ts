@@ -35,12 +35,14 @@ describe("normalizeSupervisorConfig", () => {
 			duplicateThreshold: 1,
 			noProgressCalls: 0,
 			errorStreak: -4,
+			longToolCallMs: 1,
 			timeoutMs: 100,
 		});
 		expect(config.batchToolCalls).toBe(100);
 		expect(config.duplicateThreshold).toBe(2);
 		expect(config.noProgressCalls).toBe(2);
 		expect(config.errorStreak).toBe(2);
+		expect(config.longToolCallMs).toBe(15_000);
 		expect(config.timeoutMs).toBe(5000);
 	});
 
@@ -106,11 +108,13 @@ describe("file persistence", () => {
 			...SUPERVISOR_DEFAULTS,
 			enabled: false,
 			batchToolCalls: 30,
+			longToolCallMs: 240_000,
 			timeoutMs: 45_000,
 		});
 		expect(readSupervisorConfig(agentDir)).toMatchObject({
 			enabled: false,
 			batchToolCalls: 30,
+			longToolCallMs: 240_000,
 			timeoutMs: 45_000,
 		});
 		const text = readFileSync(supervisorJsonPath(agentDir), "utf-8");

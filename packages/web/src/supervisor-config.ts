@@ -22,6 +22,7 @@ export const SUPERVISOR_DEFAULTS: SentinelSupervisorConfig = {
 	duplicateThreshold: 3,
 	noProgressCalls: 10,
 	errorStreak: 3,
+	longToolCallMs: 120_000,
 	// A reasoning model can take minutes on a 20-call batch. 180s leaves room for
 	// the first attempt and the 8192-token retry without a bare abort.
 	timeoutMs: 180_000,
@@ -38,6 +39,8 @@ const MIN_THRESHOLD = 2;
 const MAX_THRESHOLD = 50;
 const MIN_TIMEOUT = 5_000;
 const MAX_TIMEOUT = 300_000;
+const MIN_LONG_TOOL_CALL = 15_000;
+const MAX_LONG_TOOL_CALL = 1_800_000;
 const MAX_CUSTOM_STRATEGIES = 12;
 const MAX_CUSTOM_NAME = 30;
 const MAX_CUSTOM_DESCRIPTION = 80;
@@ -157,6 +160,12 @@ export function normalizeSupervisorConfig(raw: unknown): SentinelSupervisorConfi
 		),
 		noProgressCalls: clamp(record.noProgressCalls, SUPERVISOR_DEFAULTS.noProgressCalls, MIN_THRESHOLD, MAX_THRESHOLD),
 		errorStreak: clamp(record.errorStreak, SUPERVISOR_DEFAULTS.errorStreak, MIN_THRESHOLD, MAX_THRESHOLD),
+		longToolCallMs: clamp(
+			record.longToolCallMs,
+			SUPERVISOR_DEFAULTS.longToolCallMs,
+			MIN_LONG_TOOL_CALL,
+			MAX_LONG_TOOL_CALL,
+		),
 		timeoutMs: clamp(record.timeoutMs, SUPERVISOR_DEFAULTS.timeoutMs, MIN_TIMEOUT, MAX_TIMEOUT),
 		redactSecrets:
 			typeof record.redactSecrets === "boolean" ? record.redactSecrets : SUPERVISOR_DEFAULTS.redactSecrets,
