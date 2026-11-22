@@ -31,6 +31,7 @@ import { ReportComposerControl } from "./ReportComposerControl.tsx";
 import { PresetMenu, type PresetMenuAnchor, presetMenuPosition } from "./PresetMenu.tsx";
 import { SupervisorStartMenu, type SupervisorLaunchMode } from "./SupervisorStartMenu.tsx";
 import { supervisorStrategyKey } from "../supervisor-strategy.ts";
+import { WorkLinkControl } from "./WorkLinkControl.tsx";
 import "./composer.css";
 
 const { Text } = Typography;
@@ -106,6 +107,7 @@ export function Composer({
 	hasProject,
 	supportsImageInput,
 	projectId,
+	sessionId,
 	blockedReason,
 	notifyRun,
 	goalDisabledReason,
@@ -150,6 +152,8 @@ export function Composer({
 	supportsImageInput: boolean;
 	/** The active project's id; null while none is selected. Uploads land in its work dir. */
 	projectId: string | null;
+	/** The snapshot's current conversation id, used to scope work-link recording. */
+	sessionId: string | null;
 	/** Set when the console cannot run anything: the input is locked until it clears. */
 	blockedReason: string | null;
 	/** Whether the run started from here reports to the notification channel. */
@@ -445,6 +449,7 @@ export function Composer({
 							) : null}
 						</>
 					) : null}
+					<WorkLinkControl key={`${projectId ?? ""}:${sessionId ?? ""}`} projectId={projectId} sessionId={sessionId} />
 					<Button
 						size="small"
 						type={preset ? "primary" : "default"}

@@ -3225,6 +3225,7 @@ export function App() {
 											?.input.includes("image") ?? false
 									}
 									projectId={snapshot?.project?.id ?? null}
+									sessionId={snapshot?.activeSessionId ?? null}
 									blockedReason={
 										envReport && !envReport.ok
 											? t("Docker 环境不可用：{reason}。请到「设置 → 环境」修复。", {
