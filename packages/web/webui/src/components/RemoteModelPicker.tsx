@@ -1,5 +1,5 @@
 import { CloudDownloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Select, Space, Typography } from "antd";
+import { Alert, Button, Popover, Select, Space, Typography } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { REMOTE_MODEL_APIS, type RemoteModelInput, type RemoteModelList } from "../../../src/remote-model-types.ts";
 import { t } from "../i18n.ts";
@@ -9,14 +9,18 @@ export function RemoteModelPicker({
 	input,
 	modelId,
 	onSelect,
+	compact = false,
 }: {
 	input: RemoteModelInput;
 	modelId: string;
 	onSelect: (id: string) => void;
+	/** Render a compact button for use beside a model field label. */
+	compact?: boolean;
 }) {
 	const [loading, setLoading] = useState(false);
 	const [result, setResult] = useState<RemoteModelList | null>(null);
 	const [error, setError] = useState("");
+	const [popoverOpen, setPopoverOpen] = useState(false);
 	const pending = useRef<AbortController | null>(null);
 	const sequence = useRef(0);
 	const key = JSON.stringify([input.entryId, input.baseUrl, input.api, input.apiKey]);
@@ -30,6 +34,7 @@ export function RemoteModelPicker({
 		setLoading(false);
 		setResult(null);
 		setError("");
+		setPopoverOpen(false);
 		return () => {
 			sequence.current++;
 			pending.current?.abort();
@@ -70,16 +75,73 @@ export function RemoteModelPicker({
 		}
 	};
 
+	const trigger = (
+		<Button
+			icon={<CloudDownloadOutlined />}
+			loading={loading}
+			disabled={!input.baseUrl.trim() || !supported}
+			onClick={() => {
+				if (compact) setPopoverOpen(true);
+				void load();
+			}}
+			size={compact ? "small" : "middle"}
+			type={compact ? "link" : "default"}
+			title={!supported ? t("当前协议不支持获取远端模型列表，请手动填写模型 ID。") : undefined}
+		>
+			{compact ? t("读取端点模型") : t("获取远端模型列表")}
+		</Button>
+	);
+
+	if (compact) {
+		return (
+			<Popover
+				open={popoverOpen}
+				onOpenChange={setPopoverOpen}
+				placement="bottomLeft"
+				trigger="click"
+				content={
+					error ? (
+						<Alert type="error" showIcon title={error} />
+					) : result ? (
+						result.models.length > 0 ? (
+							<Space direction="vertical" size={8} style={{ width: 320 }}>
+								<Select
+									aria-label={t("远端模型列表")}
+									autoFocus
+									showSearch
+									style={{ width: "100%" }}
+									value={result.models.some((model) => model.id === modelId) ? modelId : undefined}
+									placeholder={t("搜索并选择远端模型（{count} 个）", { count: result.models.length })}
+									options={result.models.map((model) => ({
+										value: model.id,
+										label: model.name === model.id ? model.id : `${model.name} · ${model.id}`,
+									}))}
+									optionFilterProp="label"
+									onChange={(id) => {
+										onSelect(id);
+										setPopoverOpen(false);
+									}}
+								/>
+								{result.truncated ? (
+									<Alert type="warning" showIcon title={t("模型列表较大，仅显示部分结果；未找到时可手动填写模型 ID。")} />
+								) : null}
+							</Space>
+						) : (
+							<Alert type="info" showIcon title={t("远端未返回可用模型，请检查 API Key 权限，或手动填写模型 ID。")} />
+						)
+					) : loading ? (
+						<Typography.Text type="secondary">{t("正在读取模型列表…")}</Typography.Text>
+					) : null
+				}
+			>
+				{trigger}
+			</Popover>
+		);
+	}
+
 	return (
 		<Space orientation="vertical" size={8} style={{ width: "100%", marginBottom: 20 }}>
-			<Button
-				icon={<CloudDownloadOutlined />}
-				loading={loading}
-				disabled={!input.baseUrl.trim() || !supported}
-				onClick={() => void load()}
-			>
-				{t("获取远端模型列表")}
-			</Button>
+			{trigger}
 			<Typography.Text type="secondary">
 				{supported
 					? t("使用当前 Base URL 和 API Key 查询，无需先保存；也可手动填写模型 ID。")

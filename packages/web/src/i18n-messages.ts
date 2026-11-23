@@ -1593,7 +1593,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	基础镜像: "Base image",
 	"基础镜像 {image}": "Base image {image}",
 	基础预设: "Base preset",
-	填充能力: "Fill capabilities",
 	填写连接信息后保存: "Fill in the connection details and save",
 	处理时间线: "Timeline",
 	"备注名（如 主账号）": "Label (e.g. main account)",
@@ -1668,6 +1667,11 @@ export const EN_MESSAGES: Record<string, string> = {
 		"The gatekeeper judged that this command would damage target availability, data integrity, or system configuration",
 	守门员返回了空回复: "Gatekeeper returned an empty reply",
 	守门模型: "Gatekeeper model",
+	"守门模型必须关闭思考，否则可能导致守门判定错误。":
+		"The Gatekeeper model must have reasoning disabled; otherwise command verdicts may be incorrect.",
+	"到模型库编辑该模型，在「模型能力」中关闭思考。":
+		"Edit the model in the model library and turn off reasoning under Model Capabilities.",
+	必须关闭思考: "Reasoning must be off",
 	"守门模型不可用，已放行 {count} 次判定（AI 审批模式下命令未经过拦截直接执行）。":
 		"Gatekeeper model unavailable; {count} verdicts were allowed (in AI approval mode commands ran without being intercepted).",
 	"守门模型可用（{ms}ms，来源：{source}）": "Gatekeeper model available ({ms}ms, source: {source})",
@@ -2718,7 +2722,21 @@ export const EN_MESSAGES: Record<string, string> = {
 	"清空筛选条件，或换个关键字再试一次。": "Clear the filters or try a different keyword.",
 	"清空（用官方源）": "Clear (use official sources)",
 	清除: "Clear",
-	"清除已保存的密钥（改成无鉴权端点）": "Clear the saved key (make the endpoint unauthenticated)",
+	撤销清除: "Undo clear",
+	"保存后不发送 API Key": "No API key will be sent after saving",
+	"留空不发送 API Key": "Leave blank to send no API key",
+	读取端点模型: "Read endpoint models",
+	"正在读取模型列表…": "Reading model list…",
+	查找模板: "Find templates",
+	"正在查找模板…": "Searching templates…",
+	内置能力模板: "Built-in capability templates",
+	"按当前模型 ID 查找，可预览后再填充。": "Find templates by the current model ID and review them before applying.",
+	"找到 1 个匹配模板，确认后填充。": "One matching template found. Review it before applying.",
+	"找到 {count} 个匹配模板，选择一个填充。": "Found {count} matching templates. Choose one to apply.",
+	填充: "Apply",
+	相近: "Similar",
+	支持推理: "Reasoning",
+	不支持推理: "No reasoning",
 	"清除本会话的单独设定，重新跟随全局默认（{mode}）":
 		"Clear this session's override and follow the global default again ({mode})",
 	"清除目标（正在运行时会先中止）": "Clear the goal (the current run is stopped first)",
@@ -2889,8 +2907,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	"端口必须在 1-65535 之间": "The port must be between 1 and 65535",
 	"端点与协议跟随渠道；能力可在「能力与价格」里改。":
 		"Endpoint and protocol follow the channel; capabilities are edited under “Capabilities & pricing”.",
-	"端点主机已变化；不填新 Key 时，保存会清除旧密钥。":
-		"The endpoint host changed; saving without a new key clears the old one.",
 	"端点可达，但模型 {model} 不存在。": "The endpoint is reachable but model {model} does not exist.",
 	"端点在上面「角色 → 守门模型」里选。": "The endpoint is chosen above under Roles → Gatekeeper model.",
 	"端点无响应。确认服务已启动、地址端口正确。{hint}":
@@ -4094,6 +4110,38 @@ export const EN_MESSAGES: Record<string, string> = {
 	请求头值: "Header value",
 	移除请求头: "Remove header",
 	添加请求头: "Add header",
+	"留空保留已保存值；改名需重新填写值。请求头只作用于当前模型。":
+		"Leave values blank to keep them; enter the value again when renaming. Headers apply only to this model.",
+	保存模型: "Save model",
+	"请填写 Base URL": "Enter a Base URL",
+	"请填写模型 ID": "Enter a model ID",
+	"渠道、端点和鉴权": "Channel, endpoint, and authentication",
+	"上下文、输入与推理": "Context, input, and reasoning",
+	成本统计与缓存时长: "Costs and cache duration",
+	连接到模型: "Connect to a model",
+	"先选渠道，再填写模型与凭据。保存后，新请求会采用这些设置。":
+		"Choose a channel, then enter the model and credentials. New requests use these settings after saving.",
+	"正在运行的会话会从下一次模型请求开始使用新配置。":
+		"Running sessions use the new settings on their next model request.",
+	能力与请求行为: "Capabilities and request behavior",
+	"决定 Pi 怎样构造请求，以及会发送哪些输入。": "Controls how Pi builds requests and which inputs it sends.",
+	上下文容量: "Context capacity",
+	"按服务商给出的模型规格填写。": "Use the limits published by the provider.",
+	输入类型: "Input types",
+	"只勾选端点实际接受的输入。": "Select only the input types the endpoint accepts.",
+	"关闭后，截图和图片附件不会发送给这个模型。":
+		"When off, screenshots and image attachments are not sent to this model.",
+	推理设置: "Reasoning settings",
+	"配置思考能力、默认强度和请求映射。": "Configure reasoning support, the default level, and request mappings.",
+	用量成本: "Usage costs",
+	"价格单位为美元 / 百万 token。未填写的模型不参与成本统计。":
+		"Prices are USD per million tokens. Models without prices are excluded from cost totals.",
+	"Token 单价": "Token rates",
+	"输入、输出和缓存分别计价。": "Input, output, and cache rates are set separately.",
+	提示缓存时长: "Prompt cache duration",
+	"只在端点确实支持 prompt caching 时填写。": "Fill these only when the endpoint supports prompt caching.",
+	"至少填写一项价格后才保存价格组；其余空项按 0 计。":
+		"Enter at least one rate to save pricing; other blank rates are treated as 0.",
 	"只作用于这个模型；已保存的值不会回显，留空表示保留，删除行表示移除；改名需重新填写值。":
 		"Applies only to this model. Saved values are hidden; leave a value blank to keep it, remove the row to delete it, or re-enter the value when renaming a header.",
 	请求头名称不能为空: "Header name cannot be empty",

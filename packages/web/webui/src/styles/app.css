@@ -3953,15 +3953,85 @@ body {
 }
 
 .modelhub-lookup {
+	margin: 0 0 8px;
+}
+
+.modelhub-lookup__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	min-height: 36px;
+}
+
+.modelhub-lookup__head > div {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
-	margin: 4px 0 12px;
+	gap: 2px;
 }
 
 .modelhub-lookup__note {
 	display: block;
 	font-size: 12px;
+}
+
+.modelhub-template-list .ant-list-item {
+	align-items: center;
+	padding: 8px 2px;
+}
+
+.modelhub-template-list .ant-list-items {
+	max-height: 250px;
+	overflow-y: auto;
+}
+
+.modelhub-template-popover {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	width: min(390px, calc(100vw - 64px));
+}
+
+.modelhub-template-item {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 2px;
+	min-width: 0;
+}
+
+.modelhub-template-item__title {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.modelhub-template-item__meta {
+	font-size: 11px;
+}
+
+.modelhub-field-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.modelhub-model-select {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	width: 100%;
+}
+
+.modelhub-model-select > .ant-input,
+.modelhub-model-select > .ant-select {
+	flex: 1 1 0;
+	min-width: 0;
+	width: auto !important;
+}
+
+.modelhub-model-select > .ant-popover {
+	flex: none;
 }
 
 .modelhub-caps {
@@ -3990,7 +4060,7 @@ body {
 }
 
 .modelhub-drawer .ant-drawer-body {
-	padding: 8px 24px 20px;
+	padding: 4px 24px 12px;
 }
 
 .modelhub-drawer .ant-drawer-header {
@@ -4008,15 +4078,107 @@ body {
 
 .modelhub-drawer .ant-tabs-nav {
 	position: sticky;
-	top: -8px;
+	top: -4px;
 	z-index: 1;
-	padding-top: 4px;
+	margin-bottom: 8px;
+	padding: 2px 0 0;
 	background: var(--card);
 }
 
-.modelhub-drawer .modelhub-form > .ant-typography {
-	display: block;
-	margin-bottom: 14px;
+.modelhub-drawer .ant-tabs-nav-list {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	width: 100%;
+}
+
+.modelhub-drawer .ant-tabs-tab {
+	justify-content: center;
+	min-width: 0;
+	margin: 0 !important;
+	padding: 8px 10px;
+}
+
+.modelhub-template-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.modelhub-template-row .modelhub-lookup {
+	flex: 1;
+}
+
+.modelhub-block {
+	padding: 8px 0 2px;
+	border-bottom: 1px solid var(--console-border);
+}
+
+.modelhub-block:last-of-type {
+	border-bottom: 0;
+}
+
+.modelhub-block__heading {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 6px;
+}
+
+.modelhub-block__heading > .ant-typography:first-child {
+	font-size: 13px;
+}
+
+.modelhub-block .ant-form-item:last-child {
+	margin-bottom: 8px;
+}
+
+.modelhub-toggle-row {
+	display: grid;
+	grid-template-columns: 210px minmax(0, 1fr);
+	align-items: center;
+	gap: 12px;
+	padding: 8px 0 12px;
+}
+
+.modelhub-thinking-options {
+	margin: 4px 0 10px;
+	padding: 14px 16px 4px;
+	border: 1px solid var(--console-border);
+	border-radius: 8px;
+	background: #f8fafc;
+}
+
+.modelhub-optional {
+	margin: 4px 0;
+	border-top: 1px solid var(--console-border);
+	border-bottom: 1px solid var(--console-border);
+}
+
+.modelhub-optional .ant-collapse-item {
+	border-bottom: 0;
+}
+
+.modelhub-optional .ant-collapse-header {
+	align-items: center !important;
+	padding: 11px 2px !important;
+}
+
+.modelhub-optional .ant-collapse-content-box {
+	padding: 0 2px 14px !important;
+}
+
+.modelhub-note {
+	padding: 12px 0 2px;
+}
+
+.modelhub-drawer .modelhub-form .ant-form-item {
+	margin-bottom: 8px;
+}
+
+.modelhub-drawer .modelhub-form .ant-form-item-label > label {
+	font-weight: 550;
 }
 
 @media (max-width: 900px) {
@@ -4066,6 +4228,39 @@ body {
 
 	.modelhub-drawer .ant-drawer-extra {
 		display: none;
+	}
+
+	.modelhub-drawer .modelhub-form .ant-col-12 {
+		width: 100%;
+		max-width: 100%;
+	}
+
+	.modelhub-drawer .modelhub-form .ant-row > .ant-col {
+		width: 100%;
+		max-width: 100%;
+	}
+
+	.modelhub-block__heading {
+		align-items: flex-start;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.modelhub-toggle-row {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 4px;
+	}
+
+	.modelhub-thinking-options {
+		padding-inline: 10px;
+	}
+
+	.modelhub-lookup {
+		margin-bottom: 6px;
+	}
+
+	.modelhub-lookup__head {
+		align-items: flex-start;
 	}
 }
 
@@ -7439,7 +7634,9 @@ body {
 }
 
 .modelhub-form {
-	margin-top: 4px;
+	width: 100%;
+	max-width: 720px;
+	margin: 0 auto;
 }
 
 .apimodel-entity__desc {

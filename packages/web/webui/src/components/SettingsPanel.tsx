@@ -6,11 +6,14 @@ import {
 	Button,
 	Checkbox,
 	Col,
+	Collapse,
 	Drawer,
 	Form,
 	Input,
 	InputNumber,
+	List,
 	Popconfirm,
+	Popover,
 	Row,
 	Select,
 	Segmented,
@@ -80,6 +83,8 @@ interface Draft extends ModelThinkingDraft {
 	cacheLong: string;
 	customHeaders: Array<{ name: string; value: string; saved: boolean }>;
 }
+
+type DraftTabKey = "connection" | "capabilities" | "pricing";
 
 const EMPTY_DRAFT: Draft = {
 	name: "",
@@ -210,7 +215,11 @@ function parseRate(raw: string, label: string): { value?: number; error?: string
  * box means "not declared" and clears the field; the error blocks saving instead
  * of silently dropping bad input.
  */
-function capabilitiesOf(draft: Draft): { capabilities: SentinelModelCapabilities; error: string | null } {
+function capabilitiesOf(draft: Draft): {
+	capabilities: SentinelModelCapabilities;
+	error: string | null;
+	errorTab: DraftTabKey;
+} {
 	const context = parsePositive(draft.contextWindow, t("上下文窗口"));
 	const output = parsePositive(draft.maxTokens, t("最大输出"));
 	const sizeError =
@@ -246,6 +255,13 @@ function capabilitiesOf(draft: Draft): { capabilities: SentinelModelCapabilities
 					...(long.value !== undefined ? { long: long.value } : {}),
 				}
 			: undefined;
+	const thinkingError = draft.reasoning
+		? draft.availableThinkingLevels.length === 0
+			? (getLanguage() === "en" ? "Select at least one thinking level." : "至少选择一个支持的思考等级。")
+			: draft.availableThinkingLevels.some((level) => draft.thinkingLevelMap?.[level]?.trim() === "")
+				? (getLanguage() === "en" ? "Request values cannot be blank." : "思考等级的请求值不能为空。")
+				: null
+		: null;
 	const requestHeaders: Record<string, string> = {};
 	let headerError: string | null = null;
 	const seenHeaders = new Set<string>();
@@ -269,6 +285,7 @@ function capabilitiesOf(draft: Draft): { capabilities: SentinelModelCapabilities
 		}
 		requestHeaders[name] = value;
 	}
+	const error = headerError ?? sizeError ?? thinkingError ?? costError ?? short.error ?? long.error ?? null;
 	return {
 		capabilities: {
 			api: draft.api,
@@ -283,13 +300,22 @@ function capabilitiesOf(draft: Draft): { capabilities: SentinelModelCapabilities
 			...(cost ? { cost } : {}),
 			...(promptCache ? { promptCache } : {}),
 		},
-		error: headerError ?? sizeError ?? costError ?? short.error ?? long.error ?? (draft.reasoning
-			? draft.availableThinkingLevels.length === 0
-				? (getLanguage() === "en" ? "Select at least one thinking level." : "至少选择一个支持的思考等级。")
-				: draft.availableThinkingLevels.some((level) => draft.thinkingLevelMap?.[level]?.trim() === "")
-					? (getLanguage() === "en" ? "Request values cannot be blank." : "思考等级的请求值不能为空。")
-					: null
-			: null),
+		error,
+		errorTab: headerError ? "connection" : sizeError || thinkingError ? "capabilities" : "pricing",
+	};
+}
+
+function draftValidation(draft: Draft): ReturnType<typeof capabilitiesOf> & { error: string | null; errorTab: DraftTabKey } {
+	const capabilities = capabilitiesOf(draft);
+	const connectionError = !draft.baseUrl.trim()
+		? t("请填写 Base URL")
+		: !draft.modelId.trim()
+			? t("请填写模型 ID")
+			: null;
+	return {
+		...capabilities,
+		error: connectionError ?? capabilities.error,
+		errorTab: connectionError ? "connection" : capabilities.errorTab,
 	};
 }
 
@@ -336,6 +362,7 @@ export function SettingsPanel({
 	const [activeSection, setActiveSection] = useState<"models" | "roles" | "gatekeeper">("models");
 	const [activeDraftTab, setActiveDraftTab] = useState<"connection" | "capabilities" | "pricing">("connection");
 	const [deleteWarn, setDeleteWarn] = useState(false);
+	const [requestHeadersExpanded, setRequestHeadersExpanded] = useState(false);
 	const [pickerRole, setPickerRole] = useState<SentinelModelRoleName | null>(null);
 	const [search, setSearch] = useState("");
 	const [testing, setTesting] = useState<string | null>(null);
@@ -346,6 +373,7 @@ export function SettingsPanel({
 	const [defaultsLoading, setDefaultsLoading] = useState(false);
 	const [defaultsMatches, setDefaultsMatches] = useState<SentinelBuiltinModelDefaults[] | null>(null);
 	const [defaultsNote, setDefaultsNote] = useState("");
+	const [defaultsPopoverOpen, setDefaultsPopoverOpen] = useState(false);
 	/** `${modelId}|${baseUrl}` already looked up, so blur does not refill after manual edits. */
 	const [autoLookupKey, setAutoLookupKey] = useState("");
 	/** Channel list for the first picker; the query is matched on the server. */
@@ -555,19 +583,23 @@ export function SettingsPanel({
 
 	const openDraft = (next: Draft): void => {
 		setDraft(next);
+		setRequestHeadersExpanded(next.customHeaders.length > 0);
 		setActiveDraftTab("connection");
 		setDeleteWarn(false);
 		setDefaultsMatches(null);
 		setDefaultsNote("");
+		setDefaultsPopoverOpen(false);
 		setAutoLookupKey("");
 		resetChannelState();
 	};
 
 	const closeDraft = (): void => {
 		setDraft(null);
+	setRequestHeadersExpanded(false);
 		setDeleteWarn(false);
 		setDefaultsMatches(null);
 		setDefaultsNote("");
+		setDefaultsPopoverOpen(false);
 		setAutoLookupKey("");
 		resetChannelState();
 	};
@@ -579,6 +611,8 @@ export function SettingsPanel({
 		}
 		const lookupKey = key ?? `${draft.modelId.trim()}|${draft.baseUrl.trim()}`;
 		setDefaultsLoading(true);
+		setDefaultsNote("");
+		if (!auto) setDefaultsPopoverOpen(true);
 		const matches = await onLookupDefaults(draft.modelId.trim(), draft.baseUrl.trim());
 		setDefaultsLoading(false);
 		setAutoLookupKey(lookupKey);
@@ -588,15 +622,14 @@ export function SettingsPanel({
 			setDefaultsNote(t("内置库没有同 ID 的模型，请手工填写能力。"));
 			return;
 		}
-		// A near miss is a different model. Offer it as a choice; never apply it
-		// behind the operator's back, even when it is the only candidate.
+		// Approximate matches are choices only; never apply them automatically.
 		if (found.every((match) => match.approximate === true)) {
 			setDefaultsMatches(found);
 			setDefaultsNote(t("内置库没有同 ID 的模型，以下是相近条目，选择后请核对。"));
+			setDefaultsPopoverOpen(true);
 			return;
 		}
-		setDefaultsMatches(found.length > 1 ? found : null);
-		if (auto || found.length === 1) {
+		if (auto) {
 			const defaults = found[0];
 			setDraft((current) => {
 				// The operator may have typed a different model while the lookup was
@@ -609,7 +642,13 @@ export function SettingsPanel({
 			setCapsSource("catalog");
 			return;
 		}
-		setDefaultsNote(t("找到 {count} 个同 ID 模型，选一个填充。", { count: found.length }));
+		setDefaultsMatches(found);
+		setDefaultsPopoverOpen(true);
+		setDefaultsNote(
+			found.length === 1
+				? t("找到 1 个匹配模板，确认后填充。")
+				: t("找到 {count} 个匹配模板，选择一个填充。", { count: found.length }),
+		);
 	};
 
 	/** New entries prefill once per model-id/host pair; existing entries only on request. */
@@ -623,6 +662,8 @@ export function SettingsPanel({
 
 	const applyDefaultsToDraft = (defaults: SentinelBuiltinModelDefaults): void => {
 		setDraft((current) => (current ? applyDefaults(current, defaults) : current));
+		setDefaultsMatches(null);
+		setDefaultsPopoverOpen(false);
 		setDefaultsNote(t("已按内置库「{provider}」填充，可继续修改。", { provider: defaults.providerName }));
 		setCapsSource("catalog");
 		setActiveDraftTab("capabilities");
@@ -739,8 +780,11 @@ export function SettingsPanel({
 
 	const submit = (): void => {
 		if (!draft) return;
-		const parsed = capabilitiesOf(draft);
-		if (parsed.error) return;
+		const parsed = draftValidation(draft);
+		if (parsed.error) {
+			setActiveDraftTab(parsed.errorTab);
+			return;
+		}
 		// Editing: an untouched key field means "keep what is stored". A changed
 		// host must not receive the old key, so an empty field clears it instead.
 		// Adding: an empty key means the endpoint needs no authentication.
@@ -779,12 +823,8 @@ export function SettingsPanel({
 	);
 	const unused = library.entries.filter((entry) => entry.roles.length === 0).length;
 	const assigned = ROLE_ORDER.filter((role) => library.resolved[role] !== null).length;
-	const capabilityError = draft ? capabilitiesOf(draft).error : null;
-	const valid =
-		draft !== null &&
-		draft.baseUrl.trim().length > 0 &&
-		draft.modelId.trim().length > 0 &&
-		capabilityError === null;
+	const validation = draft ? draftValidation(draft) : null;
+	const activeValidationError = validation?.errorTab === activeDraftTab ? validation.error : null;
 
 	const modelOptions = models ?? [];
 	const selectedModel =
@@ -831,25 +871,19 @@ export function SettingsPanel({
 
 	const keyField = () => (
 		<Form.Item
-			label={customChannel ? "API Key" : `${channel?.name ?? ""} API Key`}
-			extra={
-				<>
+			label={
+				<div className="modelhub-field-label">
+					<span>{customChannel ? "API Key" : `${channel?.name ?? ""} API Key`}</span>
 					{draft?.id && editingEntry?.hasKey ? (
-						<Checkbox
-							checked={draft.clearKey}
-							onChange={(event) =>
-								setDraft((current) =>
-									current ? { ...current, clearKey: event.target.checked, apiKey: "" } : current,
-								)
-							}
+						<Button
+							type="link"
+							size="small"
+							onClick={() => setDraft((current) => current ? { ...current, clearKey: !current.clearKey, apiKey: "" } : current)}
 						>
-							{t("清除已保存的密钥（改成无鉴权端点）")}
-						</Checkbox>
+							{draft.clearKey ? t("撤销清除") : t("清除")}
+						</Button>
 					) : null}
-					{keyHostChanged && !draft?.apiKey.trim() && !draft?.clearKey ? (
-						<div>{t("端点主机已变化；不填新 Key 时，保存会清除旧密钥。")}</div>
-					) : null}
-				</>
+				</div>
 			}
 		>
 			<Input.Password
@@ -859,109 +893,180 @@ export function SettingsPanel({
 						current ? { ...current, apiKey: event.target.value, clearKey: false } : current,
 					)
 				}
-				placeholder={draft?.id ? t("已保存，留空表示不修改") : t("无鉴权端点留空")}
+				placeholder={draft?.clearKey ? t("保存后不发送 API Key") : keyHostChanged ? t("留空不发送 API Key") : draft?.id ? t("已保存，留空表示不修改") : t("无鉴权端点留空")}
 				spellCheck={false}
 			/>
 		</Form.Item>
 	);
 
+	const remoteModelPicker = () => (
+		<RemoteModelPicker
+			compact
+			input={{
+				entryId: draft?.id,
+				baseUrl: draft?.baseUrl ?? "",
+			api: draft?.api ?? EMPTY_DRAFT.api,
+				apiKey: draft ? (draft.clearKey ? "" : draft.apiKey.trim() || (draft.id ? null : "")) : "",
+			}}
+			modelId={draft?.modelId ?? ""}
+			onSelect={(modelId) => {
+				setDraft((current) => current
+					? { ...current, ...EMPTY_MODEL_THINKING, modelId, name: nameAfterSelection(current, modelId) }
+					: current);
+				setCustomModel(true);
+				setDefaultsMatches(null);
+				setDefaultsNote("");
+				setAutoLookupKey(`${modelId}|${draft?.baseUrl.trim() ?? ""}`);
+			}}
+		/>
+	);
+
 	const requestHeadersEditor = () => (
-		<Form.Item
-			label={
-				<Space size={4}>
-					<span>{t("自定义请求头")}</span>
-					<Button
-						type="link"
-						size="small"
-						href={`${PROJECT_REPOSITORY}/blob/main/packages/web/docs/model-request-headers.md`}
-						target="_blank"
-						rel="noopener noreferrer"
-					>
-						{t("常用请求头")}
-					</Button>
-				</Space>
-			}
-			extra={t("只作用于这个模型；已保存的值不会回显，留空表示保留，删除行表示移除；改名需重新填写值。")}
-		>
-			<Space direction="vertical" size={8} style={{ width: "100%" }}>
-				{draft?.customHeaders.map((header, index) => (
-					<Row key={`${header.name}-${index}`} gutter={8} align="middle">
-						<Col span={8}>
-							<Input
-								aria-label={t("请求头名称")}
-								value={header.name}
-								placeholder="X-Custom-Header"
-								onChange={(event) => setDraft((current) => current ? {
-									...current,
-									customHeaders: current.customHeaders.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value, saved: false } : item),
-								} : current)}
-								spellCheck={false}
-							/>
-						</Col>
-						<Col span={13}>
-							<Input.Password
-								aria-label={t("请求头值")}
-								value={header.value}
-								placeholder={header.saved ? t("已保存，留空保持") : "value"}
-								onChange={(event) => setDraft((current) => current ? {
-									...current,
-									customHeaders: current.customHeaders.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item),
-								} : current)}
-								spellCheck={false}
-							/>
-						</Col>
-						<Col span={3}>
+		<Collapse
+			className="modelhub-optional"
+			ghost
+			activeKey={requestHeadersExpanded ? ["headers"] : []}
+			onChange={(keys) => setRequestHeadersExpanded(Array.isArray(keys) ? keys.includes("headers") : keys === "headers")}
+			items={[
+				{
+					key: "headers",
+					label: (
+						<Space size={8}>
+							<Text strong>{t("自定义请求头")}</Text>
+							<Text type="secondary">{draft?.customHeaders.length ?? 0}</Text>
+						</Space>
+					),
+					extra: (
+						<Button
+							type="link"
+							size="small"
+							href={`${PROJECT_REPOSITORY}/blob/main/packages/web/docs/model-request-headers.md`}
+							target="_blank"
+							rel="noopener noreferrer"
+						>
+							{t("常用请求头")}
+						</Button>
+					),
+					children: (
+						<Space direction="vertical" size={8} style={{ width: "100%" }}>
+							<Text type="secondary">{t("留空保留已保存值；改名需重新填写值。请求头只作用于当前模型。")}</Text>
+							{draft?.customHeaders.map((header, index) => (
+								<Row key={`${header.name}-${index}`} gutter={8} align="middle">
+									<Col span={8}>
+										<Input
+											aria-label={t("请求头名称")}
+											value={header.name}
+											placeholder="X-Custom-Header"
+											onChange={(event) => setDraft((current) => current ? {
+												...current,
+												customHeaders: current.customHeaders.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value, saved: false } : item),
+											} : current)}
+											spellCheck={false}
+										/>
+									</Col>
+									<Col span={13}>
+										<Input.Password
+											aria-label={t("请求头值")}
+											value={header.value}
+											placeholder={header.saved ? t("已保存，留空保持") : "value"}
+											onChange={(event) => setDraft((current) => current ? {
+												...current,
+												customHeaders: current.customHeaders.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item),
+											} : current)}
+											spellCheck={false}
+										/>
+									</Col>
+									<Col span={3}>
+										<Button
+											aria-label={t("移除请求头")}
+											danger
+											icon={<DeleteOutlined />}
+											onClick={() => setDraft((current) => current ? {
+												...current,
+												customHeaders: current.customHeaders.filter((_, itemIndex) => itemIndex !== index),
+											} : current)}
+										/>
+									</Col>
+								</Row>
+							))}
 							<Button
-								aria-label={t("移除请求头")}
-								danger
-								icon={<DeleteOutlined />}
-								onClick={() => setDraft((current) => current ? {
-									...current,
-									customHeaders: current.customHeaders.filter((_, itemIndex) => itemIndex !== index),
-								} : current)}
-							/>
-						</Col>
-					</Row>
-				))}
-				<Button
-					icon={<PlusOutlined />}
-					onClick={() => setDraft((current) => current ? {
-						...current,
-						customHeaders: [...current.customHeaders, { name: "", value: "", saved: false }],
-					} : current)}
-				>
-					{t("添加请求头")}
-				</Button>
-			</Space>
-		</Form.Item>
+								icon={<PlusOutlined />}
+								onClick={() => {
+									setRequestHeadersExpanded(true);
+									setDraft((current) => current ? {
+										...current,
+										customHeaders: [...current.customHeaders, { name: "", value: "", saved: false }],
+									} : current);
+								}}
+							>
+								{t("添加请求头")}
+							</Button>
+						</Space>
+					),
+				},
+			]}
+		/>
 	);
 
 	const lookupPanel = () => (
 		<div className="modelhub-lookup">
-			<Space size={8} wrap>
-				<Text type="secondary">{t("按模型 ID 查内置库")}</Text>
-				<Button
-					size="small"
-					type="link"
-					disabled={defaultsLoading || !draft?.modelId.trim()}
-					loading={defaultsLoading}
-					onClick={() => void lookupDefaults(false)}
+			<div className="modelhub-lookup__head">
+				<div>
+					<Text type="secondary">{t("按模型 ID 从 pi 内置目录导入能力。")}</Text>
+				</div>
+				<Popover
+					open={defaultsPopoverOpen}
+					onOpenChange={setDefaultsPopoverOpen}
+					placement="bottomRight"
+					trigger="click"
+					content={
+						<div className="modelhub-template-popover">
+							<Text strong>{t("内置能力模板")}</Text>
+							{defaultsLoading ? (
+								<Text type="secondary">{t("正在查找模板…")}</Text>
+							) : defaultsMatches ? (
+								<List
+									className="modelhub-template-list"
+									size="small"
+									dataSource={defaultsMatches}
+									renderItem={(defaults) => (
+										<List.Item
+											key={defaults.provider}
+											actions={[
+												<Button key="apply" size="small" type="link" onClick={() => applyDefaultsToDraft(defaults)}>
+													{t("填充")}
+												</Button>,
+											]}
+										>
+											<div className="modelhub-template-item">
+												<div className="modelhub-template-item__title">
+													<Text strong>{defaults.providerName}</Text>
+													{defaults.approximate ? <Tag color="orange">{t("相近")}</Tag> : null}
+												</div>
+												<Text code>{defaults.modelId}</Text>
+												<Text type="secondary" className="modelhub-template-item__meta">
+													{`${defaults.api} · ${contextText(defaults.contextWindow)} · ${defaults.reasoning ? t("支持推理") : t("不支持推理")}`}
+												</Text>
+											</div>
+										</List.Item>
+									)}
+								/>
+							) : defaultsNote ? (
+								<Text type="secondary">{defaultsNote}</Text>
+							) : null}
+						</div>
+					}
 				>
-					{t("填充能力")}
-				</Button>
-			</Space>
-			<Text type="secondary" className="modelhub-lookup__note">
-				{defaultsNote || t("ID 匹配时自动补上下文、价格等能力，不改端点。")}
-			</Text>
-			{defaultsMatches ? (
-				<Space size={6} wrap>
-					{defaultsMatches.map((defaults) => (
-						<Button key={defaults.provider} size="small" onClick={() => applyDefaultsToDraft(defaults)}>
-							{defaults.providerName} · {defaults.modelId} · {defaults.api}
-						</Button>
-					))}
-				</Space>
-			) : null}
+					<Button
+						size="small"
+						loading={defaultsLoading}
+						disabled={!draft?.modelId.trim()}
+						onClick={() => void lookupDefaults(false)}
+					>
+						{t("查找模板")}
+					</Button>
+				</Popover>
+			</div>
 		</div>
 	);
 
@@ -1157,6 +1262,10 @@ export function SettingsPanel({
 								<strong>{t("守门模型必须使用按量付费 API。")}</strong>{" "}
 								{t("AI 审批需要在命令执行前等待守门判定，请为守门模型配置独立的按量付费端点，避免与主模型共用计划额度。")}
 							</div>
+							<div>
+								<strong>{t("守门模型必须关闭思考，否则可能导致守门判定错误。")}</strong>{" "}
+								{t("到模型库编辑该模型，在「模型能力」中关闭思考。")}
+							</div>
 							<div>{t("指挥端点、监督模型、漏洞评审建议使用按量付费 API，减少计划额度竞争和排队对任务推进的影响。")}</div>
 						</Space>
 					}
@@ -1176,7 +1285,10 @@ export function SettingsPanel({
 									</Tag>
 									<Text type="secondary">{ROLE_SHORT[role]}</Text>
 									{role === "judge" ? (
-										<Tag color="orange" variant="filled">{t("必须按量 API")}</Tag>
+										<Space size={4} wrap>
+											<Tag color="orange" variant="filled">{t("必须按量 API")}</Tag>
+											<Tag color="red" variant="filled">{t("必须关闭思考")}</Tag>
+										</Space>
 									) : role === "commander" || role === "supervisor" || role === "reviewer" ? (
 										<Tag variant="filled">{t("建议按量 API")}</Tag>
 									) : null}
@@ -1261,7 +1373,7 @@ export function SettingsPanel({
 			{draft ? (
 				<Drawer
 					open
-					size="min(760px, 100vw)"
+					size="min(860px, 100vw)"
 					onClose={closeDraft}
 					destroyOnHidden
 					className="modelhub-drawer"
@@ -1323,8 +1435,8 @@ export function SettingsPanel({
 							{editingEntry ? (
 								<Button onClick={() => onDuplicateEntry(editingEntry.id)}>{t("复制")}</Button>
 							) : null}
-							<Button type="primary" disabled={!valid} onClick={submit}>
-								{t("保存")}
+							<Button type="primary" onClick={submit}>
+								{t("保存模型")}
 							</Button>
 						</Space>
 					}
@@ -1362,7 +1474,7 @@ export function SettingsPanel({
 								label: t("连接配置"),
 								children: (
 									<Form layout="vertical" requiredMark={false} className="modelhub-form">
-										{capabilityError ? <Alert type="warning" showIcon title={capabilityError} /> : null}
+									{activeValidationError ? <Alert type="warning" showIcon title={activeValidationError} /> : null}
 										<Form.Item
 											label={t("渠道")}
 											extra={
@@ -1430,57 +1542,69 @@ export function SettingsPanel({
 
 										{customChannel ? (
 											<>
-												<Form.Item label="Base URL">
-													<Input
-														value={draft.baseUrl}
-														onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })}
-														onBlur={autoFillNewEntry}
-														placeholder="https://relay.example.com/v1"
-														spellCheck={false}
-													/>
-												</Form.Item>
-												<Form.Item label={t("协议")}>
-													<Select
-														value={draft.api}
-														onChange={(value) => setDraft({ ...draft, ...EMPTY_MODEL_THINKING, api: value })}
-														options={[
-															...MODEL_API_OPTIONS.map((option) => ({
-																value: option.id,
-																label: option.label,
-															})),
-															...(MODEL_API_OPTIONS.some((option) => option.id === draft.api)
-																? []
-																: [{ value: draft.api, label: t("{api}（当前值）", { api: draft.api }) }]),
-														]}
-													/>
-												</Form.Item>
-												<Form.Item label={t("模型 ID")}>
-													<Input
-														aria-label={t("模型 ID")}
-														value={draft.modelId}
-														onChange={(event) => setDraft({ ...draft, ...EMPTY_MODEL_THINKING, modelId: event.target.value })}
-														onBlur={autoFillNewEntry}
-														placeholder="deepseek-chat / glm-4.7 / qwen3-coder…"
-														spellCheck={false}
-													/>
-												</Form.Item>
-												{lookupPanel()}
+								<Row gutter={14}>
+									<Col span={14}>
+										<Form.Item label="Base URL">
+											<Input
+												value={draft.baseUrl}
+												onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })}
+												onBlur={autoFillNewEntry}
+												placeholder="https://relay.example.com/v1"
+												spellCheck={false}
+											/>
+										</Form.Item>
+									</Col>
+									<Col span={10}>
+										<Form.Item label={t("协议")}>
+											<Select
+												value={draft.api}
+												onChange={(value) => setDraft({ ...draft, ...EMPTY_MODEL_THINKING, api: value })}
+												options={[
+													...MODEL_API_OPTIONS.map((option) => ({ value: option.id, label: option.label })),
+													...(MODEL_API_OPTIONS.some((option) => option.id === draft.api)
+														? []
+														: [{ value: draft.api, label: t("{api}（当前值）", { api: draft.api }) }]),
+												]}
+											/>
+										</Form.Item>
+									</Col>
+								</Row>
+								<Row gutter={14}>
+									<Col span={14}>
+										<Form.Item label={t("模型 ID")}>
+											<div className="modelhub-model-select">
+												<Input
+													aria-label={t("模型 ID")}
+													value={draft.modelId}
+													onChange={(event) => setDraft({ ...draft, ...EMPTY_MODEL_THINKING, modelId: event.target.value })}
+													onBlur={autoFillNewEntry}
+													placeholder="deepseek-chat / glm-4.7 / qwen3-coder…"
+													spellCheck={false}
+												/>
+												{remoteModelPicker()}
+											</div>
+										</Form.Item>
+									</Col>
+									<Col span={10}>
+										<Form.Item label={t("显示名称")}>
+											<Input
+												value={draft.name}
+												onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+												placeholder={t("默认使用模型 ID")}
+												spellCheck={false}
+											/>
+										</Form.Item>
+									</Col>
+								</Row>
 												{keyField()}
 												{requestHeadersEditor()}
-												<Form.Item label={t("显示名称")}>
-													<Input
-														value={draft.name}
-														onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-														placeholder={t("默认使用模型 ID")}
-														spellCheck={false}
-													/>
-												</Form.Item>
 											</>
 										) : channel ? (
 											<>
-												{keyField()}
-												{requestHeadersEditor()}
-												<Form.Item label={t("模型")}>
+								<Row gutter={14}>
+									<Col span={14}>
+										<Form.Item label={t("模型")}>
+												<div className="modelhub-model-select">
 													<Select
 														showSearch
 														loading={modelsLoading}
@@ -1512,7 +1636,12 @@ export function SettingsPanel({
 															{ value: "__custom__", label: t("自定义模型 ID") },
 														]}
 													/>
-												</Form.Item>
+													{remoteModelPicker()}
+												</div>
+										</Form.Item>
+									</Col>
+									<Col span={10}>{keyField()}</Col>
+								</Row>
 												{modelsError ? (
 													<Alert
 														type="error"
@@ -1542,9 +1671,9 @@ export function SettingsPanel({
 																spellCheck={false}
 															/>
 														</Form.Item>
-														{lookupPanel()}
 													</>
 												) : null}
+								{requestHeadersEditor()}
 												<Form.Item label={t("显示名称")}>
 													<Input
 														value={draft.name}
@@ -1561,25 +1690,9 @@ export function SettingsPanel({
 													: t("先在上方选择渠道；目录之外的中转用「自定义渠道」。")}
 											</Text>
 										)}
-										{customChannel || channel ? <RemoteModelPicker
-											input={{
-												entryId: draft.id,
-												baseUrl: draft.baseUrl,
-												api: draft.api,
-												apiKey: draft.clearKey ? "" : draft.apiKey.trim() || (draft.id ? null : ""),
-											}}
-											modelId={draft.modelId}
-											onSelect={(modelId) => {
-												setDraft({ ...draft, ...EMPTY_MODEL_THINKING, modelId, name: nameAfterSelection(draft, modelId) });
-												setCustomModel(true);
-												setDefaultsMatches(null);
-												setDefaultsNote("");
-												setAutoLookupKey(`${modelId}|${draft.baseUrl.trim()}`);
-											}}
-										/> : null}
-										<Text type="secondary">
-											{t("保存后立即生效；正在运行的会话会在下一次请求时使用新配置。")}
-										</Text>
+										<div className="modelhub-note">
+											<Text type="secondary">{t("正在运行的会话会从下一次模型请求开始使用新配置。")}</Text>
+										</div>
 									</Form>
 								),
 							},
@@ -1588,7 +1701,15 @@ export function SettingsPanel({
 								label: t("模型能力"),
 								children: (
 									<Form layout="vertical" requiredMark={false} className="modelhub-form">
-										<Text type="secondary">{capsSourceLabel}</Text>
+										{activeValidationError ? <Alert type="warning" showIcon title={activeValidationError} /> : null}
+										<div className="modelhub-template-row">
+											{lookupPanel()}
+											{capsSource === "catalog" ? <Tag color="blue" variant="filled">{capsSourceLabel}</Tag> : null}
+										</div>
+										<section className="modelhub-block">
+											<div className="modelhub-block__heading">
+												<Text strong>{t("上下文容量")}</Text>
+											</div>
 										<Row gutter={12}>
 											<Col span={12}>
 												<Form.Item label={t("上下文窗口（tokens）")}>
@@ -1601,30 +1722,42 @@ export function SettingsPanel({
 												</Form.Item>
 											</Col>
 										</Row>
-										<Form.Item>
-											<Checkbox
-												checked={draft.reasoning}
-												onChange={(event) => setDraft({ ...draft, reasoning: event.target.checked })}
-											>
-												{t("支持思考 / 推理")}
-											</Checkbox>
-											{draft.reasoning ? (
-												<ThinkingLevelEditor
-													value={draft}
-													onChange={(next) => setDraft((current) => current ? { ...current, ...next } : current)}
-												/>
-											) : null}
+										</section>
+										<section className="modelhub-block">
+											<div className="modelhub-block__heading">
+												<Text strong>{t("输入类型")}</Text>
+											</div>
+						<div className="modelhub-toggle-row">
 											<Checkbox
 												checked={draft.imageInput}
 												onChange={(event) => setDraft({ ...draft, imageInput: event.target.checked })}
 											>
 												{t("支持图片输入")}
 											</Checkbox>
-											<div>
-												<Text type="secondary">{t("关闭后截图不会发给该模型")}</Text>
+											<Text type="secondary">{t("关闭后，截图和图片附件不会发送给这个模型。")}</Text>
+						</div>
+										</section>
+										<section className="modelhub-block">
+											<div className="modelhub-block__heading">
+												<Text strong>{t("推理设置")}</Text>
 											</div>
-										</Form.Item>
-										{capabilityError ? <Alert type="warning" showIcon title={capabilityError} /> : null}
+						<div className="modelhub-toggle-row">
+											<Checkbox
+												checked={draft.reasoning}
+												onChange={(event) => setDraft({ ...draft, reasoning: event.target.checked })}
+											>
+												{t("支持思考 / 推理")}
+											</Checkbox>
+						</div>
+						{draft.reasoning ? (
+							<div className="modelhub-thinking-options">
+								<ThinkingLevelEditor
+									value={draft}
+									onChange={(next) => setDraft((current) => current ? { ...current, ...next } : current)}
+								/>
+							</div>
+						) : null}
+										</section>
 									</Form>
 								),
 							},
@@ -1633,7 +1766,11 @@ export function SettingsPanel({
 								label: t("价格与缓存"),
 								children: (
 									<Form layout="vertical" requiredMark={false} className="modelhub-form">
-										<Text type="secondary">{t("价格单位：美元 / 百万 token。留空表示未声明。")}</Text>
+									{activeValidationError ? <Alert type="warning" showIcon title={activeValidationError} /> : null}
+									<section className="modelhub-block">
+										<div className="modelhub-block__heading">
+												<Text strong>{t("Token 单价（美元 / 百万 token）")}</Text>
+										</div>
 										<Row gutter={12}>
 											<Col span={12}>
 												<Form.Item label={t("输入")}>
@@ -1656,7 +1793,11 @@ export function SettingsPanel({
 												</Form.Item>
 											</Col>
 										</Row>
-										<Text strong>{t("提示缓存（秒）")}</Text>
+									</section>
+									<section className="modelhub-block">
+										<div className="modelhub-block__heading">
+											<Text strong>{t("提示缓存时长")}</Text>
+										</div>
 										<Row gutter={12}>
 											<Col span={12}>
 												<Form.Item label={t("短期")}>
@@ -1671,10 +1812,10 @@ export function SettingsPanel({
 										</Row>
 										<Text type="secondary">
 											{t(
-												"价格决定成本统计与缓存预热收益；缓存时长只在该端点确实支持 prompt caching 时填写。四项价格任意一项填写即整组保存，空项按 0 计。",
+											"至少填写一项价格后才保存价格组；其余空项按 0 计。",
 											)}
 										</Text>
-										{capabilityError ? <Alert type="warning" showIcon title={capabilityError} /> : null}
+									</section>
 									</Form>
 								),
 							},
