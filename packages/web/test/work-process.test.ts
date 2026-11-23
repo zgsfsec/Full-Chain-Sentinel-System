@@ -389,6 +389,54 @@ describe("work process analysis validation", () => {
 });
 
 describe("independent work process queue", () => {
+	test("retains verified intent wording after restart and updates from tool results without echoing history", async () => {
+		const first = harness(async (input) => {
+			const reply = workReply(input);
+			const result = JSON.parse(reply.content) as { nodes: { intentBasis: string; quote: string }[] };
+			result.nodes[0].intentBasis = "explicit";
+			result.nodes[0].quote = "确认接口权限";
+			return { ...reply, content: JSON.stringify(result) };
+		});
+		await first.manager.control(first.ref, "analyze");
+		await vi.waitFor(() => expect(first.store.get(first.ref)?.revision).toBe(1));
+		const step = first.store.get(first.ref)!.nodes.find((node) => node.kind === "step")!;
+		first.manager.close();
+		resources.splice(resources.indexOf(first.manager), 1);
+		const complete = vi.fn(async (input: string) => {
+			const context = JSON.parse(input) as {
+				nodes: { id: string; intentEvidence?: { id: string; text: string } }[];
+			};
+			expect(context.nodes.find((node) => node.id === step.id)?.intentEvidence).toEqual({
+				id: "e1",
+				text: "确认接口权限",
+			});
+			const reply = workReply(input);
+			const result = JSON.parse(reply.content) as {
+				nodes: { intentBasis: string; quote: string; evidenceIds: string[] }[];
+			};
+			expect(result.nodes[0].evidenceIds).toEqual(["e2"]);
+			result.nodes[0].intentBasis = "explicit";
+			result.nodes[0].quote = "确认接口权限";
+			return { ...reply, content: JSON.stringify(result) };
+		});
+		const reopened = new WorkProcesses(new WorkProcessStore(join(dir, "process.db")), first.sources, complete);
+		resources.push(reopened);
+		first.snapshot.lanes[0].evidence.push(
+			workEvidence("e2", { kind: "tool_end", text: "接口返回 403", status: "ok" }),
+		);
+		await reopened.control(first.ref, "retry");
+		await vi.waitFor(async () => expect((await reopened.detail(first.ref)).revision).toBe(2));
+		const saved = await reopened.detail(first.ref);
+		expect(saved).toMatchObject({ error: null, pending: 0, usage: { total: 60 } });
+		expect(saved.nodes.find((node) => node.id === step.id)).toMatchObject({
+			intentBasis: "explicit",
+			intentQuote: { evidenceId: "e1", text: "确认接口权限" },
+			evidenceIds: ["e1", "e2"],
+		});
+		expect(complete).toHaveBeenCalledTimes(1);
+		expect(reopened.revisions(first.ref, step.id)).toHaveLength(2);
+	});
+
 	test("continues incremental analysis with echoed historical references after a service restart", async () => {
 		const first = harness();
 		await first.manager.control(first.ref, "analyze");

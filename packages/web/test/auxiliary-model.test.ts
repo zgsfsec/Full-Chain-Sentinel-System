@@ -173,6 +173,33 @@ describe("auxiliary SDK calls", () => {
 		}
 	});
 
+	test.each(["openai-completions", "openai-responses", "anthropic-messages"] as const)(
+		"gatekeeper sends the explicit off instruction through %s",
+		async (api) => {
+			const id = configure(api);
+			updateLibraryEntry(dir, id, {
+				name: "gate without reasoning",
+				baseUrl: api === "anthropic-messages" ? baseUrl : `${baseUrl}/v1`,
+				apiKey: "test-key",
+				modelId: "test-model",
+				capabilities: { api, reasoning: true, defaultThinkingLevel: "off", thinkingLevelMap: { off: "none" } },
+			});
+			setLibraryRole(dir, "judge", id);
+			respond = () => modelStream(api, "BLOCK:删除业务数据");
+			const store = new GatekeeperStore(join(dir, "gatekeeper.db"));
+			try {
+				const gate = new Gatekeeper(store, { onDecision: () => {} }, dir);
+				expect((await gate.guard({ command: "delete business data", source: "test" })).kind).toBe("block");
+				expect(requests).toHaveLength(1);
+				if (api === "openai-completions") expect(requests[0].body.reasoning_effort).toBe("none");
+				else if (api === "openai-responses") expect(requests[0].body.reasoning).toEqual({ effort: "none" });
+				else expect(requests[0].body.thinking).toEqual({ type: "disabled" });
+			} finally {
+				store.close();
+			}
+		},
+	);
+
 	test.each(APIS)("supervisor retries truncation and accumulates usage with %s", async (api) => {
 		configure(api);
 		respond = () =>

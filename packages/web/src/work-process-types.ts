@@ -38,6 +38,8 @@ export interface WorkNode {
 	title: string;
 	intent: string;
 	intentBasis: "explicit" | "inferred" | "unknown";
+	/** Exact, verified wording retained for subsequent updates of an explicit intent. */
+	intentQuote?: { evidenceId: string; text: string };
 	status: WorkNodeStatus;
 	actions: string[];
 	outcomes: string[];

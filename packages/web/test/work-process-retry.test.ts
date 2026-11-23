@@ -111,6 +111,30 @@ describe("automatic work-link recovery", () => {
 		expect(complete).toHaveBeenCalledTimes(1);
 	});
 
+	test("an invalid intent quote retries with a specific correction and consumes the batch only after repair", async () => {
+		const complete = vi.fn<WorkProcessCompletion>().mockImplementation(async (input) => {
+			const reply = workReply(input);
+			if (complete.mock.calls.length > 1) {
+				expect(JSON.parse(input)).toMatchObject({
+					previousAnalysisError: expect.stringMatching(/节点 new-1.*改为「模型推断」/),
+				});
+				return reply;
+			}
+			const result = JSON.parse(reply.content) as { nodes: { intentBasis: string; quote: string }[] };
+			result.nodes[0].intentBasis = "explicit";
+			result.nodes[0].quote = "改写后的原话";
+			return { ...reply, content: JSON.stringify(result) };
+		});
+		const { manager, store, ref } = harness(complete);
+		await manager.control(ref, "analyze");
+		await vi.advanceTimersByTimeAsync(0);
+		expect(store.get(ref)).toMatchObject({ revision: 0, consumed: {}, pending: 1, usage: { total: 30 } });
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(complete).toHaveBeenCalledTimes(2);
+		expect(store.get(ref)).toMatchObject({ revision: 1, pending: 0, retry: null, error: null, usage: { total: 60 } });
+		expect(store.get(ref)?.nodes.find((node) => node.kind === "step")?.intentBasis).toBe("inferred");
+	});
+
 	test("service restart restores history-only retry deadlines and attempt counts", async () => {
 		const first = harness(async () => {
 			throw new Error("interrupted");

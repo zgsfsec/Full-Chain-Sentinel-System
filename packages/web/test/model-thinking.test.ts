@@ -28,6 +28,7 @@ import {
 	catalogThinkingSettings,
 	customThinkingSettings,
 	EMPTY_MODEL_THINKING,
+	setThinkingDisabled,
 } from "../webui/src/components/model-thinking-draft.ts";
 import { modelStream } from "./model-stream-fixtures.ts";
 
@@ -284,6 +285,50 @@ test("custom selections disable standard SDK defaults and keep a supported defau
 	expect(withoutMax.defaultThinkingLevel).toBe("low");
 	expect(withoutMax.thinkingLevelMap).toMatchObject({ off: null, max: null });
 	expect(customThinkingSettings(withoutMax, []).availableThinkingLevels).toEqual([]);
+});
+
+test("explicitly disables reasoning without removing model capabilities or custom request values", async () => {
+	const draft = setThinkingDisabled({ ...EMPTY_MODEL_THINKING, defaultThinkingLevel: "high" }, true);
+	expect(draft).toMatchObject({ defaultThinkingLevel: "off", thinkingLevelMap: { off: "none" } });
+	expect(draft.availableThinkingLevels).toEqual(EMPTY_MODEL_THINKING.availableThinkingLevels);
+	const entry = addLibraryEntry(dir, {
+		...input,
+		capabilities: {
+			reasoning: true,
+			defaultThinkingLevel: draft.defaultThinkingLevel,
+			thinkingLevelMap: draft.thinkingLevelMap,
+		},
+	});
+	expect(libraryView(dir).entries[0]).toMatchObject({
+		reasoning: true,
+		defaultThinkingLevel: "off",
+		thinkingLevelMap: { off: "none" },
+	});
+	const config = resolveAuxiliaryModel(dir, "judge");
+	if (!config) throw new Error("Missing judge model");
+	const payloads: Record<string, unknown>[] = [];
+	await completeAuxiliaryModel(config, {
+		systemPrompt: "test",
+		input: "test",
+		signal: AbortSignal.timeout(10000),
+		fetch: async (_url, options) => {
+			payloads.push(JSON.parse(String(options?.body)) as Record<string, unknown>);
+			return modelStream("openai-completions", "ALLOW");
+		},
+	});
+	expect(payloads[0]).toMatchObject({ reasoning_effort: "none" });
+	expect(readModelThinkingLevel(dir, entry.id, input.modelId)).toBe("off");
+	expect(setThinkingDisabled(draft, false).defaultThinkingLevel).toBe("medium");
+	expect(
+		setThinkingDisabled({ ...draft, thinkingLevelMap: { off: "disabled", high: "strong" } }, true).thinkingLevelMap,
+	).toEqual({ off: "disabled", high: "strong" });
+});
+
+test("does not invent off support for reasoning-only models and restores an available strength", () => {
+	const draft = customThinkingSettings(EMPTY_MODEL_THINKING, ["low", "high", "max"]);
+	expect(setThinkingDisabled(draft, true)).toEqual(draft);
+	const off = customThinkingSettings(draft, ["off", "high"]);
+	expect(setThinkingDisabled(setThinkingDisabled(off, true), false).defaultThinkingLevel).toBe("high");
 });
 
 test.each([
