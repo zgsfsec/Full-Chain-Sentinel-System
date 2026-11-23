@@ -200,6 +200,38 @@ describe("auxiliary SDK calls", () => {
 		},
 	);
 
+	test("gatekeeper disables a configured high reasoning level", async () => {
+		const id = configure("openai-completions");
+		updateLibraryEntry(dir, id, {
+			name: "slow reasoner",
+			baseUrl: `${baseUrl}/v1`,
+			apiKey: "test-key",
+			modelId: "test-model",
+			capabilities: {
+				api: "openai-completions",
+				reasoning: true,
+				defaultThinkingLevel: "high",
+				thinkingLevelMap: { off: "none" },
+			},
+		});
+		setLibraryRole(dir, "judge", id);
+		const config = resolveAuxiliaryModel(dir, "judge");
+		if (!config) throw new Error("Missing judge model");
+		const payloads: Record<string, unknown>[] = [];
+		await completeAuxiliaryModel(config, {
+			systemPrompt: "Return ALLOW",
+			input: "hello",
+			signal: AbortSignal.timeout(10000),
+			maxTokens: 128,
+			disableReasoning: true,
+			fetch: async (_url, options) => {
+				payloads.push(JSON.parse(String(options?.body)) as Record<string, unknown>);
+				return modelStream("openai-completions", "ALLOW");
+			},
+		});
+		expect(payloads[0].reasoning_effort).toBe("none");
+	});
+
 	test.each(APIS)("supervisor retries truncation and accumulates usage with %s", async (api) => {
 		configure(api);
 		respond = () =>

@@ -118,8 +118,7 @@ export const GATEKEEPER_SYSTEM_PROMPT = `你是授权渗透测试的操作守门
 - 放行：ALLOW
 - 拦截：BLOCK:<不超过30字，说明命中了哪条 BLOCK 清单>`;
 
-/** The command the settings screen judges to prove the endpoint works. */
-export const GATEKEEPER_SAMPLE_COMMAND = "nmap -sV -p- 10.0.0.1";
+export const GATEKEEPER_TEST_SYSTEM_PROMPT = "你是守门模型连通性检查器。只回复 ALLOW，不要分析或解释。";
 
 /** Longest reason kept from a BLOCK line; the prompt asks for 30 characters. */
 const MAX_REASON_CHARS = 200;
@@ -238,15 +237,26 @@ export function resolveJudgeEndpoint(agentDir: string): ResolvedJudgeEndpoint {
 }
 
 /** One HTTP call to the judge endpoint. `signal` carries the timeout and the abort. */
-async function callJudge(config: AuxiliaryModelConfig, input: string, signal: AbortSignal): Promise<JudgeCallResult> {
+async function callJudge(
+	config: AuxiliaryModelConfig,
+	input: string,
+	signal: AbortSignal,
+	systemPrompt = GATEKEEPER_SYSTEM_PROMPT,
+): Promise<JudgeCallResult> {
 	const reply = await completeAuxiliaryModel(config, {
-		systemPrompt: GATEKEEPER_SYSTEM_PROMPT,
+		systemPrompt,
 		input,
 		signal,
-		maxTokens: 128,
+		maxTokens: systemPrompt === GATEKEEPER_TEST_SYSTEM_PROMPT ? 8 : 128,
+		disableReasoning: true,
 	});
 	const raw = reply.content;
-	if (!raw.trim()) throw new Error(t("端点返回了空回复"));
+	if (!raw.trim()) {
+		const detail = reply.reasoning.trim()
+			? t("端点只返回了推理内容，没有返回 ALLOW/BLOCK 正文；请确认该端点支持关闭推理，或更换非推理模型")
+			: t("端点返回了空回复；请检查端点兼容性与模型可用状态");
+		throw new Error(`${detail} (finish_reason=${reply.rawFinishReason}, completion_tokens=${reply.usage.output})`);
+	}
 	return {
 		verdict: parseGateVerdict(raw),
 		raw: raw.trim().slice(0, MAX_RAW_CHARS),
@@ -325,7 +335,12 @@ export class Gatekeeper {
 	 */
 	private lastSuccessAt: number | null = null;
 	/** The model call; public and mutable so tests can stub it. */
-	call: (config: AuxiliaryModelConfig, input: string, signal: AbortSignal) => Promise<JudgeCallResult>;
+	call: (
+		config: AuxiliaryModelConfig,
+		input: string,
+		signal: AbortSignal,
+		systemPrompt?: string,
+	) => Promise<JudgeCallResult>;
 
 	constructor(store: GatekeeperStore, hooks: GatekeeperHooks, agentDir: string) {
 		this.store = store;

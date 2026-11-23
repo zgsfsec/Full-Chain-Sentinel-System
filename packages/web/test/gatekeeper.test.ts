@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
 	buildJudgeInput,
 	buildToolJudgeInput,
+	GATEKEEPER_TEST_SYSTEM_PROMPT,
 	Gatekeeper,
 	type JudgeCallResult,
 	parseGateVerdict,
@@ -54,6 +55,10 @@ function stubAnswer(gatekeeper: Gatekeeper, raw: string): void {
 }
 
 describe("parseGateVerdict", () => {
+	test("the settings connectivity probe uses a short prompt", () => {
+		expect(GATEKEEPER_TEST_SYSTEM_PROMPT.length).toBeLessThan(100);
+		expect(GATEKEEPER_TEST_SYSTEM_PROMPT).toContain("只回复 ALLOW");
+	});
 	test("accepts a bare ALLOW, with punctuation and markdown wrapping", () => {
 		for (const raw of ["ALLOW", "allow", " ALLOW ", "ALLOW.", "`ALLOW`", "**ALLOW**", "放行"]) {
 			expect(parseGateVerdict(raw)).toEqual({ decision: "allow" });

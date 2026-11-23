@@ -95,7 +95,12 @@ import {
 	writeFile,
 } from "./files.ts";
 import { createFridaTools, FRIDA_TOOL_NAMES } from "./frida-tool.ts";
-import { buildJudgeInput, GATEKEEPER_SAMPLE_COMMAND, Gatekeeper, type ResolvedJudgeEndpoint } from "./gatekeeper.ts";
+import {
+	buildJudgeInput,
+	GATEKEEPER_TEST_SYSTEM_PROMPT,
+	Gatekeeper,
+	type ResolvedJudgeEndpoint,
+} from "./gatekeeper.ts";
 import { readGatekeeperConfig, writeGatekeeperConfig } from "./gatekeeper-config.ts";
 import { GatekeeperStore, gatekeeperDbPath } from "./gatekeeper-store.ts";
 import {
@@ -4263,8 +4268,9 @@ export class SentinelRuntime {
 		try {
 			const out = await this.gatekeeper.call(
 				resolved.config,
-				buildJudgeInput({ command: GATEKEEPER_SAMPLE_COMMAND, source: "设置页测试" }),
+				buildJudgeInput({ command: "连通性检查", source: "设置页测试" }),
 				controller.signal,
+				GATEKEEPER_TEST_SYSTEM_PROMPT,
 			);
 			const verdict =
 				out.verdict.decision === "allow"
@@ -4277,7 +4283,7 @@ export class SentinelRuntime {
 						ms: Date.now() - started,
 						source: String(resolved.from),
 					}),
-					detail: t("样例命令「{command}」判定为 {verdict}", { command: GATEKEEPER_SAMPLE_COMMAND, verdict }),
+					detail: t("连通性检查返回 {verdict}", { verdict }),
 				},
 				raw: out.raw,
 			};

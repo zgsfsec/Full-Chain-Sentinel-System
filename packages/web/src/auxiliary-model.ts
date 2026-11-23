@@ -26,6 +26,8 @@ interface CompletionOptions {
 	signal: AbortSignal;
 	maxTokens?: number;
 	json?: boolean;
+	/** Ignore the model library's default effort for latency-sensitive classifiers. */
+	disableReasoning?: boolean;
 	fetch?: typeof fetch;
 }
 
@@ -98,7 +100,7 @@ export async function completeAuxiliaryModel(
 				signal.throwIfAborted();
 				const model = runtime.getModel(config.providerId, config.modelId);
 				if (!model) throw new Error(t("模型不存在：{model}", { model: config.modelId }));
-				const thinking = config.capabilities?.defaultThinkingLevel;
+				const thinking = options.disableReasoning ? undefined : config.capabilities?.defaultThinkingLevel;
 				const request: SimpleStreamOptions = {
 					signal,
 					temperature: 0,
