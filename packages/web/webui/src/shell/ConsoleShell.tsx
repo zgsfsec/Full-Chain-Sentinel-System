@@ -47,6 +47,8 @@ import { consoleThemes } from "../ui/theme.ts";
 import { useThemeMode } from "../ui/theme-mode.ts";
 import { ThemeToggle } from "../ui/ThemeToggle.tsx";
 import { WorkProcessPage } from "../components/WorkProcessPage.tsx";
+import { WorkLinkFullPage } from "../components/WorkLinkFullPage.tsx";
+import { WORK_LINK_PAGE_HASH } from "../work-link-page.ts";
 import { PageBoundary } from "../components/PageBoundary.tsx";
 import type { WorkProcessKind, WorkProcessRef } from "../../../src/work-process-types.ts";
 import {
@@ -143,6 +145,7 @@ export function ConsoleShell({
 	const [globalNavigation, setGlobalNavigation] = useState(false);
 	const [workTarget, setWorkTarget] = useState<WorkProcessRef | null>(null);
 	const [workKind, setWorkKind] = useState<WorkProcessKind>("session");
+	const [workHash, setWorkHash] = useState(() => typeof window === "undefined" ? "" : window.location.hash);
 	const update = useVersionCheck();
 	const hasConversations = page === "chat" && sessionPanel !== undefined;
 	const showConversations = hasConversations && !globalNavigation;
@@ -152,6 +155,11 @@ export function ConsoleShell({
 		setGlobalNavigation(false);
 	}, [page]);
 	useEffect(() => { setWorkTarget(null); }, [activeProject?.id]);
+	useEffect(() => {
+		const update = () => setWorkHash(window.location.hash);
+		window.addEventListener("hashchange", update);
+		return () => window.removeEventListener("hashchange", update);
+	}, []);
 
 	const badgeFor = (entry: MenuEntry): ReactNode => {
 		if (entry.page === "settings.model" && !modelConfigured) {
@@ -413,6 +421,8 @@ export function ConsoleShell({
 			</div>
 		</Header>
 	);
+
+	if (workHash.startsWith(WORK_LINK_PAGE_HASH)) return <WorkLinkFullPage hash={workHash} />;
 
 	return (
 		<Layout className="console-shell" style={CONSOLE_SURFACE_STYLE}>

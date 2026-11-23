@@ -13,6 +13,11 @@
 .work-process__detail-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 16px; }
 .work-process__name.ant-btn { padding-inline: 0; white-space: normal; height: auto; text-align: left; }
 .work-process__loading { padding: 64px; }
+.work-link-fullpage { position: fixed; inset: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; height: 100dvh; padding: 16px; overflow: auto; background: var(--ant-color-bg-layout); color: var(--ant-color-text); }
+.work-link-fullpage:fullscreen { height: 100%; }
+.work-link-fullpage__header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.work-link-fullpage > .work-process { overflow: hidden; }
+.work-link-fullpage .work-process__body { min-height: 0; }
 .work-graph { display: flex; flex-direction: column; min-height: 0; min-width: 0; border: 1px solid var(--ant-color-border-secondary); border-radius: 8px; background: var(--ant-color-bg-container); overflow: hidden; }
 .work-graph__toolbar { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px; border-bottom: 1px solid var(--ant-color-border-secondary); }
 .work-graph__toolbar > .ant-input-affix-wrapper { flex: 1; min-width: 180px; }
@@ -84,5 +89,8 @@
 	.work-process__body { display: flex; flex-direction: column; flex: none; min-height: 0; }
 	.work-graph { height: clamp(400px, 65dvh, 760px); flex: none; }
 	.work-process__detail-column { max-height: 75dvh; flex: none; }
+	.work-link-fullpage > .work-process { overflow: auto; }
+	.work-link-fullpage .work-process__body { flex: 1; }
+	.work-link-fullpage .work-graph { flex: 1; min-height: 400px; height: auto; }
 }
 @media (max-width: 600px) { .work-process__heading .ant-space { flex-wrap: wrap; } .work-graph__toolbar .ant-space { flex-wrap: wrap; } .work-tree__intent { display: none; } .work-tree__node strong { max-width: none; flex: 1; } }

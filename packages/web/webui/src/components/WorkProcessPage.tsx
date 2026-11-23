@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Empty, Input, Select, Space, Spin, Table, Tag, Typography } from "antd";
-import { ArrowLeftOutlined, ApartmentOutlined, CloseOutlined, PauseOutlined, PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, ApartmentOutlined, CloseOutlined, ExportOutlined, PauseOutlined, PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
 import type { WorkEvidence, WorkNode, WorkProcess, WorkProcessItem, WorkProcessKind, WorkProcessRef, WorkRevision } from "../../../src/work-process-types.ts";
 import type { SentinelProjectInfo } from "../types.ts";
 import { readJson } from "../read-json.ts";
+import { workLinkPageHref } from "../work-link-page.ts";
 import { WorkProcessGraph, workEdgeLabel, WORK_STATUS, workText as tx } from "./WorkProcessGraph.tsx";
 import "./work-process.css";
 
@@ -65,9 +66,9 @@ export function WorkNodeDetails({ process, node, revisions = [], onHistory, onEv
 	</aside>;
 }
 
-export function WorkProcessDetail({ target, onBack }: { target: WorkProcessRef; onBack?: () => void }) {
+export function WorkProcessDetail({ target, onBack, expanded = false, initialSelectedId = null }: { target: WorkProcessRef; onBack?: () => void; expanded?: boolean; initialSelectedId?: string | null }) {
 	const [process, setProcess] = useState<WorkProcess | null>(null);
-	const [selectedId, setSelectedId] = useState<string | null>(null);
+	const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
 	const [error, setError] = useState<string | null>(null);
 	const [pending, setPending] = useState(false);
 	const [refresh, setRefresh] = useState(0);
@@ -143,6 +144,7 @@ export function WorkProcessDetail({ target, onBack }: { target: WorkProcessRef; 
 	return <div className="work-process work-process--detail">
 		<div className="work-process__heading"><Space>{onBack ? <Button icon={<ArrowLeftOutlined />} onClick={onBack}>{tx("返回列表", "Back")}</Button> : null}<Title level={3}>{process?.title ?? tx("工作链路", "Work links")}</Title></Space>
 			<Space wrap><Button icon={<ReloadOutlined />} onClick={() => setRefresh((value) => value + 1)}>{tx("刷新", "Refresh")}</Button>
+				{!expanded ? <Button icon={<ExportOutlined />} href={workLinkPageHref(target, selectedId)} target="_blank" rel="noopener noreferrer">{tx("新页面展开", "Open expanded page")}</Button> : null}
 				{process ? <>
 					<Button type={process.enabled || process.running || process.retry ? "default" : "primary"} loading={pending} icon={process.enabled || process.running || process.retry ? <PauseOutlined /> : <PlayCircleOutlined />} onClick={() => void control(process.enabled || process.running || process.retry ? "pause" : "enable")}>
 						{process.enabled || process.running || process.retry ? tx("暂停分析", "Pause analysis") : process.revision ? tx("恢复持续分析", "Resume live analysis") : tx("开启工作链路", "Enable work links")}</Button>
@@ -162,7 +164,7 @@ export function WorkProcessDetail({ target, onBack }: { target: WorkProcessRef; 
 			{process.revision === 0 && !process.enabled && !process.running && !process.retry ? <Alert type="info" showIcon title={tx("手动开启工作链路", "Enable work links manually")}
 				description={tx("开启后先分析已有记录，再持续更新；也可以只补分析已有记录。分析会额外调用工作链路模型。", "Enable to analyze existing records and keep updating, or analyze history once. Analysis uses the work links model.")} /> : null}
 			<div className={selected ? "work-process__body has-details" : "work-process__body"}>
-				<WorkProcessGraph process={process} selectedId={selectedId} onSelect={(node) => { selectionGeneration.current++; setSelectedId(node.id); setRevisions([]); setOriginal(null); }} />
+				<WorkProcessGraph process={process} selectedId={selectedId} initialView={expanded ? "graph" : "tree"} onSelect={(node) => { selectionGeneration.current++; setSelectedId(node.id); setRevisions([]); setOriginal(null); }} />
 				{selected ? <div className="work-process__detail-column">
 					<div className="work-process__detail-header"><strong>{tx("节点详情", "Node details")}</strong><Button size="small" type="text" icon={<CloseOutlined />} onClick={() => { selectionGeneration.current++; setSelectedId(null); setOriginal(null); }}>{tx("关闭详情", "Close details")}</Button></div>
 					<div className="work-process__detail-scroll" ref={detailScroll} key={selected.id} tabIndex={0} role="region" aria-label={tx("可滚动节点详情", "Scrollable node details")}>

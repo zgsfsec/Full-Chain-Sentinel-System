@@ -21,8 +21,8 @@ const NODE_LABELS: Record<WorkNode["kind"], [string, string]> = {
 };
 export function workEdgeLabel(kind: WorkEdgeKind): string { return workText(...EDGE_LABELS[kind]); }
 
-export function WorkProcessGraph({ process, selectedId, onSelect }: { process: WorkProcess; selectedId: string | null; onSelect: (node: WorkNode) => void }) {
-	const [view, setView] = useState("tree");
+export function WorkProcessGraph({ process, selectedId, onSelect, initialView = "tree" }: { process: WorkProcess; selectedId: string | null; onSelect: (node: WorkNode) => void; initialView?: "tree" | "graph" }) {
+	const [view, setView] = useState<string>(initialView);
 	const [collapsed, setCollapsed] = useState(new Set<string>());
 	const [query, setQuery] = useState("");
 	const [zoom, setZoom] = useState(1);
