@@ -579,6 +579,19 @@ export async function startSentinelServer(
 				agentDir,
 				{
 					credentialStore: () => runtime.credentialStore,
+					onCreated: async (engine, input) => {
+						const previous =
+							input.previousEngineId && workProcesses
+								? await workProcesses.detail({
+										projectId: engine.projectId,
+										kind: "engine",
+										id: input.previousEngineId,
+									})
+								: null;
+						if (input.recordWorkLinks !== true && !previous?.enabled) return;
+						if (!workProcesses) throw new Error("工作链路服务不可用");
+						await workProcesses.control({ projectId: engine.projectId, kind: "engine", id: engine.id }, "enable");
+					},
 					archiveReport: async (engine, markdown) => {
 						const project = listProjects(agentDir).projects.find((entry) => entry.id === engine.projectId);
 						if (!project) throw new Error("工程所属项目不存在，无法归档报告。");

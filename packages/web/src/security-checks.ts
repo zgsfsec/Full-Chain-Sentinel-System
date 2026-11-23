@@ -24,6 +24,8 @@ function engineInput(value: unknown): SentinelEngineCreateInput {
 	}
 	if (input.gateMode !== "auto" && input.gateMode !== "ai") throw new Error("执行模式无效");
 	if (typeof input.presetOptional !== "boolean") throw new Error("预设 Agent 配置无效");
+	if (input.recordWorkLinks !== undefined && typeof input.recordWorkLinks !== "boolean")
+		throw new Error("记录工作链路选项必须为布尔值");
 	if (
 		input.reportTemplateId !== undefined &&
 		input.reportTemplateId !== null &&
@@ -48,6 +50,7 @@ function engineInput(value: unknown): SentinelEngineCreateInput {
 		};
 	}
 	return {
+		recordWorkLinks: input.recordWorkLinks,
 		name: checkString(input.name, "工程名称", 256),
 		reportTemplateId: input.reportTemplateId,
 		targets: checkString(input.targets, "目标", 256 * 1024, true),

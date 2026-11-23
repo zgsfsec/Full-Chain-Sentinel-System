@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import { CredentialStore } from "../src/credential-store.ts";
 import { parseCredential } from "../src/credential-types.ts";
-import { EngineManager } from "../src/engine.ts";
+import { type EngineHooks, EngineManager } from "../src/engine.ts";
 import { EngineStore } from "../src/engine-store.ts";
 import { ReportTemplateStore } from "../src/report-templates.ts";
 import { securityCheckCategories } from "../src/security-check-categories.ts";
@@ -182,12 +182,14 @@ test("multiple rules submit one ordinary engine with frozen inputs, project cred
 	);
 	const vault = new CredentialStore(dir);
 	cleanups.push(() => vault.close());
+	const recordingCreated = vi.fn<NonNullable<EngineHooks["onCreated"]>>(async () => {});
 	const manager = new EngineManager(
 		dir,
 		{
 			onChange: () => {},
 			onCommanderEvent: () => {},
 			onTaskEvent: () => {},
+			onCreated: recordingCreated,
 			beforeStart: async () => ({ ok: false, error: "No Docker fixture" }),
 		},
 		async () => {
@@ -219,6 +221,7 @@ test("multiple rules submit one ordinary engine with frozen inputs, project cred
 		credentials: [credential].map(({ id, revision }) => ({ id, revision })),
 		requirements: "",
 		input: {
+			recordWorkLinks: true,
 			name: "检查",
 			reportTemplateId: chosenTemplate.id,
 			targets: "",
@@ -230,6 +233,12 @@ test("multiple rules submit one ordinary engine with frozen inputs, project cred
 		},
 	};
 	const submitted = await service.submit(body);
+	expect(recordingCreated).toHaveBeenCalledWith(expect.objectContaining({ id: submitted.engineId }), {
+		recordWorkLinks: true,
+	});
+	await expect(
+		service.submit({ ...body, requestId: "invalid-recording", input: { ...body.input, recordWorkLinks: "true" } }),
+	).rejects.toThrow("布尔值");
 	expect(manager.getEngine(submitted.engineId)?.reportTemplate?.id).toBe(chosenTemplate.id);
 	expect(manager.listEngines()).toHaveLength(1);
 	expect(await service.submit(structuredClone(body))).toEqual(submitted);

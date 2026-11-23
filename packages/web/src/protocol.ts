@@ -3212,6 +3212,8 @@ export interface SentinelSessionPresetView {
 
 /** Operator input when creating an engineering run. */
 export interface SentinelEngineCreateInput {
+	/** Opt in to recording this engineering run's work links; off when omitted. */
+	recordWorkLinks?: boolean;
 	/** Omitted follows the project default; null explicitly selects no template. */
 	reportTemplateId?: string | null;
 	name: string;

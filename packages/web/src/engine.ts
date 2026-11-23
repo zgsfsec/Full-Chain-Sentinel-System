@@ -119,6 +119,8 @@ const COMMANDER_BASH_DENYLIST: RegExp[] = [
 ];
 
 export interface EngineHooks {
+	/** Initialize optional recording after insertion, before any commander starts. */
+	onCreated?(engine: SentinelEngine, options: { recordWorkLinks?: boolean; previousEngineId?: string }): Promise<void>;
 	credentialStore?(): CredentialStore;
 	/** Delivery results appear alongside chat and open-source notifications. */
 	onNotifyStatus?(status: SentinelNotifyStatus): void;
@@ -326,6 +328,9 @@ export class EngineManager {
 		input: SentinelEngineCreateInput,
 		submission?: EngineSubmission,
 	): Promise<SentinelEngine> {
+		if (input.recordWorkLinks !== undefined && typeof input.recordWorkLinks !== "boolean") {
+			throw new Error("记录工作链路选项必须为布尔值");
+		}
 		if (submission) {
 			const existing = this.store.findSubmittedEngine(submission.source, submission.key);
 			if (existing) {
@@ -371,6 +376,7 @@ export class EngineManager {
 		// full model round-trip, and waiting for it left the new row invisible
 		// until the operator refreshed.
 		this.hooks.onChange(this.getEngine(stored.id) ?? stored);
+		if (input.recordWorkLinks) await this.initializeRecording(entry, { recordWorkLinks: true });
 		if (!schedule) {
 			try {
 				const check = await this.hooks.beforeStart?.(stored);
@@ -1199,7 +1205,7 @@ export class EngineManager {
 				this.notifyEngineDone(entry.engine);
 				if (completedSchedule?.repeatDaily) {
 					try {
-						this.scheduleNextDailyRun(entry.engine, completedSchedule);
+						await this.scheduleNextDailyRun(entry.engine, completedSchedule);
 					} catch (error) {
 						this.pushCommanderEvent(entry, {
 							kind: "status",
@@ -1772,7 +1778,10 @@ export class EngineManager {
 	}
 
 	/** Each daily recurrence is a fresh engine row so completed runs remain reviewable. */
-	private scheduleNextDailyRun(engine: SentinelEngine, prior: NonNullable<SentinelEngine["schedule"]>): void {
+	private async scheduleNextDailyRun(
+		engine: SentinelEngine,
+		prior: NonNullable<SentinelEngine["schedule"]>,
+	): Promise<void> {
 		const nextStart = nextDailyOccurrence(prior, Date.now());
 		const submission = this.store.submission(engine.id);
 		const schedule = normalizeSchedule(
@@ -1802,9 +1811,27 @@ export class EngineManager {
 			schedule,
 			submission: submission ? { ...submission, key: `daily:${engine.id}:${nextStart}` } : undefined,
 		});
-		this.live.set(stored.id, this.emptyLive(stored));
+		const entry = this.emptyLive(stored);
+		this.live.set(stored.id, entry);
 		this.hooks.onChange(stored);
+		await this.initializeRecording(entry, { previousEngineId: engine.id });
 		this.armScheduler();
+	}
+
+	private async initializeRecording(
+		entry: EngineLive,
+		options: { recordWorkLinks?: boolean; previousEngineId?: string },
+	): Promise<void> {
+		try {
+			await this.hooks.onCreated?.(entry.engine, options);
+		} catch (error) {
+			if (this.disposed || this.live.get(entry.engine.id) !== entry) return;
+			this.pushCommanderEvent(entry, {
+				kind: "status",
+				status: "error",
+				note: `工作链路开启失败：${errorText(error)}。工程仍按原计划执行；可在工作链路页面手动开启。`,
+			});
+		}
 	}
 
 	private projectOf(engine: SentinelEngine): SentinelProjectInfo {

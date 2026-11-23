@@ -1272,6 +1272,7 @@ function CreateEngineForm(props: {
 	judgeAvailable: boolean;
 	onCancel(): void;
 	onSubmit(input: {
+		recordWorkLinks: boolean;
 		name: string;
 		reportTemplateId?: string | null;
 		targets: string;
@@ -1307,6 +1308,7 @@ function CreateEngineForm(props: {
 	/** A task may run without a preset; allowing it is the default. */
 	const [presetOptional, setPresetOptional] = useState(true);
 	const [reportTemplateId, setReportTemplateId] = useState<string | null | undefined>();
+	const [recordWorkLinks, setRecordWorkLinks] = useState(false);
 	const [concurrency, setConcurrency] = useState(3);
 	const [roundLimit, setRoundLimit] = useState(5);
 	const [maxRetries, setMaxRetries] = useState(1);
@@ -1401,6 +1403,7 @@ function CreateEngineForm(props: {
 		setFormError(null);
 		if (!props.securityCheck && !selectedDoctrine) return;
 		const input = {
+			recordWorkLinks,
 			name: name.trim(),
 			reportTemplateId,
 			targets: engineTargetText(targets, attachments, props.project?.id ?? ""),
@@ -1585,6 +1588,9 @@ function CreateEngineForm(props: {
 						{step === settingsStep ? (
 							<>
 								{props.securityCheck && agentSettings}
+								<Form layout="vertical"><Form.Item extra={getLanguage() === "en" ? "Trace commander decisions, task execution and subagents. Uses additional work-links model calls; pause recording from Work links." : "记录指挥决策、任务执行和子 Agent 分支。会额外调用工作链路模型，可在工作链路页面暂停。"}>
+									<Checkbox checked={recordWorkLinks} disabled={submitting} onChange={(event) => setRecordWorkLinks(event.target.checked)}>{getLanguage() === "en" ? "Record work links" : "记录工作链路"}</Checkbox>
+								</Form.Item></Form>
 								{props.project ? <Form layout="vertical"><Form.Item label={getLanguage() === "en" ? "Final report template" : "工程总报告模板"} extra={getLanguage() === "en" ? "Applies to the final report. Task reports keep their existing format." : "仅用于工程总报告，子任务报告沿用当前格式。"}><ReportTemplateSelect key={props.project.id} projectId={props.project.id} value={reportTemplateId} onChange={setReportTemplateId} disabled={submitting} /></Form.Item></Form> : null}
 								<Space size={8} className="enginewiz-section">
 									<Text strong>{t("启动方式")}</Text>
@@ -1698,6 +1704,7 @@ function CreateEngineForm(props: {
 								<Card size="small" className="enginewiz-review" title={t("确认")}>
 									{props.securityCheck && <Typography.Paragraph>项目：{props.project?.name} · 规则 {securityRules.length} 条 · 凭据目标 {credentialTargets.length} 条。工程可按需访问当前项目全部凭据。<br />{[targets, ...credentialTargets.map((r) => `${r.host} (${r.type})`)].filter(Boolean).join("；") || requirements}</Typography.Paragraph>}
 									<Space size={24} wrap>
+										<Text type="secondary">{getLanguage() === "en" ? "Work links" : "工作链路"}{" "}<Text strong>{recordWorkLinks ? (getLanguage() === "en" ? "Record" : "开启记录") : (getLanguage() === "en" ? "Off" : "未开启")}</Text></Text>
 										{!props.securityCheck && <Text type="secondary">
 											{t("指挥")} <Text strong>{selectedDoctrine?.name ?? t("待填写")}</Text>
 										</Text>}

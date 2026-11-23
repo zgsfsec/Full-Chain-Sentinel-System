@@ -3089,6 +3089,7 @@ export interface SentinelSessionPresetView {
 }
 
 export interface SentinelEngineCreateInput {
+	recordWorkLinks?: boolean;
 	reportTemplateId?: string | null;
 	name: string;
 	targets: string;
