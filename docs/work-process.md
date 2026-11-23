@@ -16,6 +16,7 @@
 4. 在「目标树」查看目标归属层级；「链路图」根据先后、依赖、转向与汇合关系从左向右分层，同级步骤也可沿工作关系展开，并行分支分行、汇合进入后续层。循环关系保留为回连，不修改原始目标归属。缺少工作关系时按目标归属排列，不编造路径。支持拖动画布、适应视图、缩放、定位选中节点、关系筛选、搜索及分支收起。选中节点时突出相关路径。大图每组展示最多 150 个节点，节点详情保留全部关联。
    链路图默认显示工作流及分支入口，避免总目标到每一步的归属连线遮挡路径；可切换「全部关系」查看完整连接。分支围绕主线向上、向下排列，汇合后重新对齐；跨列和回连寻找附近空隙绕行。初次浏览垂直居中，适应视图时整体居中。
 5. 点击节点查看意图、行动、结果及证据。详情栏独立滚动，关闭按钮固定；点击原始记录自动定位到对应内容。窄屏下图谱和详情上下排列，均可滚动。原始记录按真实会话条目或工程事件定位；模型节点还可查看修订历史。
+6. 点击详情顶部「新页面展开」，在新标签页独立查看当前对话或工程的链路，默认显示链路图，并保留打开时选中的节点。独立页面没有控制台侧栏，可点击「进入全屏」进一步铺满屏幕，按 Esc 或点击「退出全屏」恢复；「返回控制台」回到普通界面。浏览器要求在新页再次点击才能进入全屏；不支持全屏时仍可使用独立页面。刷新保留链路对象及链接中的节点。展开、全屏和关闭页面不会改变持续记录状态。
 
 工程视图汇总总目标、指挥 Agent、所属任务和任务内部步骤。失败及放弃的路径保留。步骤按工作目的聚合，多次工具调用可以属于同一步骤。
 
@@ -52,11 +53,12 @@
 - `packages/web/src/work-process-api.ts`：复用现有入口、登录和使用确认校验的 HTTP 接口。
 - `packages/web/webui/src/components/WorkProcessPage.tsx`：列表、详情、操作及证据查看。
 - `packages/web/webui/src/components/WorkProcessGraph.tsx`：目标树和链路图。
+- `packages/web/webui/src/components/WorkLinkFullPage.tsx`：独立链路页面及浏览器全屏。
 
 专项测试从 `packages/web` 运行：
 
 ```sh
-node ../../node_modules/vitest/dist/cli.js --run test/work-process.test.ts test/work-process-source.test.ts test/work-process-server.test.ts webui/src/components/WorkProcessPage.test.tsx
+node ../../node_modules/vitest/dist/cli.js --run test/work-process.test.ts test/work-process-source.test.ts test/work-process-server.test.ts webui/src/components/WorkProcessPage.test.tsx webui/src/work-link-page.test.tsx
 ```
 
 测试使用本地模拟模型和模拟 Docker，覆盖引用校验、节点稳定性、批次消费、失败重试、暂停取消、重启恢复、并发限制、工程汇总、登录隔离、真实 SDK 协议调用和新增消息的后台增量处理。页面另外验证目标树、链路图、证据、修订、搜索、折叠、缩放、窄屏及深色模式。
