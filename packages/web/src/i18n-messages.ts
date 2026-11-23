@@ -4088,6 +4088,19 @@ export const EN_MESSAGES: Record<string, string> = {
 	新建: "New",
 	"Agent 上报的资产与测试记录在侧栏「资产库」。":
 		"Assets and test records reported by the agent live under Asset library in the sider.",
+	自定义请求头: "Custom request headers",
+	常用请求头: "Common request headers",
+	请求头名称: "Header name",
+	请求头值: "Header value",
+	移除请求头: "Remove header",
+	添加请求头: "Add header",
+	"只作用于这个模型；已保存的值不会回显，留空表示保留，删除行表示移除；改名需重新填写值。":
+		"Applies only to this model. Saved values are hidden; leave a value blank to keep it, remove the row to delete it, or re-enter the value when renaming a header.",
+	请求头名称不能为空: "Header name cannot be empty",
+	"请求头名称格式无效：{name}": "Invalid header name: {name}",
+	"请求头名称不能重复：{name}": "Header name is duplicated: {name}",
+	"请求头值不能包含控制字符：{name}": "Header value cannot contain control characters: {name}",
+	"请填写请求头 {name} 的值": "Enter a value for header {name}",
 	插件开发任务: "Plugin development task",
 };
 

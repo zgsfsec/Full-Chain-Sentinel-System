@@ -184,6 +184,8 @@ export interface SentinelModelCapabilities {
 	/** Omitted preserves advanced settings; null clears a previous model's template. */
 	thinkingLevelMap?: ThinkingLevelMap | null;
 	compat?: Model<Api>["compat"] | null;
+	/** Model-specific HTTP headers. Values are never returned to the browser. */
+	headers?: Record<string, string> | null;
 	input?: Array<"text" | "image">;
 	cost?: SentinelModelCostRates;
 	promptCache?: SentinelModelPromptCache;
@@ -228,6 +230,8 @@ export interface SentinelModelEntryView {
 	availableThinkingLevels?: ThinkingLevel[];
 	thinkingLevelMap?: ThinkingLevelMap;
 	compat?: Model<Api>["compat"];
+	/** Names only; request-header values can contain credentials. */
+	customHeaders?: string[];
 	input: Array<"text" | "image">;
 	cost: SentinelModelCostRates | null;
 	promptCache: SentinelModelPromptCache | null;

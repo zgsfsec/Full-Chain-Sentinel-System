@@ -21,6 +21,7 @@ import {
 } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { getLanguage, t } from "../i18n.ts";
+import { PROJECT_REPOSITORY } from "../branding.ts";
 import { SettingsEmpty, SettingsNote, SettingsSection } from "../ui/Settings.tsx";
 
 const { Text } = Typography;
@@ -77,6 +78,7 @@ interface Draft extends ModelThinkingDraft {
 	costCacheWrite: string;
 	cacheShort: string;
 	cacheLong: string;
+	customHeaders: Array<{ name: string; value: string; saved: boolean }>;
 }
 
 const EMPTY_DRAFT: Draft = {
@@ -97,6 +99,7 @@ const EMPTY_DRAFT: Draft = {
 	costCacheWrite: "",
 	cacheShort: "",
 	cacheLong: "",
+	customHeaders: [],
 };
 
 function draftOf(entry: SentinelModelEntryView): Draft {
@@ -124,6 +127,7 @@ function draftOf(entry: SentinelModelEntryView): Draft {
 		costCacheWrite: entry.cost === null ? "" : rateText(entry.cost.cacheWrite),
 		cacheShort: entry.promptCache?.short === undefined ? "" : String(entry.promptCache.short),
 		cacheLong: entry.promptCache?.long === undefined ? "" : String(entry.promptCache.long),
+		customHeaders: (entry.customHeaders ?? []).map((name) => ({ name, value: "", saved: true })),
 	};
 }
 
@@ -242,9 +246,33 @@ function capabilitiesOf(draft: Draft): { capabilities: SentinelModelCapabilities
 					...(long.value !== undefined ? { long: long.value } : {}),
 				}
 			: undefined;
+	const requestHeaders: Record<string, string> = {};
+	let headerError: string | null = null;
+	const seenHeaders = new Set<string>();
+	for (const header of draft.customHeaders) {
+		const name = header.name.trim();
+		const value = header.value.trim();
+		if (!name && !value) continue;
+		if (!name) {
+			headerError = t("请求头名称不能为空");
+			break;
+		}
+		const normalized = name.toLowerCase();
+		if (seenHeaders.has(normalized)) {
+			headerError = t("请求头名称不能重复：{name}", { name });
+			break;
+		}
+		seenHeaders.add(normalized);
+		if (!value && !header.saved) {
+			headerError = t("请填写请求头 {name} 的值", { name });
+			break;
+		}
+		requestHeaders[name] = value;
+	}
 	return {
 		capabilities: {
 			api: draft.api,
+			headers: Object.keys(requestHeaders).length > 0 ? requestHeaders : null,
 			...(context.value !== undefined ? { contextWindow: context.value } : {}),
 			...(output.value !== undefined ? { maxTokens: output.value } : {}),
 			reasoning: draft.reasoning,
@@ -255,7 +283,7 @@ function capabilitiesOf(draft: Draft): { capabilities: SentinelModelCapabilities
 			...(cost ? { cost } : {}),
 			...(promptCache ? { promptCache } : {}),
 		},
-		error: sizeError ?? costError ?? short.error ?? long.error ?? (draft.reasoning
+		error: headerError ?? sizeError ?? costError ?? short.error ?? long.error ?? (draft.reasoning
 			? draft.availableThinkingLevels.length === 0
 				? (getLanguage() === "en" ? "Select at least one thinking level." : "至少选择一个支持的思考等级。")
 				: draft.availableThinkingLevels.some((level) => draft.thinkingLevelMap?.[level]?.trim() === "")
@@ -837,6 +865,77 @@ export function SettingsPanel({
 		</Form.Item>
 	);
 
+	const requestHeadersEditor = () => (
+		<Form.Item
+			label={
+				<Space size={4}>
+					<span>{t("自定义请求头")}</span>
+					<Button
+						type="link"
+						size="small"
+						href={`${PROJECT_REPOSITORY}/blob/main/packages/web/docs/model-request-headers.md`}
+						target="_blank"
+						rel="noopener noreferrer"
+					>
+						{t("常用请求头")}
+					</Button>
+				</Space>
+			}
+			extra={t("只作用于这个模型；已保存的值不会回显，留空表示保留，删除行表示移除；改名需重新填写值。")}
+		>
+			<Space direction="vertical" size={8} style={{ width: "100%" }}>
+				{draft?.customHeaders.map((header, index) => (
+					<Row key={`${header.name}-${index}`} gutter={8} align="middle">
+						<Col span={8}>
+							<Input
+								aria-label={t("请求头名称")}
+								value={header.name}
+								placeholder="X-Custom-Header"
+								onChange={(event) => setDraft((current) => current ? {
+									...current,
+									customHeaders: current.customHeaders.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value, saved: false } : item),
+								} : current)}
+								spellCheck={false}
+							/>
+						</Col>
+						<Col span={13}>
+							<Input.Password
+								aria-label={t("请求头值")}
+								value={header.value}
+								placeholder={header.saved ? t("已保存，留空保持") : "value"}
+								onChange={(event) => setDraft((current) => current ? {
+									...current,
+									customHeaders: current.customHeaders.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item),
+								} : current)}
+								spellCheck={false}
+							/>
+						</Col>
+						<Col span={3}>
+							<Button
+								aria-label={t("移除请求头")}
+								danger
+								icon={<DeleteOutlined />}
+								onClick={() => setDraft((current) => current ? {
+									...current,
+									customHeaders: current.customHeaders.filter((_, itemIndex) => itemIndex !== index),
+								} : current)}
+							/>
+						</Col>
+					</Row>
+				))}
+				<Button
+					icon={<PlusOutlined />}
+					onClick={() => setDraft((current) => current ? {
+						...current,
+						customHeaders: [...current.customHeaders, { name: "", value: "", saved: false }],
+					} : current)}
+				>
+					{t("添加请求头")}
+				</Button>
+			</Space>
+		</Form.Item>
+	);
+
 	const lookupPanel = () => (
 		<div className="modelhub-lookup">
 			<Space size={8} wrap>
@@ -1367,6 +1466,7 @@ export function SettingsPanel({
 												</Form.Item>
 												{lookupPanel()}
 												{keyField()}
+												{requestHeadersEditor()}
 												<Form.Item label={t("显示名称")}>
 													<Input
 														value={draft.name}
@@ -1379,6 +1479,7 @@ export function SettingsPanel({
 										) : channel ? (
 											<>
 												{keyField()}
+												{requestHeadersEditor()}
 												<Form.Item label={t("模型")}>
 													<Select
 														showSearch

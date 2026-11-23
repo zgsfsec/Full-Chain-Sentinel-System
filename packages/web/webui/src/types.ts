@@ -165,6 +165,7 @@ export interface SentinelModelCapabilities {
 	defaultThinkingLevel?: SentinelThinkingLevel;
 	thinkingLevelMap?: ThinkingLevelMap | null;
 	compat?: Model<Api>["compat"] | null;
+	headers?: Record<string, string> | null;
 	input?: Array<"text" | "image">;
 	cost?: SentinelModelCostRates;
 	promptCache?: SentinelModelPromptCache;
@@ -197,6 +198,8 @@ export interface SentinelModelEntryView {
 	availableThinkingLevels?: SentinelThinkingLevel[];
 	thinkingLevelMap?: ThinkingLevelMap;
 	compat?: Model<Api>["compat"];
+	/** Header names only; values may contain credentials. */
+	customHeaders?: string[];
 	input: Array<"text" | "image">;
 	cost: SentinelModelCostRates | null;
 	promptCache: SentinelModelPromptCache | null;

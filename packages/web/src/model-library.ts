@@ -349,6 +349,7 @@ export function libraryView(agentDir: string): SentinelModelLibraryView {
 			reasoning: capabilities?.reasoning === true,
 			...(capabilities?.thinkingLevelMap ? { thinkingLevelMap: capabilities.thinkingLevelMap } : {}),
 			...(capabilities?.compat ? { compat: capabilities.compat } : {}),
+			...(capabilities?.headers ? { customHeaders: Object.keys(capabilities.headers) } : {}),
 			...(config
 				? readProviderThinkingSettings(agentDir, entry.id)
 				: { defaultThinkingLevel: "off" as const, availableThinkingLevels: ["off" as const] }),
@@ -404,6 +405,26 @@ function positiveInteger(value: number | undefined, label: string): number | und
 	return value;
 }
 
+function cleanRequestHeaders(value: SentinelModelCapabilities["headers"]): SentinelModelCapabilities["headers"] {
+	if (value === null || value === undefined) return value;
+	const headers: Record<string, string> = {};
+	const seen = new Set<string>();
+	for (const [rawName, rawValue] of Object.entries(value)) {
+		const name = rawName.trim();
+		if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(name)) {
+			throw new Error(t("请求头名称格式无效：{name}", { name: rawName }));
+		}
+		const normalized = name.toLowerCase();
+		if (seen.has(normalized)) throw new Error(t("请求头名称不能重复：{name}", { name }));
+		seen.add(normalized);
+		if (typeof rawValue !== "string" || /[\u0000-\u0008\u000A-\u001F\u007F]/u.test(rawValue)) {
+			throw new Error(t("请求头值不能包含控制字符：{name}", { name }));
+		}
+		headers[name] = rawValue.trim();
+	}
+	return headers;
+}
+
 /**
  * Validate the form's capability fields. A provided object is the whole
  * declaration: omitted fields are cleared, which is what lets the operator turn
@@ -449,6 +470,7 @@ function cleanCapabilities(raw: SentinelModelCapabilities | undefined): Sentinel
 	return {
 		api,
 		...cleanModelAdvancedSettings(raw),
+		headers: cleanRequestHeaders(raw.headers),
 		...(contextWindow !== undefined ? { contextWindow } : {}),
 		...(maxTokens !== undefined ? { maxTokens } : {}),
 		reasoning: raw.reasoning === true,

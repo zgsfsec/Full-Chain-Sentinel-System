@@ -119,6 +119,7 @@ function readCapabilities(
 		capabilities.thinkingLevelMap = model.thinkingLevelMap as SentinelModelCapabilities["thinkingLevelMap"];
 	}
 	if (model.compat !== undefined) capabilities.compat = model.compat as SentinelModelCapabilities["compat"];
+	if (model.headers !== undefined) capabilities.headers = model.headers as Record<string, string>;
 	const input = readInput(model.input);
 	if (input) capabilities.input = input;
 	const cost = readCost(model.cost);
@@ -236,6 +237,31 @@ export function writeProviderModelConfig(
 		for (const field of ["thinkingLevelMap", "compat"] as const) {
 			if (advanced[field] === null) delete nextModel[field];
 			else if (advanced[field] !== undefined) nextModel[field] = advanced[field];
+		}
+		if (capabilities.headers === null) {
+			delete nextModel.headers;
+		} else if (capabilities.headers !== undefined) {
+			const previousHeaders =
+				typeof previousModel.headers === "object" && previousModel.headers !== null
+					? (previousModel.headers as Record<string, unknown>)
+					: {};
+			const nextHeaders: Record<string, string> = {};
+			for (const [name, value] of Object.entries(capabilities.headers)) {
+				if (value !== "") {
+					nextHeaders[name] = value;
+					continue;
+				}
+				const previousName = Object.keys(previousHeaders).find(
+					(candidate) => candidate.toLowerCase() === name.toLowerCase(),
+				);
+				const previousValue = previousName === undefined ? undefined : previousHeaders[previousName];
+				if (previousName === undefined || typeof previousValue !== "string") {
+					throw new Error(`Request header value is required: ${name}`);
+				}
+				nextHeaders[previousName] = previousValue;
+			}
+			if (Object.keys(nextHeaders).length > 0) nextModel.headers = nextHeaders;
+			else delete nextModel.headers;
 		}
 		const contextWindow = positiveNumber(capabilities.contextWindow);
 		if (contextWindow !== undefined) nextModel.contextWindow = contextWindow;
