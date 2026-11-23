@@ -31,8 +31,8 @@ export interface SqliteDatabase {
 }
 
 interface SqliteModule {
-	DatabaseSync?: new (path: string) => SqliteDatabase;
-	Database?: new (path: string) => SqliteDatabase;
+	DatabaseSync?: new (path: string, options?: { readOnly: boolean }) => SqliteDatabase;
+	Database?: new (path: string, options?: { readonly: boolean }) => SqliteDatabase;
 }
 
 function loadSqliteModule(): SqliteModule {
@@ -50,10 +50,11 @@ function loadSqliteModule(): SqliteModule {
 	throw new Error(`无法加载 SQLite 运行时：${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
 
-/** Open (creating if needed) the SQLite database at `path`. */
-export function openSqliteDatabase(path: string): SqliteDatabase {
+/** Open a database; read-only observers neither create files nor run migrations. */
+export function openSqliteDatabase(path: string, options: { readOnly: boolean } = { readOnly: false }): SqliteDatabase {
 	const module = loadSqliteModule();
-	const Database = module.DatabaseSync ?? module.Database;
-	if (!Database) throw new Error("SQLite 运行时未导出 DatabaseSync/Database");
-	return new Database(path);
+	if (module.DatabaseSync) return new module.DatabaseSync(path, { readOnly: options.readOnly });
+	if (module.Database)
+		return options.readOnly ? new module.Database(path, { readonly: true }) : new module.Database(path);
+	throw new Error("SQLite 运行时未导出 DatabaseSync/Database");
 }

@@ -13,6 +13,7 @@ import {
 	setLibraryRole,
 } from "../src/model-library.ts";
 import type { SentinelEngine, SentinelEngineTask } from "../src/protocol.ts";
+import { SubagentStore, subagentDbPath } from "../src/subagent-store.ts";
 import {
 	engineWorkEvidence,
 	engineWorkSnapshot,
@@ -207,6 +208,59 @@ describe("recorded work process sources", () => {
 		);
 		expect(entries[0]).toMatchObject({ status: "running", id: "commander:event:1" });
 		expect(entries[1]).toMatchObject({ status: "ok", truncated: true, id: "commander:event:2" });
+	});
+
+	test("attaches spawned children to their engineering task session and retrieves their evidence", async () => {
+		const input = engine();
+		input.tasks[0].sessionId = "session-t1";
+		input.tasks[1].sessionId = "session-t2";
+		const store = new SubagentStore(subagentDbPath(dir));
+		try {
+			for (const [id, sessionId, projectId] of [
+				["child-1", "session-t1", "p1"],
+				["child-2", "session-t2", "p1"],
+				["foreign", "session-t1", "p2"],
+			]) {
+				store.createRun({ id, sessionId, projectId, task: `核实 ${id}`, startedAt: "2026-01-01T00:00:00Z" });
+				store.appendEvent(id, {
+					seq: 1,
+					at: 5,
+					kind: "tool_end",
+					toolName: "bash",
+					toolCallId: "same-id",
+					output: id,
+				});
+			}
+			store.finishRun("child-2", { status: "error", turns: 1, endedAt: "2026-01-01T00:01:00Z", error: "请求失败" });
+			const sources = new RecordedWorkProcessSources({
+				agentDir: dir,
+				projects: () => [{ id: "p1", name: "项目", cwd: dir }],
+				engines: () => [input],
+				commanderEvents: () => [],
+				taskEvents: () => [],
+				active: () => ({ id: null, projectId: null, running: [] }),
+			});
+			const ref = { projectId: "p1", kind: "engine" as const, id: input.id };
+			const snapshot = await sources.load(ref);
+			expect(snapshot.nodes.find((node) => node.id === "subagent:child-1")).toMatchObject({
+				parentId: "task:t1",
+				status: "running",
+			});
+			expect(snapshot.nodes.find((node) => node.id === "subagent:child-2")).toMatchObject({
+				parentId: "task:t2",
+				status: "failed",
+			});
+			expect(snapshot.nodes.some((node) => node.id === "subagent:foreign")).toBe(false);
+			expect(snapshot.edges).toContainEqual(
+				expect.objectContaining({ from: "task:t1", to: "subagent:child-1", kind: "dispatch" }),
+			);
+			const entry = snapshot.lanes
+				.find((lane) => lane.ownerId === "subagent:child-1")!
+				.evidence.find((entry) => entry.kind === "tool_end")!;
+			expect(await sources.original(ref, entry)).toEqual({ text: "child-1", truncated: false });
+		} finally {
+			store.close();
+		}
 	});
 
 	test("reads history without changing source files, enforces project membership and expands original evidence", async () => {

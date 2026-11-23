@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import { getSessionDirPath, parseSessionEntries, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { SentinelEngine, SentinelSubagentEvent } from "./protocol.ts";
 import { redactWorkText as redact } from "./work-process-redact.ts";
+import { recordedWorkSubagents } from "./work-process-subagents.ts";
 import type {
 	WorkEvidence,
 	WorkNode,
@@ -341,13 +342,88 @@ export class RecordedWorkProcessSources implements WorkProcessSources {
 		return result;
 	}
 
-	async load(ref: WorkProcessRef): Promise<WorkSourceSnapshot> {
+	private appendSubagents(snapshot: WorkSourceSnapshot, sessionId: string, parentId: string, limit: number): void {
+		for (const run of recordedWorkSubagents(this.options.agentDir, snapshot.source.projectId, sessionId)) {
+			const ownerId = `subagent:${run.id}`;
+			const startedAt = Date.parse(run.startedAt) || 0;
+			const updatedAt = Math.max(startedAt, Date.parse(run.endedAt ?? "") || run.events?.at(-1)?.at || 0);
+			const brief = evidence(
+				{ id: `${ownerId}:task`, ownerId, at: startedAt, entryId: run.id, kind: "instruction", text: run.task },
+				limit,
+			);
+			const statusText = `状态：${run.status}${run.error ? `\n错误：${run.error}` : ""}`;
+			const status = evidence(
+				{
+					id: `${ownerId}:status:${createHash("sha256")
+						.update(statusText + (run.endedAt ?? ""))
+						.digest("hex")
+						.slice(0, 16)}`,
+					ownerId,
+					at: run.status === "running" ? startedAt : updatedAt,
+					entryId: run.id,
+					kind: "status",
+					text: statusText,
+					truncated: run.error?.endsWith("\n…（已截断）") ?? false,
+				},
+				limit,
+			);
+			const records = [brief, ...engineWorkEvidence(run.events ?? [], ownerId, limit), status];
+			if (run.result)
+				records.push(
+					evidence(
+						{
+							id: `${ownerId}:result`,
+							ownerId,
+							at: updatedAt,
+							entryId: run.id,
+							kind: "assistant",
+							text: run.result,
+							truncated: run.result.endsWith("\n…（已截断）"),
+						},
+						limit,
+					),
+				);
+			snapshot.nodes.push(
+				workStructuralNode({
+					id: ownerId,
+					ownerId,
+					parentId,
+					kind: "agent",
+					title: `子 Agent：${run.task}`,
+					intent: run.task,
+					status: run.status === "error" ? "failed" : taskStatus(run.status),
+					startedAt,
+					updatedAt,
+					evidenceIds: [brief.id, status.id, ...(run.result ? [`${ownerId}:result`] : [])],
+					outcomes: [run.result, run.error].filter((value): value is string => Boolean(value)),
+				}),
+			);
+			snapshot.edges.push({
+				id: `dispatch:${ownerId}`,
+				from: parentId,
+				to: ownerId,
+				kind: "dispatch",
+				basis: "recorded",
+				reason: "spawn_agent 父会话与子 Agent 派发记录",
+				evidenceIds: [brief.id],
+			});
+			snapshot.lanes.push({ ownerId, parentId: ownerId, evidence: records });
+			snapshot.source.active ||= run.status === "running";
+			snapshot.source.updatedAt = Math.max(snapshot.source.updatedAt, updatedAt);
+		}
+	}
+
+	async load(ref: WorkProcessRef, subagentEvidenceLimit = 6000): Promise<WorkSourceSnapshot> {
 		const project = this.options.projects().find((entry) => entry.id === ref.projectId);
 		if (!project) throw new Error("项目不存在");
 		if (ref.kind === "engine") {
 			const engine = this.options.engines().find((entry) => entry.id === ref.id && entry.projectId === project.id);
 			if (!engine) throw new Error("工程不存在");
-			return engineWorkSnapshot(engine, this.options.commanderEvents(engine.id), this.options.taskEvents);
+			const snapshot = engineWorkSnapshot(engine, this.options.commanderEvents(engine.id), this.options.taskEvents);
+			for (const task of engine.tasks)
+				if (task.sessionId)
+					this.appendSubagents(snapshot, task.sessionId, `task:${task.id}`, subagentEvidenceLimit);
+			return snapshot;
 		}
 		const path = SessionManager.findById(project.cwd, ref.id, getSessionDirPath(project.cwd, this.options.agentDir));
 		const active = this.options.active();
@@ -379,7 +455,7 @@ export class RecordedWorkProcessSources implements WorkProcessSources {
 		}
 		const first = entries.find((entry) => entry.kind === "user");
 		const title = sessionTitle || first?.text.slice(0, 100) || "新对话";
-		return {
+		const snapshot: WorkSourceSnapshot = {
 			source: { ...ref, projectName: project.name, title, updatedAt, active: active.running.includes(ref.id) },
 			nodes: [
 				workStructuralNode({
@@ -397,11 +473,26 @@ export class RecordedWorkProcessSources implements WorkProcessSources {
 			edges: [],
 			lanes: [{ ownerId: ref.id, parentId: "root", evidence: entries }],
 		};
+		this.appendSubagents(snapshot, ref.id, "root", subagentEvidenceLimit);
+		return snapshot;
 	}
 
 	async original(ref: WorkProcessRef, entry: WorkEvidence): Promise<{ text: string; truncated: boolean }> {
 		let found: WorkEvidence | undefined;
-		if (ref.kind === "session") {
+		if (entry.ownerId.startsWith("subagent:")) {
+			const snapshot = await this.load(ref, 256_000);
+			found = snapshot.lanes
+				.flatMap((lane) => lane.evidence)
+				.find((item) => item.id === entry.id && item.ownerId === entry.ownerId);
+			// Earlier metadata revisions live in the saved graph after the run changes state.
+			if (
+				!found &&
+				entry.kind === "status" &&
+				entry.id.startsWith(`${entry.ownerId}:status:`) &&
+				snapshot.nodes.some((node) => node.id === entry.ownerId && entry.ownerId === `subagent:${entry.entryId}`)
+			)
+				found = entry;
+		} else if (ref.kind === "session") {
 			const project = this.options.projects().find((project) => project.id === ref.projectId);
 			const path = project
 				? SessionManager.findById(project.cwd, ref.id, getSessionDirPath(project.cwd, this.options.agentDir))
