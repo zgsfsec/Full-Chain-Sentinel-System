@@ -22,7 +22,7 @@ import {
 	Tag,
 	Typography,
 } from "antd";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { getLanguage, t } from "../i18n.ts";
 import { PROJECT_REPOSITORY } from "../branding.ts";
 import { SettingsEmpty, SettingsNote, SettingsSection } from "../ui/Settings.tsx";
@@ -33,6 +33,7 @@ import type {
 	SentinelBuiltinModelDefaults,
 	SentinelBuiltinModelPreset,
 	SentinelGatekeeperConfig,
+	SentinelJudgeLoadReport,
 	SentinelModelCapabilities,
 	SentinelModelCostRates,
 	SentinelModelEntryView,
@@ -49,6 +50,9 @@ import { catalogThinkingSettings, EMPTY_MODEL_THINKING, type ModelThinkingDraft 
 import {
 	capabilityChips,
 	hostOf,
+	JUDGE_LOAD_TEST_SIZE,
+	JudgeLoadTestReport,
+	type JudgeLoadTestOutcome,
 	MODEL_API_OPTIONS,
 	ModelStatusTag,
 	ROLE_HINTS,
@@ -335,6 +339,7 @@ export function SettingsPanel({
 	judgeResolved,
 	onSaveGatekeeperConfig,
 	onTestJudge,
+	onTestJudgeLoad,
 }: {
 	library: SentinelModelLibraryView | null;
 	onSaveEntry: (entry: {
@@ -357,6 +362,8 @@ export function SettingsPanel({
 	judgeResolved: SentinelResolvedModelView | null;
 	onSaveGatekeeperConfig: (settings: SentinelGatekeeperConfig) => void;
 	onTestJudge: () => Promise<{ result: SentinelTestResult; raw?: string } | null>;
+	/** Sends several real judgments at once to the 守门模型 and reports how many answered. */
+	onTestJudgeLoad: () => Promise<{ result: SentinelTestResult; load?: SentinelJudgeLoadReport } | null>;
 }) {
 	const [draft, setDraft] = useState<Draft | null>(null);
 	const [activeSection, setActiveSection] = useState<"models" | "roles" | "gatekeeper">("models");
@@ -369,6 +376,9 @@ export function SettingsPanel({
 	const [testingAll, setTestingAll] = useState(false);
 	/** Test results live in this component only: a stored "usable" goes stale. */
 	const [results, setResults] = useState<Record<string, SentinelTestResult | null>>({});
+	const [testingJudgeLoad, setTestingJudgeLoad] = useState(false);
+	/** Undefined until the 守门模型 concurrency test ran once. */
+	const [judgeLoad, setJudgeLoad] = useState<JudgeLoadTestOutcome | undefined>(undefined);
 	/** Built-in catalog suggestions for the open draft; applying is always explicit or new-entry-only. */
 	const [defaultsLoading, setDefaultsLoading] = useState(false);
 	const [defaultsMatches, setDefaultsMatches] = useState<SentinelBuiltinModelDefaults[] | null>(null);
@@ -544,6 +554,16 @@ export function SettingsPanel({
 			setResults((current) => ({ ...current, [id]: result }));
 		} finally {
 			setTesting(null);
+		}
+	};
+
+	const runJudgeLoadTest = async () => {
+		if (testingJudgeLoad) return;
+		setTestingJudgeLoad(true);
+		try {
+			setJudgeLoad(await onTestJudgeLoad());
+		} finally {
+			setTestingJudgeLoad(false);
 		}
 	};
 
@@ -1278,70 +1298,89 @@ export function SettingsPanel({
 							library.entries.find((candidate) => candidate.id === (resolved?.entryId ?? roleRef)) ?? null;
 						const state = testState(testing === entry?.id, entry ? results[entry.id] : undefined);
 						return (
-							<div className="modelhub-role-row" key={role}>
-								<div className="modelhub-role-row__name">
-									<Tag color={role === "main" ? "blue" : undefined} variant="filled">
-										{ROLE_LABELS[role]}
-									</Tag>
-									<Text type="secondary">{ROLE_SHORT[role]}</Text>
-									{role === "judge" ? (
-										<Space size={4} wrap>
-											<Tag color="orange" variant="filled">{t("必须按量 API")}</Tag>
-											<Tag color="red" variant="filled">{t("必须关闭思考")}</Tag>
-										</Space>
-									) : role === "commander" || role === "supervisor" || role === "reviewer" ? (
-										<Tag variant="filled">{t("建议按量 API")}</Tag>
-									) : null}
-								</div>
-								<div className="modelhub-role-row__model">
-									<Text strong ellipsis title={entry?.name ?? t("未选择模型")}>
-										{entry?.name ?? t("未选择模型")}
-									</Text>
-									<Text type="secondary" ellipsis title={entry?.baseUrl ?? ROLE_HINTS[role]}>
-										{entry ? `${entry.modelId} · ${hostOf(entry.baseUrl)}` : ROLE_HINTS[role]}
-									</Text>
-								</div>
-								<div className="modelhub-role-row__caps">
-									{entry ? (
-										capabilityChips(entry).map((chip) => (
-											<Tag key={chip} variant="filled">
-												{chip}
-											</Tag>
-										))
-									) : (
-										<Tag variant="filled">{t("未绑定")}</Tag>
-									)}
-								</div>
-								<div className="modelhub-role-row__status">
-									<ModelStatusTag state={state} detail={testDetail(entry ? results[entry.id] : undefined)} />
-									{role === "reviewer" ? (
-										<Tag
-											color={library.reviewerAuto ? "green" : "default"}
-											variant="filled"
-											role="button"
-											onClick={() => onSetReviewerAuto(!library.reviewerAuto)}
-											title={t("关闭后新记录不再排队，已排队的也会停止")}
-										>
-											{t("自动评审")}
+							<Fragment key={role}>
+								<div className="modelhub-role-row">
+									<div className="modelhub-role-row__name">
+										<Tag color={role === "main" ? "blue" : undefined} variant="filled">
+											{ROLE_LABELS[role]}
 										</Tag>
-									) : null}
-								</div>
-								<div className="modelhub-role-row__actions">
-									<Button size="small" type="link" onClick={() => setPickerRole(role)}>
-										{t("更换")}
-									</Button>
-									{entry ? (
-										<Button
-											size="small"
-											type="link"
-											loading={testing === entry.id}
-											onClick={() => void runTest(entry.id)}
-										>
-											{t("测试")}
+										<Text type="secondary">{ROLE_SHORT[role]}</Text>
+										{role === "judge" ? (
+											<Space size={4} wrap>
+												<Tag color="orange" variant="filled">{t("必须按量 API")}</Tag>
+												<Tag color="red" variant="filled">{t("必须关闭思考")}</Tag>
+											</Space>
+										) : role === "commander" || role === "supervisor" || role === "reviewer" ? (
+											<Tag variant="filled">{t("建议按量 API")}</Tag>
+										) : null}
+									</div>
+									<div className="modelhub-role-row__model">
+										<Text strong ellipsis title={entry?.name ?? t("未选择模型")}>
+											{entry?.name ?? t("未选择模型")}
+										</Text>
+										<Text type="secondary" ellipsis title={entry?.baseUrl ?? ROLE_HINTS[role]}>
+											{entry ? `${entry.modelId} · ${hostOf(entry.baseUrl)}` : ROLE_HINTS[role]}
+										</Text>
+									</div>
+									<div className="modelhub-role-row__caps">
+										{entry ? (
+											capabilityChips(entry).map((chip) => (
+												<Tag key={chip} variant="filled">
+													{chip}
+												</Tag>
+											))
+										) : (
+											<Tag variant="filled">{t("未绑定")}</Tag>
+										)}
+									</div>
+									<div className="modelhub-role-row__status">
+										<ModelStatusTag state={state} detail={testDetail(entry ? results[entry.id] : undefined)} />
+										{role === "reviewer" ? (
+											<Tag
+												color={library.reviewerAuto ? "green" : "default"}
+												variant="filled"
+												role="button"
+												onClick={() => onSetReviewerAuto(!library.reviewerAuto)}
+												title={t("关闭后新记录不再排队，已排队的也会停止")}
+											>
+												{t("自动评审")}
+											</Tag>
+										) : null}
+									</div>
+									<div className="modelhub-role-row__actions">
+										<Button size="small" type="link" onClick={() => setPickerRole(role)}>
+											{t("更换")}
 										</Button>
-									) : null}
+										{entry ? (
+											<Button
+												size="small"
+												type="link"
+												loading={testing === entry.id}
+												onClick={() => void runTest(entry.id)}
+											>
+												{t("测试")}
+											</Button>
+										) : null}
+										{role === "judge" ? (
+											<Button
+												size="small"
+												type="link"
+												loading={testingJudgeLoad}
+												disabled={testingJudgeLoad}
+												title={t("同时发出 {count} 次真实判定，看成功率与延迟", { count: JUDGE_LOAD_TEST_SIZE })}
+												onClick={() => void runJudgeLoadTest()}
+											>
+												{t("并发测试")}
+											</Button>
+										) : null}
+									</div>
 								</div>
-							</div>
+								{role === "judge" && judgeLoad !== undefined ? (
+									<div className="modelhub-role-load">
+										<JudgeLoadTestReport outcome={judgeLoad} />
+									</div>
+								) : null}
+							</Fragment>
 						);
 					})}
 				</div>

@@ -209,6 +209,7 @@
 - 新增控制台接口契约（`packages/web/docs/contract/`），供重写后端的团队照着重写、并用现有前端验收：HTTP 接口的 OpenAPI 文档与说明；WebSocket `/ws` 的 228 种上行和 119 种下行消息，按 21 个功能域成文，每种消息带经编译器校验的 JSON 样例；三道门与连接约定；两份协议类型的差异清单；文案与常量附录；验收说明。配套检查：编译期比对 `protocol.ts` 与浏览器副本（`webui/src/protocol-alignment.ts`）、文档与处理代码交叉核对、OpenAPI 路径与实际路由核对、把每种可安全发送的上行消息的样例发给真实后端并核对回复（`test/contract/`），生成物过期检查（`check:contract`）。新增可在进程内或对指定后端运行的验收测试和记录代理（`scripts/contract-proxy.mjs`）。
 
 - 新增给前端开发、可直接导入 ApiFox 或 Postman 的接口文档（`packages/web/docs/contract/frontend/`）：OpenAPI 3.0 文档（96 个 HTTP 操作，每个参数、请求体和响应都有示例，响应结构由后端的 TypeScript 类型生成）、Postman 集合与环境、347 种 WebSocket 消息的结构与样例目录（`websocket-messages.json`），以及导入指南。配套检查：把 96 个 HTTP 操作里可以发送的 88 个按文档示例发给真实后端，核对状态码和响应结构（`test/contract/http-replay.test.ts`）；导入文件的引用、关键字、示例和一致性（`test/contract/frontend-docs.test.ts`）；生成物过期检查（`check:contract-api`）。核对时修正了 `openapi.yaml` 里的错误：`POST /api/mitm/config` 的配置字段与 `projectId` 平铺而不是嵌在 `config` 里、`POST /api/mitm/webfuzz/send` 的 `request` 是对象而不是字符串、`POST /api/mitm/webfuzz/import` 返回的是请求草稿、`POST /api/assets/import` 的响应漏了 `created` 和 `merged`、`POST /api/intelligence/sources/{id}` 只返回新令牌、`GET /api/intelligence/alerts` 的 `ip` 必填，并补上 `/api/mitm/flows` 的筛选参数和若干路由缺失的状态码。
+- 设置 → 模型 → 角色分配里，守门模型一行新增「并发测试」：同时发出 10 次真实判定，显示成功率和延迟；有一次没在判定超时内返回可解析的 `ALLOW` / `BLOCK` 就算未通过，并提示「您配置的模型可能无法成功进行 AI 审批守门」。不带 `concurrency` 的 `test_judge` 仍是一次连通性检查。
 
 ### Changed
 

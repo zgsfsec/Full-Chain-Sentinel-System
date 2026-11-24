@@ -1676,6 +1676,18 @@ export const EN_MESSAGES: Record<string, string> = {
 		"Gatekeeper model unavailable; {count} verdicts were allowed (in AI approval mode commands ran without being intercepted).",
 	"守门模型可用（{ms}ms，来源：{source}）": "Gatekeeper model available ({ms}ms, source: {source})",
 	守门模型调用失败: "Gatekeeper model call failed",
+	守门模型并发测试通过: "Gatekeeper model passed the concurrency test",
+	守门模型并发测试未通过: "Gatekeeper model failed the concurrency test",
+	"您配置的模型可能无法成功进行 AI 审批守门":
+		"The model you configured may not be able to gate commands in AI approval mode",
+	并发测试: "Concurrency test",
+	"同时发出 {count} 次真实判定，看成功率与延迟":
+		"Sends {count} real judgments at once and reports the success rate and latency",
+	测试成功: "Test passed",
+	"成功率 {ok}/{total}": "Success rate {ok}/{total}",
+	"延迟：平均 {avg}，最慢 {max}": "Latency: {avg} on average, {max} at the slowest",
+	失败原因: "Why they failed",
+	"{text} × {count}": "{text} × {count}",
 	守门端点: "Gatekeeper endpoint",
 	"守门设置（AI 审批）": "Gatekeeper settings (AI Approval)",
 	安全: "Security",

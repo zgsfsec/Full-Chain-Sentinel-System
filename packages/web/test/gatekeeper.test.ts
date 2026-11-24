@@ -1,19 +1,24 @@
 /**
  * Unit tests for the gatekeeper judge: the one-line verdict parser, the endpoint
- * fallback chain, and the guard's three outcomes (allow, block, failed) plus its
- * timeout, abort, and concurrency behavior.
+ * fallback chain, the guard's three outcomes (allow, block, failed) plus its
+ * timeout, abort, and concurrency behavior, and the concurrency test of the
+ * endpoint that the settings screen runs.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import type { AuxiliaryModelConfig } from "../src/auxiliary-model.ts";
 import {
 	buildJudgeInput,
 	buildToolJudgeInput,
 	GATEKEEPER_TEST_SYSTEM_PROMPT,
 	Gatekeeper,
 	type JudgeCallResult,
+	judgeLoadTestResult,
+	judgeLoadTestSize,
+	MAX_JUDGE_LOAD_TEST_SIZE,
 	parseGateVerdict,
 	resolveJudgeEndpoint,
 } from "../src/gatekeeper.ts";
@@ -365,5 +370,108 @@ describe("Gatekeeper.guard", () => {
 		};
 		expect(await run(1)).toBe(1);
 		expect(await run(0)).toBe(3);
+	});
+});
+
+describe("Gatekeeper.loadTest", () => {
+	const config: AuxiliaryModelConfig = {
+		agentDir,
+		providerId: "judge-entry",
+		baseUrl: "http://judge/v1",
+		apiKey: "",
+		modelId: "judge-stub",
+	};
+
+	test("sends every judgment at once with the real prompt, and reports how many answered and how fast", async () => {
+		const gatekeeper = newGatekeeper();
+		let running = 0;
+		let peak = 0;
+		const prompts: Array<string | undefined> = [];
+		const inputs: string[] = [];
+		gatekeeper.call = async (_config, input, _signal, systemPrompt) => {
+			running += 1;
+			peak = Math.max(peak, running);
+			prompts.push(systemPrompt);
+			inputs.push(input);
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			running -= 1;
+			return { verdict: { decision: "allow" }, raw: "ALLOW" };
+		};
+		const report = await gatekeeper.loadTest(config, 10, 15_000);
+		expect(report).toMatchObject({ concurrency: 10, succeeded: 10, failures: [] });
+		expect(peak).toBe(10);
+		// The latency shown is the one a real judgment has, not a connectivity check's.
+		expect(prompts.every((prompt) => prompt === undefined)).toBe(true);
+		expect(inputs).toHaveLength(10);
+		expect(inputs[0]).toContain("nmap -sV -p 1-1000 target");
+		const { min, median, avg, max } = report.latencyMs ?? {};
+		expect(min).toBeGreaterThan(0);
+		expect(min).toBeLessThanOrEqual(median ?? Number.POSITIVE_INFINITY);
+		expect(median).toBeLessThanOrEqual(max ?? 0);
+		expect(avg).toBeGreaterThanOrEqual(min ?? 0);
+		expect(avg).toBeLessThanOrEqual(max ?? 0);
+		// A settings check: nothing reaches the audit.
+		expect(store.list(undefined).total).toBe(0);
+	});
+
+	test("counts a timeout and an endpoint error as failures, and times only the judgments that answered", async () => {
+		const gatekeeper = newGatekeeper();
+		let nth = 0;
+		gatekeeper.call = (_config, _input, signal) => {
+			nth += 1;
+			if (nth === 1)
+				return new Promise<JudgeCallResult>((_resolve, reject) => {
+					signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+				});
+			if (nth === 2) return Promise.reject(new Error("HTTP 503"));
+			return Promise.resolve({ verdict: { decision: "allow" }, raw: "ALLOW" });
+		};
+		const report = await gatekeeper.loadTest(config, 3, 50);
+		expect(report.concurrency).toBe(3);
+		expect(report.succeeded).toBe(1);
+		expect(report.failures).toEqual(["守门判定超时（50ms）", "HTTP 503"]);
+		// An answer that comes back within the same millisecond takes 0 ms.
+		const only = report.latencyMs?.min;
+		expect(only).toBeGreaterThanOrEqual(0);
+		expect(report.latencyMs).toEqual({ min: only, median: only, avg: only, max: only });
+	});
+
+	test("reports no latency when nothing succeeded", async () => {
+		const gatekeeper = newGatekeeper();
+		gatekeeper.call = async () => {
+			throw new Error("connection refused");
+		};
+		const report = await gatekeeper.loadTest(config, 4, 1000);
+		expect(report.succeeded).toBe(0);
+		expect(report.latencyMs).toBeUndefined();
+		expect(report.failures).toEqual(Array(4).fill("connection refused"));
+	});
+
+	test("passes only when every judgment answered, and then says what is at stake", () => {
+		expect(
+			judgeLoadTestResult({
+				concurrency: 10,
+				succeeded: 10,
+				failures: [],
+				latencyMs: { min: 1, median: 1, avg: 1, max: 1 },
+			}),
+		).toEqual({
+			ok: true,
+			message: "守门模型并发测试通过",
+		});
+		expect(judgeLoadTestResult({ concurrency: 10, succeeded: 9, failures: ["守门判定超时（15000ms）"] })).toEqual({
+			ok: false,
+			message: "守门模型并发测试未通过",
+			detail: "您配置的模型可能无法成功进行 AI 审批守门",
+		});
+	});
+
+	test("an omitted size is the single connectivity check, and the size is capped", () => {
+		expect(judgeLoadTestSize(undefined)).toBe(1);
+		expect(judgeLoadTestSize(10)).toBe(10);
+		expect(judgeLoadTestSize(4.6)).toBe(5);
+		expect(judgeLoadTestSize(0)).toBe(1);
+		expect(judgeLoadTestSize(Number.NaN)).toBe(1);
+		expect(judgeLoadTestSize(1000)).toBe(MAX_JUDGE_LOAD_TEST_SIZE);
 	});
 });

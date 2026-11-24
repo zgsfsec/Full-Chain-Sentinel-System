@@ -61,11 +61,16 @@
 
 ### `test_judge`
 
-对守门模型的端点做一次连通性检查。
+测试守门模型的端点，也就是「角色分配 → 守门模型」当前指向的那条模型。两种测法：
+
+- 不带 `concurrency`：做一次连通性检查。用一条很短的提示词，只要求回 `ALLOW`，回复里带 `raw`。
+- 带 `concurrency`：同时发出那么多次真实判定，回复里带 `load`。每次用正式的守门提示词判定同一条固定的扫描命令 `nmap -sV -p 1-1000 target`，在守门设置的判定超时之内返回可解析的 `ALLOW` 或 `BLOCK` 才算成功。全部成功才算通过；有一次没成功，`result.ok` 就是 `false`，`result.detail` 是「您配置的模型可能无法成功进行 AI 审批守门」。`concurrency` 取 1 到 20 的整数，超出按 20；界面上的「并发测试」发的是 10。
+
+两种测试都不写审计记录。
 
 | 项目 | 内容 |
 | --- | --- |
-| 字段 | 无 |
+| 字段 | `concurrency`（可选）：number，同时发出的判定次数 |
 | 回复请求方 | `judge_test_result` |
 | 广播 | 无 |
 | 失败文案 | 无 |
@@ -164,22 +169,33 @@
 
 ### `judge_test_result`
 
-守门判定端点的测试结果。
+守门模型端点的测试结果：一次连通性检查的，或者一次并发测试的。
 
 | 项目 | 内容 |
 | --- | --- |
-| 字段 | `result`：SentinelTestResult；`raw`（可选）：string。The raw one-line answer, when a judgment actually came back. |
+| 字段 | `result`：SentinelTestResult；`raw`（可选）：string，只在不带 `concurrency` 的测试里，是模型那一行原始回复；`load`（可选）：SentinelJudgeLoadReport，只在带 `concurrency` 的测试里。`load.concurrency` 是同时发出的次数，`load.succeeded` 是成功的次数，`load.latencyMs`（可选）是成功那几次的最小值、中位数、平均值和最大值，单位毫秒，一次都没成功时没有，`load.failures` 是每次失败的原因 |
 | 发送时机 | 回复 `test_judge` 时，只发给发出消息的连接 |
+
+下面是并发测试通过时的样子。没通过时 `ok` 是 `false`，`message` 是「守门模型并发测试未通过」，`detail` 是「您配置的模型可能无法成功进行 AI 审批守门」，`failures` 里逐条写着原因，例如「守门判定超时（15000ms）」。
 
 ```json
 {
 	"type": "judge_test_result",
 	"result": {
 		"ok": true,
-		"message": "示例文本",
-		"detail": "示例文本"
+		"message": "守门模型并发测试通过"
 	},
-	"raw": "text"
+	"load": {
+		"concurrency": 10,
+		"succeeded": 10,
+		"latencyMs": {
+			"min": 812,
+			"median": 1402,
+			"avg": 1518,
+			"max": 2930
+		},
+		"failures": []
+	}
 }
 ```
 

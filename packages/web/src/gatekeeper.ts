@@ -28,7 +28,7 @@ import { readGatekeeperConfig } from "./gatekeeper-config.ts";
 import type { GateDecisionInput, GatekeeperStore } from "./gatekeeper-store.ts";
 import { t } from "./i18n.ts";
 import { resolveLibraryRole } from "./model-library.ts";
-import type { SentinelGateDecision } from "./protocol.ts";
+import type { SentinelGateDecision, SentinelJudgeLoadReport, SentinelTestResult } from "./protocol.ts";
 
 /** The tool the judge is asked about; bash is the only execution surface. */
 export const GATEKEEPER_TOOL = "bash";
@@ -120,6 +120,12 @@ export const GATEKEEPER_SYSTEM_PROMPT = `你是授权渗透测试的操作守门
 
 export const GATEKEEPER_TEST_SYSTEM_PROMPT = "你是守门模型连通性检查器。只回复 ALLOW，不要分析或解释。";
 
+/** The most the concurrency test sends at once: it is a settings check, not a load generator. */
+export const MAX_JUDGE_LOAD_TEST_SIZE = 20;
+
+/** The command the concurrency test judges: a plain port scan, which the prompt lists under ALLOW. */
+const LOAD_TEST_COMMAND = "nmap -sV -p 1-1000 target";
+
 /** Longest reason kept from a BLOCK line; the prompt asks for 30 characters. */
 const MAX_REASON_CHARS = 200;
 /** Longest raw answer kept for the settings screen's test result. */
@@ -192,6 +198,37 @@ function cleanReason(text: string): string {
 		.trim();
 	if (stripped.length <= MAX_REASON_CHARS) return stripped;
 	return `${stripped.slice(0, MAX_REASON_CHARS)}…`;
+}
+
+/**
+ * How many judgments `test_judge` sends at once. Left out means one, the plain
+ * connectivity check; anything else is the concurrency test, capped.
+ */
+export function judgeLoadTestSize(requested: number | undefined): number {
+	if (requested === undefined || !Number.isFinite(requested)) return 1;
+	return Math.min(MAX_JUDGE_LOAD_TEST_SIZE, Math.max(1, Math.round(requested)));
+}
+
+/** Min, median, average and max of latencies already sorted from fastest to slowest. */
+function latencyStats(sorted: number[]): NonNullable<SentinelJudgeLoadReport["latencyMs"]> {
+	const middle = Math.floor(sorted.length / 2);
+	return {
+		min: sorted[0],
+		median: sorted.length % 2 === 1 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2),
+		avg: Math.round(sorted.reduce((total, value) => total + value, 0) / sorted.length),
+		max: sorted[sorted.length - 1],
+	};
+}
+
+/** What the settings screen says of a concurrency test. Every judgment has to answer: one that
+ * fails is a command the gate would let through unjudged. */
+export function judgeLoadTestResult(report: SentinelJudgeLoadReport): SentinelTestResult {
+	if (report.succeeded === report.concurrency) return { ok: true, message: t("守门模型并发测试通过") };
+	return {
+		ok: false,
+		message: t("守门模型并发测试未通过"),
+		detail: t("您配置的模型可能无法成功进行 AI 审批守门"),
+	};
 }
 
 /** A verdict word only counts when the next character ends it or separates it. */
@@ -372,6 +409,51 @@ export class Gatekeeper {
 	/** Endpoint currently in effect, for the settings screen and the mode guard. */
 	resolve(): ResolvedJudgeEndpoint {
 		return resolveJudgeEndpoint(this.agentDir);
+	}
+
+	/**
+	 * Send `count` judgments at once with the real prompt, so the operator sees
+	 * whether the endpoint keeps answering when several workers ask at the same
+	 * time. Each is held to the gatekeeper's own timeout. Nothing is recorded:
+	 * this is a settings check, not a judgment.
+	 */
+	async loadTest(config: AuxiliaryModelConfig, count: number, timeoutMs: number): Promise<SentinelJudgeLoadReport> {
+		const input = buildJudgeInput({ command: LOAD_TEST_COMMAND, source: t("设置页测试") });
+		const samples = await Promise.all(
+			Array.from({ length: count }, async () => {
+				const controller = new AbortController();
+				let timedOut = false;
+				const timer = setTimeout(() => {
+					timedOut = true;
+					controller.abort();
+				}, timeoutMs);
+				const started = Date.now();
+				try {
+					await this.call(config, input, controller.signal);
+					return { ok: true, latencyMs: Date.now() - started, error: "" };
+				} catch (error) {
+					// The aborted request surfaces as a connection error, so the flag, not the error, says it timed out.
+					const text = timedOut
+						? t("守门判定超时（{ms}ms）", { ms: timeoutMs })
+						: error instanceof Error
+							? error.message
+							: String(error);
+					return { ok: false, latencyMs: Date.now() - started, error: text };
+				} finally {
+					clearTimeout(timer);
+				}
+			}),
+		);
+		const answered = samples
+			.filter((sample) => sample.ok)
+			.map((sample) => sample.latencyMs)
+			.sort((left, right) => left - right);
+		return {
+			concurrency: count,
+			succeeded: answered.length,
+			...(answered.length > 0 ? { latencyMs: latencyStats(answered) } : {}),
+			failures: samples.flatMap((sample) => (sample.ok ? [] : [sample.error])),
+		};
 	}
 
 	/** Judge one tool call and record the outcome. Never throws for a judge failure. */

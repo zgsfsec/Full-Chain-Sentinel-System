@@ -953,8 +953,8 @@
 			},
 			"test_judge": {
 				"domain": "gatekeeper",
-				"description": "对守门模型的端点做一次连通性检查。",
-				"fields": "无",
+				"description": "测试守门模型的端点，也就是「角色分配 → 守门模型」当前指向的那条模型。两种测法：",
+				"fields": "`concurrency`（可选）：number，同时发出的判定次数",
 				"replies": [
 					"judge_test_result"
 				],
@@ -6012,8 +6012,8 @@
 			},
 			"judge_test_result": {
 				"domain": "gatekeeper",
-				"description": "守门判定端点的测试结果。",
-				"fields": "`result`：SentinelTestResult；`raw`（可选）：string。The raw one-line answer, when a judgment actually came back.",
+				"description": "守门模型端点的测试结果：一次连通性检查的，或者一次并发测试的。",
+				"fields": "`result`：SentinelTestResult；`raw`（可选）：string，只在不带 `concurrency` 的测试里，是模型那一行原始回复；`load`（可选）：SentinelJudgeLoadReport，只在带 `concurrency` 的测试里。`load.concurrency` 是同时发出的次数，`load.succeeded` 是成功的次数，`load.latencyMs`（可选）是成功那几次的最小值、中位数、平均值和最大值，单位毫秒，一次都没成功时没有，`load.failures` 是每次失败的原因",
 				"sentWhen": "回复 `test_judge` 时，只发给发出消息的连接",
 				"schema": {
 					"$ref": "#/$defs/Ws.server.judge_test_result"
@@ -6022,10 +6022,19 @@
 					"type": "judge_test_result",
 					"result": {
 						"ok": true,
-						"message": "示例文本",
-						"detail": "示例文本"
+						"message": "守门模型并发测试通过"
 					},
-					"raw": "text"
+					"load": {
+						"concurrency": 10,
+						"succeeded": 10,
+						"latencyMs": {
+							"min": 812,
+							"median": 1402,
+							"avg": 1518,
+							"max": 2930
+						},
+						"failures": []
+					}
 				}
 			},
 			"gate_audit": {
@@ -17394,6 +17403,9 @@
 			"properties": {
 				"type": {
 					"const": "test_judge"
+				},
+				"concurrency": {
+					"type": "number"
 				}
 			},
 			"required": [
@@ -17493,9 +17505,13 @@
 				"type": {
 					"const": "judge_test_result"
 				},
+				"load": {
+					"$ref": "#/$defs/SentinelJudgeLoadReport",
+					"description": "What the run measured, when the test sent more than one judgment."
+				},
 				"raw": {
 					"type": "string",
-					"description": "The raw one-line answer, when a judgment actually came back."
+					"description": "The raw one-line answer, when one judgment actually came back."
 				},
 				"result": {
 					"$ref": "#/$defs/SentinelTestResult"
@@ -17504,6 +17520,56 @@
 			"required": [
 				"type",
 				"result"
+			]
+		},
+		"SentinelJudgeLoadReport": {
+			"type": "object",
+			"description": "What the 守门模型 concurrency test measured: several judgments sent at once.",
+			"properties": {
+				"concurrency": {
+					"type": "number",
+					"description": "Judgments sent at once."
+				},
+				"failures": {
+					"type": "array",
+					"description": "Why each failed judgment failed.",
+					"items": {
+						"type": "string"
+					}
+				},
+				"latencyMs": {
+					"type": "object",
+					"description": "Time from sending to answering, over the judgments that succeeded. Absent when none did.",
+					"properties": {
+						"avg": {
+							"type": "number"
+						},
+						"max": {
+							"type": "number"
+						},
+						"median": {
+							"type": "number"
+						},
+						"min": {
+							"type": "number"
+						}
+					},
+					"required": [
+						"min",
+						"median",
+						"avg",
+						"max"
+					]
+				},
+				"succeeded": {
+					"type": "number",
+					"description": "Judgments that answered a verdict within the gatekeeper's timeout."
+				}
+			},
+			"required": [
+				"concurrency",
+				"succeeded",
+				"failures"
 			]
 		},
 		"Ws.server.gate_audit": {

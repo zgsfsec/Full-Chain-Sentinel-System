@@ -9681,6 +9681,56 @@
 				"updatedAt"
 			]
 		},
+		"SentinelJudgeLoadReport": {
+			"type": "object",
+			"description": "What the 守门模型 concurrency test measured: several judgments sent at once.",
+			"properties": {
+				"concurrency": {
+					"type": "number",
+					"description": "Judgments sent at once."
+				},
+				"failures": {
+					"type": "array",
+					"description": "Why each failed judgment failed.",
+					"items": {
+						"type": "string"
+					}
+				},
+				"latencyMs": {
+					"type": "object",
+					"description": "Time from sending to answering, over the judgments that succeeded. Absent when none did.",
+					"properties": {
+						"avg": {
+							"type": "number"
+						},
+						"max": {
+							"type": "number"
+						},
+						"median": {
+							"type": "number"
+						},
+						"min": {
+							"type": "number"
+						}
+					},
+					"required": [
+						"min",
+						"median",
+						"avg",
+						"max"
+					]
+				},
+				"succeeded": {
+					"type": "number",
+					"description": "Judgments that answered a verdict within the gatekeeper's timeout."
+				}
+			},
+			"required": [
+				"concurrency",
+				"succeeded",
+				"failures"
+			]
+		},
 		"SentinelMcpConfigView": {
 			"type": "object",
 			"description": "The whole custom-MCP configuration as the console sees it.",
@@ -19631,6 +19681,9 @@
 			"properties": {
 				"type": {
 					"const": "test_judge"
+				},
+				"concurrency": {
+					"type": "number"
 				}
 			},
 			"required": [
@@ -21075,9 +21128,13 @@
 				"type": {
 					"const": "judge_test_result"
 				},
+				"load": {
+					"$ref": "#/$defs/SentinelJudgeLoadReport",
+					"description": "What the run measured, when the test sent more than one judgment."
+				},
 				"raw": {
 					"type": "string",
-					"description": "The raw one-line answer, when a judgment actually came back."
+					"description": "The raw one-line answer, when one judgment actually came back."
 				},
 				"result": {
 					"$ref": "#/$defs/SentinelTestResult"
@@ -23683,7 +23740,7 @@
 		}
 	},
 	"typesSource": {
-		"hash": "2b64347db21b13e5d7a9a0bd85ba065e23ae8fbb82534b66a9bb8125e9abca8c",
+		"hash": "5aaefb11d9e5937f17ce23f5aa55fbea0fa16a93ebf069de02f23639a09fcec0",
 		"files": [
 			"packages/agent/src/agent-loop.ts",
 			"packages/agent/src/agent.ts",

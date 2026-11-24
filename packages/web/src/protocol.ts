@@ -353,6 +353,18 @@ export interface SentinelTestResult {
 	detail?: string;
 }
 
+/** What the 守门模型 concurrency test measured: several judgments sent at once. */
+export interface SentinelJudgeLoadReport {
+	/** Judgments sent at once. */
+	concurrency: number;
+	/** Judgments that answered a verdict within the gatekeeper's timeout. */
+	succeeded: number;
+	/** Time from sending to answering, over the judgments that succeeded. Absent when none did. */
+	latencyMs?: { min: number; median: number; avg: number; max: number };
+	/** Why each failed judgment failed. */
+	failures: string[];
+}
+
 /** A bash command awaiting operator approval. */
 export interface SentinelApprovalRequest {
 	id: string;
@@ -2243,8 +2255,12 @@ export type SentinelClientMessage =
 	| { type: "get_gatekeeper_config" }
 	| { type: "set_ui_language"; language: UiLanguage }
 	| { type: "save_gatekeeper_config"; config: SentinelGatekeeperConfig }
-	/** Probes whatever the 守门模型 role resolves to with one fixed sample command. */
-	| { type: "test_judge" }
+	/**
+	 * Probes whatever the 守门模型 role resolves to. Without `concurrency` it is
+	 * one connectivity check; with it, that many real judgments go out at once
+	 * (clamped to 1–20) and the answer says how many answered and how fast.
+	 */
+	| { type: "test_judge"; concurrency?: number }
 	| { type: "gate_audit_query"; filter?: SentinelGateFilter; page?: number; pageSize?: number }
 	| { type: "gate_audit_stats"; filter?: SentinelGateFilter }
 	/** Arm supervision before the conversation's first message. */
@@ -2568,12 +2584,14 @@ export type SentinelServerMessage =
 	  }
 	| { type: "gatekeeper_config"; config: SentinelGatekeeperConfig }
 	| { type: "ui_config"; language: UiLanguage }
-	/** One sample judgment, so the operator can see the prompt and endpoint work. */
+	/** The answer to `test_judge`: one sample judgment, or what several sent at once measured. */
 	| {
 			type: "judge_test_result";
 			result: SentinelTestResult;
-			/** The raw one-line answer, when a judgment actually came back. */
+			/** The raw one-line answer, when one judgment actually came back. */
 			raw?: string;
+			/** What the run measured, when the test sent more than one judgment. */
+			load?: SentinelJudgeLoadReport;
 	  }
 	| { type: "gate_audit"; page: SentinelGatePage }
 	| {

@@ -1,10 +1,17 @@
-import { Tag } from "antd";
+import { Alert, Space, Tag, Typography } from "antd";
 import type {
+	SentinelJudgeLoadReport,
 	SentinelModelEntryView,
 	SentinelModelRoleName,
 	SentinelTestResult,
 } from "../types.ts";
 import { t } from "../i18n.ts";
+import { formatMs } from "../subagent-process.ts";
+
+const { Text } = Typography;
+
+/** How many judgments the 守门模型 concurrency test sends at once. */
+export const JUDGE_LOAD_TEST_SIZE = 10;
 
 export const FOLLOW_MAIN = "follow-main";
 
@@ -101,6 +108,57 @@ export function ModelStatusTag({ state, detail }: { state: ModelTestState; detai
 		<Tag color={TONE_COLORS[state.tone]} variant="filled" title={detail}>
 			{state.label}
 		</Tag>
+	);
+}
+
+/** What the 守门模型 concurrency test answered: null when the backend did not answer at all. */
+export type JudgeLoadTestOutcome = { result: SentinelTestResult; load?: SentinelJudgeLoadReport } | null;
+
+/** Each reason once, with how many judgments it failed: `超时 × 2、报错`. */
+function counted(values: string[]): string[] {
+	const counts = new Map<string, number>();
+	for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+	return [...counts].map(([value, count]) => (count > 1 ? t("{text} × {count}", { text: value, count }) : value));
+}
+
+/** The concurrency test's result on the settings screen: did every judgment get through, and how fast. */
+export function JudgeLoadTestReport({ outcome }: { outcome: JudgeLoadTestOutcome }) {
+	if (outcome === null) {
+		return (
+			<Alert
+				type="error"
+				showIcon
+				className="ui-page__alert"
+				title={t("无响应")}
+				description={t("没有收到测试结果，请重试。")}
+			/>
+		);
+	}
+	const { result, load } = outcome;
+	const latency = load?.latencyMs
+		? ` · ${t("延迟：平均 {avg}，最慢 {max}", { avg: formatMs(load.latencyMs.avg), max: formatMs(load.latencyMs.max) })}`
+		: "";
+	return (
+		<Alert
+			type={result.ok ? "success" : "error"}
+			showIcon
+			className="ui-page__alert"
+			title={`${result.ok ? t("测试成功") : t("测试失败")} · ${result.message}`}
+			description={
+				load ? (
+					<Space orientation="vertical" size={4}>
+						<div>
+							{t("成功率 {ok}/{total}", { ok: load.succeeded, total: load.concurrency})}
+							{latency}
+						</div>
+						{result.detail ? <Text strong>{result.detail}</Text> : null}
+						{load.failures.length > 0 ? <div>{t("失败原因")}：{counted(load.failures).join("；")}</div> : null}
+					</Space>
+				) : (
+					result.detail
+				)
+			}
+		/>
 	);
 }
 

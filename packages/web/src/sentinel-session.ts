@@ -99,6 +99,8 @@ import {
 	buildJudgeInput,
 	GATEKEEPER_TEST_SYSTEM_PROMPT,
 	Gatekeeper,
+	judgeLoadTestResult,
+	judgeLoadTestSize,
 	type ResolvedJudgeEndpoint,
 } from "./gatekeeper.ts";
 import { readGatekeeperConfig, writeGatekeeperConfig } from "./gatekeeper-config.ts";
@@ -248,6 +250,7 @@ import type {
 	SentinelGoalRoundOutcome,
 	SentinelGoalUsage,
 	SentinelGoalView,
+	SentinelJudgeLoadReport,
 	SentinelMcpConfigView,
 	SentinelMcpServerInput,
 	SentinelMcpTestResult,
@@ -4243,10 +4246,14 @@ export class SentinelRuntime {
 	}
 
 	/**
-	 * Probe the judge with one fixed sample command. Nothing is recorded: this is
-	 * a settings check, not a real command judgment.
+	 * Probe the judge. Without `concurrency` it is one connectivity check on a
+	 * fixed sample command; with it, that many real judgments go out at once and
+	 * the answer says how many answered and how fast. Nothing is recorded: this
+	 * is a settings check, not a real command judgment.
 	 */
-	async testJudge(): Promise<{ result: SentinelTestResult; raw?: string }> {
+	async testJudge(
+		concurrency?: number,
+	): Promise<{ result: SentinelTestResult; raw?: string; load?: SentinelJudgeLoadReport }> {
 		const resolved = this.gatekeeper.resolve();
 		if (!resolved.config) {
 			return {
@@ -4258,6 +4265,11 @@ export class SentinelRuntime {
 			};
 		}
 		const settings = readGatekeeperConfig(this.agentDir);
+		const count = judgeLoadTestSize(concurrency);
+		if (count > 1) {
+			const load = await this.gatekeeper.loadTest(resolved.config, count, settings.timeoutMs);
+			return { result: judgeLoadTestResult(load), load };
+		}
 		const controller = new AbortController();
 		let timedOut = false;
 		const timer = setTimeout(() => {

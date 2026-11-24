@@ -6,6 +6,7 @@ import { ReportCenterPage } from "./components/ReportCenterPage.tsx";
 import { CredentialsPage } from "./components/CredentialsPage.tsx";
 import { ApiModelPage } from "./components/ApiModelPage.tsx";
 import { ApprovalQueue } from "./components/ApprovalQueue.tsx";
+import { JUDGE_LOAD_TEST_SIZE } from "./components/model-ui.tsx";
 import { AuthGate } from "./components/AuthGate.tsx";
 import { ConsoleShell } from "./shell/ConsoleShell.tsx";
 import type { PluginNavEntry } from "./shell/navigation.tsx";
@@ -104,6 +105,7 @@ import type {
 	SentinelGateFilter,
 	SentinelGatekeeperConfig,
 	SentinelGateStats,
+	SentinelJudgeLoadReport,
 	SentinelMode,
 	SentinelModelLibraryView,
 	SentinelNotifyConfig,
@@ -606,6 +608,9 @@ export function App() {
 	const assetTestResolverRef = useRef<((result: SentinelTestResult | null) => void) | null>(null);
 	const mcpTestResolverRef = useRef<((result: SentinelMcpTestResult | null) => void) | null>(null);
 	const judgeTestResolverRef = useRef<((result: { result: SentinelTestResult; raw?: string } | null) => void) | null>(null);
+	const judgeLoadResolverRef = useRef<((outcome: { result: SentinelTestResult; load?: SentinelJudgeLoadReport } | null) => void) | null>(
+		null,
+	);
 	const supervisorTestResolverRef = useRef<
 		((result: { result: SentinelTestResult; raw?: string } | null) => void) | null
 	>(null);
@@ -943,6 +948,11 @@ export function App() {
 						const resolve = judgeTestResolverRef.current;
 						judgeTestResolverRef.current = null;
 						resolve({ result: message.result, ...(message.raw ? { raw: message.raw } : {}) });
+					}
+					if (judgeLoadResolverRef.current) {
+						const resolve = judgeLoadResolverRef.current;
+						judgeLoadResolverRef.current = null;
+						resolve({ result: message.result, ...(message.load ? { load: message.load } : {}) });
 					}
 					break;
 				case "gate_audit":
@@ -3730,6 +3740,26 @@ export function App() {
 										},
 									);
 									return result;
+								}}
+								onTestJudgeLoad={async () => {
+									const outcome = await new Promise<{
+										result: SentinelTestResult;
+										load?: SentinelJudgeLoadReport;
+									} | null>((resolve) => {
+										judgeLoadResolverRef.current = resolve;
+										connectionRef.current?.send({
+											type: "test_judge",
+											concurrency: JUDGE_LOAD_TEST_SIZE,
+										});
+										// The gatekeeper's timeout is at most 120 seconds (see its settings).
+										window.setTimeout(() => {
+											if (judgeLoadResolverRef.current === resolve) {
+												judgeLoadResolverRef.current = null;
+												resolve(null);
+											}
+										}, 130000);
+									});
+									return outcome;
 								}}
 							/>
 						</SettingsPage>

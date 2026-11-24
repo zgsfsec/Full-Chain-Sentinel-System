@@ -3895,6 +3895,21 @@ body {
 	border-bottom: 0;
 }
 
+/* The 守门模型 concurrency test's result sits right under that role's row. */
+.modelhub-role-load {
+	padding: 10px 12px;
+	border-bottom: 1px solid var(--console-border);
+	background: #f8fafc;
+}
+
+.modelhub-role-load .ui-page__alert {
+	margin-bottom: 0;
+}
+
+.modelhub-role-list > :last-child {
+	border-bottom: 0;
+}
+
 .modelhub-role-row:hover {
 	background: #f8fafc;
 }

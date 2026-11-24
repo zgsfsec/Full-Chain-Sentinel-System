@@ -63,10 +63,14 @@ export const server = {
 		type: "judge_test_result",
 		result: {
 			ok: true,
-			message: "示例文本",
-			detail: "示例文本",
+			message: "守门模型并发测试通过",
 		},
-		raw: "text",
+		load: {
+			concurrency: 10,
+			succeeded: 10,
+			latencyMs: { min: 812, median: 1402, avg: 1518, max: 2930 },
+			failures: [],
+		},
 	},
 	gate_audit: {
 		type: "gate_audit",

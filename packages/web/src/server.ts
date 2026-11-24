@@ -4521,7 +4521,7 @@ export async function startSentinelServer(
 					return;
 				}
 				case "test_judge": {
-					const result = await runtime.testJudge();
+					const result = await runtime.testJudge(message.concurrency);
 					sendTo(socket, { type: "judge_test_result", ...result });
 					return;
 				}

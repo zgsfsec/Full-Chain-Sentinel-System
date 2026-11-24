@@ -347,6 +347,18 @@ export interface SentinelTestResult {
 	detail?: string;
 }
 
+/** What the 守门模型 concurrency test measured: several judgments sent at once. */
+export interface SentinelJudgeLoadReport {
+	/** Judgments sent at once. */
+	concurrency: number;
+	/** Judgments that answered a verdict within the gatekeeper's timeout. */
+	succeeded: number;
+	/** Time from sending to answering, over the judgments that succeeded. Absent when none did. */
+	latencyMs?: { min: number; median: number; avg: number; max: number };
+	/** Why each failed judgment failed. */
+	failures: string[];
+}
+
 export type {
 	SentinelNotifyChannel,
 	SentinelNotifyChannelConfig,
@@ -1957,7 +1969,7 @@ export type SentinelClientMessage =
 	| { type: "get_gatekeeper_config" }
 	| { type: "set_ui_language"; language: UiLanguage }
 	| { type: "save_gatekeeper_config"; config: SentinelGatekeeperConfig }
-	| { type: "test_judge" }
+	| { type: "test_judge"; concurrency?: number }
 	| { type: "gate_audit_query"; filter?: SentinelGateFilter; page?: number; pageSize?: number }
 	| { type: "gate_audit_stats"; filter?: SentinelGateFilter }
 	| {
@@ -2185,7 +2197,7 @@ export type SentinelServerMessage =
 	  }
 	| { type: "gatekeeper_config"; config: SentinelGatekeeperConfig }
 	| { type: "ui_config"; language: UiLanguage }
-	| { type: "judge_test_result"; result: SentinelTestResult; raw?: string }
+	| { type: "judge_test_result"; result: SentinelTestResult; raw?: string; load?: SentinelJudgeLoadReport }
 	| { type: "gate_audit"; page: SentinelGatePage }
 	| { type: "gate_audit_stats"; stats: SentinelGateStats; tabCounts: Record<SentinelGateApproval, number> }
 	| { type: "gate_decision"; decision: SentinelGateDecision }
