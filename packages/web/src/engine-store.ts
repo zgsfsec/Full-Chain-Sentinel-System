@@ -577,8 +577,9 @@ export class EngineStore {
 	}
 
 	/**
-	 * A restart is not a scheduled pause: safe policy leaves interrupted work for
-	 * the operator, so no task may auto-continue on the next manual resume.
+	 * A restart is not a scheduled pause: nothing of the old run is live, so no
+	 * task keeps the plan's marker. The interrupted work stays paused until the
+	 * operator clicks 继续, which puts back all of it, not only what a plan paused.
 	 */
 	clearAutoResume(): void {
 		this.db.prepare("UPDATE engine_tasks SET auto_resume = 0").run();

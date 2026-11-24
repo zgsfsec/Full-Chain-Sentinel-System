@@ -1127,6 +1127,11 @@ export const EN_MESSAGES: Record<string, string> = {
 	"任务 {id} 的会话文件不存在，无法在原会话上继续；请用 dispatch_task 重新派发":
 		"The session file for task {id} is missing, so it cannot continue in the original session; dispatch it again with dispatch_task",
 	"任务 {id} 自动续跑失败：{error}": "Task {id} failed to auto-resume: {error}",
+	"继续失败：{error}": "Resume failed: {error}",
+	"工程恢复：此前任务因暂停被中断，请从中断处继续完成原目标，不要重复已完成的步骤。":
+		"The engine resumed. This task was interrupted by a pause: continue toward the original goal from where it stopped, without repeating finished steps.",
+	"还有 {count} 个任务因暂停而中断，尚未处理：用 continue_task 在原会话上续跑，或用 abort_task 放弃":
+		"{count} tasks were interrupted by a pause and are not dealt with yet: continue them in their own conversations with continue_task, or drop them with abort_task",
 	"任务不在运行中，无法注入指令": "The task is not running; the instruction cannot be injected",
 	"任务会话仍在运行，请先中止再续跑": "The task session is still running; abort it before continuing",
 	任务会话创建失败: "Failed to create the task session",

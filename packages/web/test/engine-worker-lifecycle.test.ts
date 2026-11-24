@@ -363,7 +363,9 @@ test("a late acquisition failure does not overwrite an explicit abort", async ()
 });
 
 // Full-Chain-Sentinel-System #6: recovery applies only to stale running rows.
-test.each<SentinelEngineTaskStatus>(["done", "failed", "blocked", "aborted", "paused"])(
+// A paused task is not kept: it is one a pause interrupted, and aborting it is
+// how it is dropped (engine-pause-resume.test.ts).
+test.each<SentinelEngineTaskStatus>(["done", "failed", "blocked", "aborted"])(
 	"abort preserves an inactive %s task",
 	async (status) => {
 		const { manager, internals, addTask } = setup(async () => {

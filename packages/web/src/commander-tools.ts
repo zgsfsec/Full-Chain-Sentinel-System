@@ -39,7 +39,7 @@ export interface CommanderPort {
 		/** Preset agent id to run the task as; null uses the default agent. */
 		presetId: string | null;
 	}): { task?: SentinelEngineTask; position?: number; error?: string };
-	/** Stop one task (queued or running) with a reason. */
+	/** Stop one task (queued, running, or paused) with a reason. */
 	abortTask(taskId: string, reason: string): MaybePromise<{ ok: boolean; error?: string }>;
 	/** Queue an instruction into a running task (intel injection, mid-course correction). */
 	steerTask(taskId: string, instruction: string): MaybePromise<{ ok: boolean; error?: string }>;
@@ -80,8 +80,14 @@ export function formatTaskBoard(tasks: readonly SentinelEngineTask[]): string {
 				(task.summary ? `，结论：${task.summary}` : "") +
 				(task.error ? `，错误：${task.error}` : "") +
 				// Terminal and paused tasks keep their conversation; saying so here is
-				// what makes continue_task discoverable at the moment it is needed.
-				(task.status === "queued" || task.status === "running" ? "" : "；可 continue_task 续跑"),
+				// what makes continue_task discoverable at the moment it is needed. A
+				// task that a pause caught before it started has no conversation to
+				// continue, and the board must not offer one.
+				(task.status === "queued" || task.status === "running"
+					? ""
+					: task.status === "paused" && task.sessionId === null
+						? "；尚未开始，没有可续跑的会话"
+						: "；可 continue_task 续跑"),
 		)
 		.join("\n");
 }
@@ -233,7 +239,7 @@ export function createCommanderTools(port: CommanderPort): ToolDefinition[] {
 		name: "abort_task",
 		label: "Abort task",
 		description:
-			"Abort one queued or running task. Use for tasks that are pointless now (scope change, duplicate work, hopelessly stuck) so they stop consuming rounds.",
+			"Abort one queued, running, or paused task. Use for tasks that are pointless now (scope change, duplicate work, hopelessly stuck) so they stop consuming rounds. A paused task is one that a pause of the engineering run interrupted; aborting it is how it is dropped for good, and the run cannot finish while one is left.",
 		parameters: Type.Object({
 			task_id: Type.String({ description: "The task id from dispatch_task or list_tasks." }),
 			reason: Type.String({ description: "Why the task is being aborted; recorded on the task." }),
@@ -337,7 +343,7 @@ export function createCommanderTools(port: CommanderPort): ToolDefinition[] {
 		name: "engine_done",
 		label: "Finish engine",
 		description:
-			"Archive the final Markdown report and its local images in the project report center, then finish the engineering run. Relative image paths use /work. Download remote images into the project first. If archiving fails, correct the report and retry. Refused while tasks are queued or running: settle those first.",
+			"Archive the final Markdown report and its local images in the project report center, then finish the engineering run. Relative image paths use /work. Download remote images into the project first. If archiving fails, correct the report and retry. Refused while tasks are queued, running, or paused: settle those first.",
 		parameters: Type.Object({
 			report: Type.String({
 				description:

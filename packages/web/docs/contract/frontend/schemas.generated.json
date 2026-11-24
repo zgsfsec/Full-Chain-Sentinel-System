@@ -23740,7 +23740,7 @@
 		}
 	},
 	"typesSource": {
-		"hash": "b221e1f9909a64f3e8ab5687c3dc5a207c5210cd323136487b3315af8a3caee7",
+		"hash": "3cd1d56e6ed5f6da4de4987b4c93ad7656172fbc220d7388248c9b61edad1b27",
 		"files": [
 			"packages/agent/src/agent-loop.ts",
 			"packages/agent/src/agent.ts",

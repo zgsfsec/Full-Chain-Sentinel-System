@@ -951,7 +951,12 @@ function TargetsBox({ engineId, onSend }: { engineId: string; onSend: (message: 
 	);
 }
 
-function TaskBoard(props: { engine: SentinelEngine; onOpenTask(taskId: string): void; onAbortTask(taskId: string): void }) {
+/** The board of one run's tasks. Exported for its test: which tasks can be aborted is the console's one rule about them. */
+export function TaskBoard(props: {
+	engine: SentinelEngine;
+	onOpenTask(taskId: string): void;
+	onAbortTask(taskId: string): void;
+}) {
 	const tasks = props.engine.tasks;
 	return (
 		<section className="engine-workspace-tasks" aria-label={t("任务看板")}>
@@ -979,7 +984,8 @@ function TaskBoard(props: { engine: SentinelEngine; onOpenTask(taskId: string): 
 							</span>
 							{task.error || task.summary || task.target ? <span className={task.error ? "engine-workspace-task__preview is-error" : "engine-workspace-task__preview"} title={task.error ?? task.summary ?? task.target ?? undefined}>{task.error ?? task.summary ?? task.target}</span> : null}
 						</button>
-						{task.status === "running" || task.status === "queued" ? (
+						{/* A paused task is one a pause interrupted. Aborting it is how the operator drops it for good: a run cannot be closed while one is left. */}
+						{task.status === "running" || task.status === "queued" || task.status === "paused" ? (
 							<Button size="small" type="text" danger className="engine-workspace-task__abort" onClick={() => props.onAbortTask(task.id)}>{t("中止")}</Button>
 						) : null}
 					</div>
@@ -1021,7 +1027,7 @@ function TaskModal(props: {
 						{t("在对话中打开")}
 					</Button>
 				) : null}
-				{task.status === "running" || task.status === "queued" ? (
+				{task.status === "running" || task.status === "queued" || task.status === "paused" ? (
 					<Button size="small" danger onClick={() => props.onAbort(task.id)}>
 						{t("中止任务")}
 					</Button>

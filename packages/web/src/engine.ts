@@ -416,7 +416,10 @@ export class EngineManager {
 		this.armScheduler();
 	}
 
-	/** Resume a paused engine: reopen the commander with a board recap, revive paused tasks. */
+	/**
+	 * Resume a paused engine: put back the work the pause interrupted and reopen
+	 * the commander with a board recap.
+	 */
 	async resumeEngine(id: string): Promise<void> {
 		const entry = this.live.get(id);
 		if (!entry) throw new Error(t("工程不存在"));
@@ -426,7 +429,15 @@ export class EngineManager {
 			await this.startPausedEngine(entry);
 			return;
 		}
-		await this.resumeEngineInternal(entry, true);
+		try {
+			await this.resumeEngineInternal(entry, false);
+		} catch (error) {
+			// The engine is marked running and its tasks put back, but nothing drives
+			// it now: left like this it would sit "running" for good. Back to paused,
+			// with the reason on the board, and the caller still hears what went wrong.
+			await this.pauseEngineInternal(entry, t("继续失败：{error}", { error: errorText(error) }), false);
+			throw error;
+		}
 		this.armScheduler();
 	}
 
@@ -505,6 +516,12 @@ export class EngineManager {
 		// does not wake the commander for a task the pause is about to put back.
 		this.store.setEngineStatus(id, "paused", note, null);
 		entry.engine = this.store.getEngine(id) ?? entry.engine;
+		// Queued tasks are paused with the engine. A paused engine then has nothing in
+		// flight, as the console assumes when it lets the container stop, and the board
+		// does not show work waiting under an engine that is not going to start it.
+		// None of them had started, so there is no conversation to keep.
+		for (const task of entry.engine.tasks)
+			if (task.status === "queued") this.store.updateTask(task.id, { status: "paused", autoResume });
 		await this.stopWorkers(entry, "paused", note, autoResume);
 		// The commander is not a worker and pause does not dispose it (resume rebuilds
 		// it), so it has to be stopped explicitly: otherwise its turn in flight keeps
@@ -514,22 +531,37 @@ export class EngineManager {
 		this.hooks.onChange(entry.engine);
 	}
 
-	/** Requeue the work a scheduled pause interrupted, before the commander resumes. */
-	private requeueAutoResumeTasks(entry: EngineLive): void {
+	/**
+	 * Put back the work an interruption left behind. What had started continues in
+	 * its own conversation, where its findings and conclusions still are; what had
+	 * not started yet simply starts. A continuation the commander had already asked
+	 * for keeps the instruction it was given.
+	 *
+	 * A resume by the plan puts back only what the plan's own pause interrupted
+	 * (`autoResume`); an operator's 继续 puts back everything that was interrupted.
+	 */
+	private requeueInterruptedTasks(entry: EngineLive, onlyAutoResume: boolean): void {
 		const tasks = (this.store.getEngine(entry.engine.id)?.tasks ?? []).filter(
-			(task) => task.status === "paused" && task.autoResume,
+			(task) => task.status === "paused" && (!onlyAutoResume || task.autoResume || task.pendingContinue !== null),
 		);
 		for (const task of tasks) {
-			const result = this.continueTask(task.id, {
-				instruction: "定时计划恢复：此前任务因计划暂停被中断，请从中断处继续完成原目标，不要重复已完成的步骤。",
-				criteria: task.criteria,
-				roundLimit: 1,
-			});
-			if (result.error) {
+			// A continuation the commander already asked for keeps its instruction, and
+			// a task that never started has no conversation to continue: both go back
+			// in the queue as they are.
+			const asQueued = task.pendingContinue !== null || task.sessionId === null;
+			const error = asQueued
+				? undefined
+				: this.continueTask(task.id, {
+						instruction: t("工程恢复：此前任务因暂停被中断，请从中断处继续完成原目标，不要重复已完成的步骤。"),
+						criteria: task.criteria,
+						roundLimit: 1,
+					}).error;
+			if (asQueued) this.store.updateTask(task.id, { status: "queued", endedAt: null });
+			if (error) {
 				this.pushCommanderEvent(entry, {
 					kind: "status",
 					status: "error",
-					note: t("任务 {id} 自动续跑失败：{error}", { id: task.id, error: result.error }),
+					note: t("任务 {id} 自动续跑失败：{error}", { id: task.id, error }),
 				});
 				continue;
 			}
@@ -538,23 +570,13 @@ export class EngineManager {
 		entry.engine = this.store.getEngine(entry.engine.id) ?? entry.engine;
 	}
 
-	/** Resume an engine that has already started, with optional schedule auto-continue. */
-	private async resumeEngineInternal(entry: EngineLive, autoResumeTasks: boolean): Promise<void> {
+	/** An engine that has already started, with optional schedule auto-continue. */
+	private async resumeEngineInternal(entry: EngineLive, onlyAutoResume: boolean): Promise<void> {
 		const id = entry.engine.id;
 		this.store.setEngineStatus(id, "running", null, null);
 		entry.engine = this.store.getEngine(id) ?? entry.engine;
 		entry.nudges = 0;
-		if (autoResumeTasks) this.requeueAutoResumeTasks(entry);
-		// A continuation that was waiting for a slot when the process stopped is
-		// still an explicit commander decision; requeue it.
-		for (const task of entry.engine.tasks) {
-			// A paused auto-resume task that failed above must stay paused for the
-			// operator; its old pending continuation is not a new decision.
-			if (task.status === "paused" && task.pendingContinue && !task.autoResume) {
-				this.store.updateTask(task.id, { status: "queued", endedAt: null });
-			}
-		}
-		entry.engine = this.store.getEngine(id) ?? entry.engine;
+		this.requeueInterruptedTasks(entry, onlyAutoResume);
 		await this.startCommander(entry, "resume");
 		this.tick();
 		this.hooks.onChange(this.getEngine(id) ?? entry.engine);
@@ -927,7 +949,9 @@ export class EngineManager {
 		if (!task) return { ok: false, error: t("任务 {id} 不存在（可能已完成、已删除或 id 有误）", { id: taskId }) };
 		const entry = this.live.get(task.engineId);
 		if (!entry) return { ok: false, error: t("任务所属工程不存在") };
-		if (task.status === "queued") {
+		// A queued task never ran. A paused one was interrupted, or is waiting for a
+		// decision: dropping it is how an interrupted engine is cleared for a finish.
+		if (task.status === "queued" || task.status === "paused") {
 			this.store.updateTask(taskId, { status: "aborted", endedAt: Date.now(), error: reason });
 			entry.engine = this.store.getEngine(entry.engine.id) ?? entry.engine;
 			this.hooks.onChange(entry.engine);
@@ -971,7 +995,9 @@ export class EngineManager {
 	 * worker cannot fix itself — a 429, a timeout, an exhausted round budget — and
 	 * the way the commander starts a new phase on top of finished work. Only the
 	 * operator or commander can start it; the engine never continues terminal
-	 * tasks on its own.
+	 * tasks on its own. The one thing it puts back by itself is a task that a
+	 * pause interrupted (`requeueInterruptedTasks`): that is not a new decision,
+	 * it is the old one carried on.
 	 */
 	continueTask(
 		taskId: string,
@@ -1157,6 +1183,20 @@ export class EngineManager {
 						error: t("还有 {count} 个任务未结束（排队或运行中），先等它们结束或用 abort_task 中止", {
 							count: outstanding.length,
 						}),
+					};
+				}
+				// Work an interruption cut short is not done because the commander
+				// moved on: the report would close the engine on it unfinished.
+				const interrupted = board.filter((task) => task.status === "paused");
+				if (interrupted.length > 0) {
+					return {
+						ok: false,
+						error: t(
+							"还有 {count} 个任务因暂停而中断，尚未处理：用 continue_task 在原会话上续跑，或用 abort_task 放弃",
+							{
+								count: interrupted.length,
+							},
+						),
 					};
 				}
 				const completedSchedule = entry.engine.schedule;
@@ -1352,7 +1392,7 @@ export class EngineManager {
 			entry,
 			kind === "initial"
 				? `工程「${entry.engine.name}」已启动。目标清单与指挥思路见你的系统指令。请开始编排：先用 list_tasks 确认看板为空，然后按思路派发第一批任务。`
-				: `工程已恢复运行。当前看板：\n${formatTaskBoard(this.store.getEngine(entry.engine.id)?.tasks ?? [])}\n\n请决定下一步：继续派发、处理未完成任务，或（若全部结束）用 engine_done 收尾。`,
+				: `工程已恢复运行。被暂停中断的任务已经重新排队：看板里「排队中」「运行中」的就是，它们会在各自的原会话里从中断处接着跑，不用再派发。\n仍然「已暂停」的是无法自动续跑的任务（续跑失败的原因已记入决策日志）：用 continue_task 重试、dispatch_task 重新派发，或 abort_task 放弃。\n当前看板：\n${formatTaskBoard(this.store.getEngine(entry.engine.id)?.tasks ?? [])}\n\n请决定下一步：继续派发、处理未完成的任务，或（若全部结束）用 engine_done 收尾。`,
 		);
 	}
 
@@ -1507,9 +1547,14 @@ export class EngineManager {
 			return;
 		}
 		entry.nudges += 1;
+		// Interrupted tasks are not finished work. Left to the plain nudge, a
+		// commander that had nothing queued read it as leave to close the engine on them.
+		const interrupted = board.filter((task) => task.status === "paused");
 		void this.promptCommander(
 			entry,
-			`当前没有排队或运行中的任务。请用 engine_done 提交总报告结束工程；若还有目标没有处理，用 dispatch_task 继续派发。不要只是回复文字——没有工具调用，工程不会前进。`,
+			interrupted.length > 0
+				? `有 ${interrupted.length} 个任务因暂停而中断，还没完成，engine_done 会被拒绝：用 continue_task 在它们的原会话上续跑，确实不需要的用 abort_task 放弃。不要只是回复文字——没有工具调用，工程不会前进。`
+				: "当前没有排队或运行中的任务。请用 engine_done 提交总报告结束工程；若还有目标没有处理，用 dispatch_task 继续派发。不要只是回复文字——没有工具调用，工程不会前进。",
 		);
 	}
 

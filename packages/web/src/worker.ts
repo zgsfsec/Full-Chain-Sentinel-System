@@ -332,7 +332,34 @@ export class EngineWorker {
 		// Not just the visible streaming case: a session that is compacting has no
 		// active run but must be aborted all the same, or the run resumes after it.
 		if (this.session && !this.session.isIdle) await this.session.abort();
+		this.recordStopped();
 		this.settle("aborted", reason, this.currentUsage());
+	}
+
+	/**
+	 * Write the stop into the task's conversation: the round in flight is closed
+	 * and the goal waits for a continuation, which is what the console writes when
+	 * the operator aborts a run. Without it the file keeps a goal that is "active"
+	 * over a round that never ends, so a conversation the operator opens from the
+	 * board shows work in progress under a task the board lists as paused.
+	 */
+	private recordStopped(): void {
+		if (!this.goal || !this.session || this.disposed) return;
+		const at = Date.now();
+		let goal = this.goal;
+		const last = goal.rounds[goal.rounds.length - 1];
+		if (last && last.endedAt === undefined) {
+			goal = finishRound(goal, {
+				at,
+				toolCalls: this.roundToolCalls,
+				usage: diffUsage(usageOf(this.session.getSessionStats()), this.roundUsageStart),
+				outcome: "aborted",
+			});
+			this.roundToolCalls = 0;
+		}
+		if (goal.status === "active") goal = pauseGoal(goal, "manual", t("运行被中止，目标已暂停"), at);
+		this.goal = goal;
+		this.persistGoal();
 	}
 
 	/** Queue an instruction into the running worker (steer / intel injection). */
