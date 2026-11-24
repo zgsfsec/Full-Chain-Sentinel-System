@@ -58,6 +58,7 @@ import type {
 } from "../types.ts";
 import { SENTINEL_VULN_SEVERITIES, SENTINEL_VULN_SEVERITY_LABELS, SENTINEL_VULN_STATUS_LABELS } from "../types.ts";
 import { Page, Section } from "../ui/Page.tsx";
+import { ResizableTitle, useResizableColumns } from "../ui/resizable-columns.tsx";
 import "./vulnerability-assets.css";
 
 const { Text } = Typography;
@@ -69,6 +70,12 @@ const SEVERITY_COLORS: Record<SentinelVulnSeverity, string> = {
 	low: "blue",
 	info: "default",
 };
+
+/** The selection column's width. It is not resizable, but it counts towards the table's width. */
+const SELECTION_COLUMN_WIDTH = 44;
+
+/** The header cells carry the column edges; see ui/resizable-columns.tsx. */
+const VULN_TABLE_COMPONENTS = { header: { cell: ResizableTitle } };
 
 const STATUS_COLORS: Record<SentinelVulnStatus, string> = {
 	pending: "gold",
@@ -364,122 +371,9 @@ export function VulnPage({
 
 	const clearSelection = (): void => setSelected(new Set());
 
-	if (!hasProject) {
-		return (
-			<Page title={t("漏洞中枢")} description={t("漏洞记录按项目隔离")}>
-				<Empty
-					image={Empty.PRESENTED_IMAGE_SIMPLE}
-					description={
-						<>
-							<div>{t("尚未选择项目")}</div>
-							<div className="vulnhub-empty-hint">{t("请先在侧栏顶部选择或创建一个项目")}</div>
-						</>
-					}
-				/>
-			</Page>
-		);
-	}
-
-	const filterPanel = (
-		<div className="vulnhub-filters">
-			<label className="vulnhub-filters__field">
-				<span>{t("目标（主机 / URL / IP:port）")}</span>
-				<Input
-					size="small"
-					value={target}
-					placeholder={t("10.0.0.5、https://…")}
-					onChange={(event) => setTarget(event.target.value)}
-					onPressEnter={() => onFiltersChange({ ...filters, target: target.trim() || undefined })}
-				/>
-			</label>
-			<label className="vulnhub-filters__field">
-				<span>{t("会话（只列本项目）")}</span>
-				<Select
-					size="small"
-					value={filters.sessionId ?? ""}
-					onChange={(value) => onFiltersChange({ ...filters, sessionId: value || undefined })}
-					options={[
-						{ value: "", label: t("不限会话") },
-						...(filters.sessionId && !sessionOptions.some((option) => option.id === filters.sessionId)
-							? [{ value: filters.sessionId, label: sessionLabelFor(filters.sessionId) }]
-							: []),
-						...sessionOptions.map((option) => ({ value: option.id, label: option.name })),
-					]}
-				/>
-			</label>
-			<label className="vulnhub-filters__field">
-				<span>{t("工程（只列本项目，含已结束）")}</span>
-				<Select
-					size="small"
-					value={filters.engineId ?? ""}
-					// The task belongs to an engine, so switching engines clears it.
-					onChange={(value) =>
-						onFiltersChange({ ...filters, engineId: value || undefined, taskId: undefined })
-					}
-					options={[
-						{ value: "", label: t("不限工程") },
-						...projectEngines.map((engine) => ({ value: engine.id, label: engine.name })),
-					]}
-				/>
-			</label>
-			<label className="vulnhub-filters__field">
-				<span>{t("任务（先选工程）")}</span>
-				<Select
-					size="small"
-					value={filters.taskId ?? ""}
-					disabled={!filters.engineId}
-					onChange={(value) => onFiltersChange({ ...filters, taskId: value || undefined })}
-					options={[
-						{ value: "", label: filters.engineId ? t("不限任务") : t("先选工程") },
-						...(activeEngine?.tasks ?? []).map((task) => ({ value: task.id, label: task.title })),
-					]}
-				/>
-			</label>
-			<label className="vulnhub-filters__field">
-				<span>{t("等级")}</span>
-				<Select
-					size="small"
-					mode="multiple"
-					allowClear
-					maxTagCount="responsive"
-					aria-label={t("等级")}
-					placeholder={t("全部等级")}
-					value={filters.severity ?? []}
-					onChange={(value: SentinelVulnSeverity[]) =>
-						onFiltersChange({ ...filters, severity: value.length ? value : undefined })
-					}
-					options={SENTINEL_VULN_SEVERITIES.map((severity) => ({
-						value: severity,
-						label: SENTINEL_VULN_SEVERITY_LABELS[severity],
-					}))}
-				/>
-			</label>
-			<label className="vulnhub-filters__field">
-				<span>{t("状态")}</span>
-				<Select
-					size="small"
-					value={filters.status ?? ""}
-					onChange={(value) =>
-						onFiltersChange({ ...filters, status: (value || undefined) as SentinelVulnStatus | undefined })
-					}
-					options={[
-						{ value: "", label: t("全部状态") },
-						...STATUSES.map((status) => ({ value: status, label: SENTINEL_VULN_STATUS_LABELS[status] })),
-					]}
-				/>
-			</label>
-			<div className="vulnhub-filters__foot">
-				<Button size="small" onClick={clearAll}>
-					{t("清空全部")}
-				</Button>
-				<Button size="small" type="primary" onClick={() => setFilterOpen(false)}>
-					{t("完成")}
-				</Button>
-			</div>
-		</div>
-	);
-
-	const columns: ProColumns<SentinelVulnSummary>[] = [
+	// Each column's `width` is the width it starts from. The operator can drag the edges apart;
+	// the widths that result are kept in this browser.
+	const baseColumns: ProColumns<SentinelVulnSummary>[] = [
 		{
 			title: t("编号"),
 			dataIndex: "number",
@@ -612,6 +506,123 @@ export function VulnPage({
 			},
 		},
 	];
+	const resizable = useResizableColumns("vulns", baseColumns);
+
+	if (!hasProject) {
+		return (
+			<Page title={t("漏洞中枢")} description={t("漏洞记录按项目隔离")}>
+				<Empty
+					image={Empty.PRESENTED_IMAGE_SIMPLE}
+					description={
+						<>
+							<div>{t("尚未选择项目")}</div>
+							<div className="vulnhub-empty-hint">{t("请先在侧栏顶部选择或创建一个项目")}</div>
+						</>
+					}
+				/>
+			</Page>
+		);
+	}
+
+	const filterPanel = (
+		<div className="vulnhub-filters">
+			<label className="vulnhub-filters__field">
+				<span>{t("目标（主机 / URL / IP:port）")}</span>
+				<Input
+					size="small"
+					value={target}
+					placeholder={t("10.0.0.5、https://…")}
+					onChange={(event) => setTarget(event.target.value)}
+					onPressEnter={() => onFiltersChange({ ...filters, target: target.trim() || undefined })}
+				/>
+			</label>
+			<label className="vulnhub-filters__field">
+				<span>{t("会话（只列本项目）")}</span>
+				<Select
+					size="small"
+					value={filters.sessionId ?? ""}
+					onChange={(value) => onFiltersChange({ ...filters, sessionId: value || undefined })}
+					options={[
+						{ value: "", label: t("不限会话") },
+						...(filters.sessionId && !sessionOptions.some((option) => option.id === filters.sessionId)
+							? [{ value: filters.sessionId, label: sessionLabelFor(filters.sessionId) }]
+							: []),
+						...sessionOptions.map((option) => ({ value: option.id, label: option.name })),
+					]}
+				/>
+			</label>
+			<label className="vulnhub-filters__field">
+				<span>{t("工程（只列本项目，含已结束）")}</span>
+				<Select
+					size="small"
+					value={filters.engineId ?? ""}
+					// The task belongs to an engine, so switching engines clears it.
+					onChange={(value) =>
+						onFiltersChange({ ...filters, engineId: value || undefined, taskId: undefined })
+					}
+					options={[
+						{ value: "", label: t("不限工程") },
+						...projectEngines.map((engine) => ({ value: engine.id, label: engine.name })),
+					]}
+				/>
+			</label>
+			<label className="vulnhub-filters__field">
+				<span>{t("任务（先选工程）")}</span>
+				<Select
+					size="small"
+					value={filters.taskId ?? ""}
+					disabled={!filters.engineId}
+					onChange={(value) => onFiltersChange({ ...filters, taskId: value || undefined })}
+					options={[
+						{ value: "", label: filters.engineId ? t("不限任务") : t("先选工程") },
+						...(activeEngine?.tasks ?? []).map((task) => ({ value: task.id, label: task.title })),
+					]}
+				/>
+			</label>
+			<label className="vulnhub-filters__field">
+				<span>{t("等级")}</span>
+				<Select
+					size="small"
+					mode="multiple"
+					allowClear
+					maxTagCount="responsive"
+					aria-label={t("等级")}
+					placeholder={t("全部等级")}
+					value={filters.severity ?? []}
+					onChange={(value: SentinelVulnSeverity[]) =>
+						onFiltersChange({ ...filters, severity: value.length ? value : undefined })
+					}
+					options={SENTINEL_VULN_SEVERITIES.map((severity) => ({
+						value: severity,
+						label: SENTINEL_VULN_SEVERITY_LABELS[severity],
+					}))}
+				/>
+			</label>
+			<label className="vulnhub-filters__field">
+				<span>{t("状态")}</span>
+				<Select
+					size="small"
+					value={filters.status ?? ""}
+					onChange={(value) =>
+						onFiltersChange({ ...filters, status: (value || undefined) as SentinelVulnStatus | undefined })
+					}
+					options={[
+						{ value: "", label: t("全部状态") },
+						...STATUSES.map((status) => ({ value: status, label: SENTINEL_VULN_STATUS_LABELS[status] })),
+					]}
+				/>
+			</label>
+			<div className="vulnhub-filters__foot">
+				<Button size="small" onClick={clearAll}>
+					{t("清空全部")}
+				</Button>
+				<Button size="small" type="primary" onClick={() => setFilterOpen(false)}>
+					{t("完成")}
+				</Button>
+			</div>
+		</div>
+	);
+
 
 	return (
 		<Page
@@ -688,16 +699,20 @@ export function VulnPage({
 				className="vulnhub-table"
 				rowKey="id"
 				size="small"
-				columns={columns}
+				columns={resizable.columns}
 				dataSource={items}
 				search={false}
 				options={false}
 				pagination={false}
-				scroll={{ x: 1372 }}
+				// Fixed, so each column gets exactly the width it was given.
+				tableLayout="fixed"
+				// As wide as its columns add up to: it scrolls sideways only past the page's width.
+				scroll={{ x: resizable.total + SELECTION_COLUMN_WIDTH }}
+				components={VULN_TABLE_COMPONENTS}
 				rowSelection={{
 					selectedRowKeys: selectedIds,
 					onChange: (keys) => setSelected(new Set(keys as string[])),
-					columnWidth: 44,
+					columnWidth: SELECTION_COLUMN_WIDTH,
 				}}
 				toolbar={{
 					title: (
@@ -743,6 +758,11 @@ export function VulnPage({
 							>
 								{allSelected ? t("取消全选") : t("全选筛选结果")}
 							</Button>
+								{resizable.customized ? (
+									<Button type="link" title={t("所有列回到默认宽度")} onClick={resizable.reset}>
+										{t("重置列宽")}
+									</Button>
+								) : null}
 							{chips.map((chip) => (
 								<Tag key={chip.key} closable onClose={chip.clear} className="vulnhub-chip">
 									{chip.label}：{chip.value}

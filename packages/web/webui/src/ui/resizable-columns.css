@@ -1,0 +1,43 @@
+/* Draggable column edges: the right end of each header cell is a handle. */
+
+th.resizable-col {
+	position: relative;
+	/* A column dragged narrower than its title must not paint that title over its neighbour. */
+	overflow: hidden;
+}
+
+.resizable-col-handle {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 3;
+	width: 12px;
+	cursor: col-resize;
+	/* On a touch screen a drag moves the edge, not the page. */
+	touch-action: none;
+}
+
+/* A hint of where the edge is, on hover and while it is being dragged. */
+.resizable-col-handle::after {
+	content: "";
+	position: absolute;
+	top: 20%;
+	bottom: 20%;
+	left: 50%;
+	width: 2px;
+	border-radius: 1px;
+	transform: translateX(-50%);
+	background: transparent;
+}
+
+.resizable-col-handle:hover::after,
+body.is-resizing-column .resizable-col-handle::after {
+	background: var(--ant-color-primary, #1677ff);
+}
+
+/* While an edge moves, the cursor keeps saying so wherever the pointer is, and no text gets selected. */
+body.is-resizing-column {
+	cursor: col-resize;
+	user-select: none;
+}
