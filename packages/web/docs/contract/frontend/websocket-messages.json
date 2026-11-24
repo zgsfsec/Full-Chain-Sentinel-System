@@ -3986,7 +3986,7 @@
 			},
 			"engine_pause": {
 				"domain": "engine",
-				"description": "暂停一个工程。",
+				"description": "暂停一个工程：从此不再派发，正在运行的任务停下。",
 				"fields": "`id`：string",
 				"replies": [],
 				"broadcasts": [],
@@ -4001,7 +4001,7 @@
 			},
 			"engine_resume": {
 				"domain": "engine",
-				"description": "继续一个工程。",
+				"description": "继续一个已暂停的工程，并把暂停打断的工作放回去。",
 				"fields": "`id`：string",
 				"replies": [
 					"error"
@@ -4130,7 +4130,7 @@
 			},
 			"engine_abort_task": {
 				"domain": "engine",
-				"description": "中止工程里的一个任务。",
+				"description": "中止工程里的一个任务。`queued`、`running` 和 `paused` 的任务都可以：",
 				"fields": "`taskId`：string",
 				"replies": [
 					"error"

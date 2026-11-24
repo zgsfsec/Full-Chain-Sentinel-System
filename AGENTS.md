@@ -116,6 +116,24 @@ Attribution:
 - Internal (from issues): `Fixed foo bar ([#123](https://github.com/earendil-works/pi/issues/123))`
 - External contributions: `Added feature X ([#456](https://github.com/earendil-works/pi/pull/456) by [@username](https://github.com/username))`
 
+## Interface Contract Documents
+
+`packages/web/docs/contract/` is the contract between the browser console and the backend: the HTTP routes (`openapi.yaml`, `http-api.md`), every WebSocket message (`websocket/*.md`), and the files frontend developers import (`frontend/`). Frontend developers and a rewritten backend build against it. Every interface change updates the contract in the same change, before it is committed.
+
+An interface change is any of these:
+
+- An HTTP route or a WebSocket message is added, removed, or reshaped: a field or a type added, removed, or changed.
+- A text a handler can answer with is added or changed.
+- What a message does changes, even when its shape does not: which objects a request accepts, what it does to their state, when something is broadcast.
+
+How to update it:
+
+- Hand-written documents come first: `openapi.yaml`, `http-api.md`, `websocket/*.md`, `acceptance.md`. Read the entry of every route and message the change touches and correct what it says. The automated checks cannot see stale prose: they verify fields, replies, and failure texts, not behavior.
+- A new message or field gets an example in `packages/web/test/contract/examples/`, which the compiler checks against the message types.
+- Then regenerate, in this order, from `packages/web`: `npm run generate:contract`, `npm run generate:contract-schemas` (needs `CONTRACT_TYPESCRIPT` pointing at a TypeScript 5 install), `npm run generate:contract-api`. Commit the generated files with the change; never edit them by hand.
+- The `处理代码` row of each domain document holds line ranges in `packages/web/src/server.ts`, and nothing checks them. When lines move there, fix every range that moved.
+- Before committing, run the contract tests from `packages/web`: `node "$(git rev-parse --show-toplevel)/node_modules/vitest/dist/cli.js" --run test/contract`.
+
 ## Releasing
 
 For release preparation, publishing, verification, or recovery, load and follow [.pi/skills/release.md](.pi/skills/release.md).
