@@ -23740,7 +23740,7 @@
 		}
 	},
 	"typesSource": {
-		"hash": "3cd1d56e6ed5f6da4de4987b4c93ad7656172fbc220d7388248c9b61edad1b27",
+		"hash": "0cea9cf7dd070e86e1bf65cad5d909569f7b5ecbcb35c840cf893f405d99efcc",
 		"files": [
 			"packages/agent/src/agent-loop.ts",
 			"packages/agent/src/agent.ts",
@@ -24320,7 +24320,6 @@
 			"packages/web/src/droid-protocol.ts",
 			"packages/web/src/droid-tool.ts",
 			"packages/web/src/droid.ts",
-			"packages/web/src/embedded-assets.generated.ts",
 			"packages/web/src/engine-schedule.ts",
 			"packages/web/src/engine-store.ts",
 			"packages/web/src/engine-submission.ts",

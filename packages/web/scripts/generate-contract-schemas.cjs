@@ -13,7 +13,8 @@
  *
  * The output records a hash of the type sources it read. `--check` fails when
  * they have changed since. `--check-source` reads that record and the sources
- * alone, so it needs no TypeScript: it is what `npm run check` runs.
+ * alone, so it needs no TypeScript: it is what `npm run check` runs. The
+ * embedded asset module is left out of the record: see EMBEDDED_ASSETS.
  */
 
 const crypto = require("node:crypto");
@@ -25,6 +26,14 @@ const path = require("node:path");
 const packageRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(packageRoot, "..", "..");
 const outFile = path.join(packageRoot, "docs", "contract", "frontend", "schemas.generated.json");
+
+/**
+ * The embedded asset module holds the built console as strings. Its content
+ * changes with every frontend build; its types (two `Record<string, string>`
+ * and two strings) never do. Left in the record, each rebuild of the console
+ * made the output look stale until this script ran again.
+ */
+const EMBEDDED_ASSETS = "packages/web/src/embedded-assets.generated.ts";
 
 /**
  * What decides whether the output is stale: the content of every source the
@@ -483,7 +492,9 @@ try {
 			.getSourceFiles()
 			.map((file) => file.fileName)
 			.filter((file) => file.startsWith(repoRoot) && !file.includes("node_modules") && file !== declarations)
-			.map((file) => path.relative(repoRoot, file)),
+			.map((file) => path.relative(repoRoot, file))
+			// Compared with forward slashes: TypeScript writes them, `path.relative` follows the platform.
+			.filter((file) => file.split(path.sep).join("/") !== EMBEDDED_ASSETS),
 	].sort();
 	const sourceRecord = recordSources(sources);
 	// A name with a type's number in it says nothing about the type.

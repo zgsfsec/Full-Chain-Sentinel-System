@@ -438,3 +438,14 @@ test("the WebSocket catalog resolves every reference it makes", () => {
 	expect(references.length).toBeGreaterThan(500);
 	expect([...new Set(references)].filter((reference) => !resolveReference(reference, catalog))).toEqual([]);
 });
+
+test("the source record of the schemas leaves out the embedded console", () => {
+	// The embedded asset module holds the built console as strings. Its content
+	// changes with every frontend build and its types never do. With it in the
+	// record, every rebuild made `npm run check` report the schemas as stale.
+	const { files } = (read("schemas.generated.json") as { typesSource: { files: string[] } }).typesSource;
+	expect(files).not.toContain("packages/web/src/embedded-assets.generated.ts");
+	// What the documents are made of is still recorded.
+	expect(files).toContain("packages/web/src/protocol.ts");
+	expect(files).toContain("tsconfig.json");
+});
