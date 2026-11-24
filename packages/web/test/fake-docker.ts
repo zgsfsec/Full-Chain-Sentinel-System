@@ -96,7 +96,12 @@ case "$cmd" in
 		target="$(last_arg "$@")"
 		state=""
 		[ -n "$state_dir" ] && [ -f "$state_dir/$target" ] && state=$(cat "$state_dir/$target")
-		case "$target:$state" in *-sb-*: ) echo "no such gateway" >&2; exit 1 ;; esac
+		# The MITM proxy and the gateway are containers the console inspects before
+		# it ever starts them: for those, never seen means not there, as Docker says.
+		case "$target:$state" in
+			*-sb-*: ) echo "no such gateway" >&2; exit 1 ;;
+			*-mitm-*: ) echo "Error: No such object: $target" >&2; exit 1 ;;
+		esac
 		format=""
 		for arg in "$@"; do
 			case "$arg" in *"{{"*) format="$arg" ;; esac

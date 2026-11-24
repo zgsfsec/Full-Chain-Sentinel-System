@@ -44,6 +44,8 @@ npm run build:offline       # 全量构建，不联网、不重生成模型目�
 
 本仓库不跑 CI（只保留发布流程）：提交前请自己跑 `npm run check` 和 `./test.sh`。
 
+控制台前后端之间的接口约定见[接口契约](../packages/web/docs/contract/README.md)。改了 `/api/*` 路由或 `/ws` 消息后要同步改契约文档，否则 `npm run check` 和 `packages/web/test/contract/` 下的测试会失败：新增一种消息时，在 `packages/web/test/contract/domains.ts` 里把它归到一个功能域，补上文档条目和样例。
+
 单测从包根目录跑：
 
 ```bash

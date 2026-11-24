@@ -1,0 +1,3153 @@
+openapi: 3.1.0
+
+info:
+  title: 全链哨兵 Web 控制台 HTTP 接口
+  version: 2.3.4
+  summary: "浏览器控制台与后端之间的 HTTP 接口。WebSocket `/ws` 的消息另见 docs/contract/websocket。"
+  description: |
+    这份文档只覆盖 HTTP。每个请求依次经过三道门，任何一道没过都到不了接口本身：
+
+    1. **入口串**：除了标明「不需要入口 Cookie」的路径，不带 `sentinel-gate` Cookie 的请求一律回
+       `404`，正文是纯文本 `Not Found\n`。打开启动日志里的入口地址 `/<入口串>` 会得到 `302` 到 `/`，
+       并下发这个 Cookie。
+    2. **会话 Cookie**：`/api/*`（除登录相关的几条）和插件图标需要 `sentinel-auth` Cookie，否则回
+       `401`，正文 `{"error":"未登录"}`。
+    3. **授权承诺**：账号还没接受首次使用的授权承诺时，已登录的请求访问 `/api/*` 回 `403`，正文
+       `{"error":"consent_required"}`。
+
+    通用约定：
+
+    - JSON 响应的 `Content-Type` 是 `application/json; charset=utf-8`。出错的正文都是 `{"error": "…"}`，
+      `error` 是给操作员看的完整句子，按当前界面语言生成（少数路由固定为中文或英文）。
+    - 没有匹配到任何路由的路径返回前端页面 `index.html`（`200`，`text/html`），这是单页应用的路由回退。
+      所以对一条存在的 API 路径用了不支持的请求方法时，多数情况下得到的不是 `405`，而是 `200` 的 HTML 页面；
+      只有文档里列出了 `405` 的路由会明确拒绝。
+    - 路径里带查询参数 `projectId` 的路由都要求它是**当前项目**的 ID：项目在请求期间被切换时回 `409`。
+
+    响应和请求体的精确结构不在这份文件里手写。写成 `schema: { x-schema: Http.某名称 }` 的地方，结构由后端的
+    TypeScript 类型生成，`Http.某名称` 是 `docs/contract/frontend/schemas.generated.json` 里根的名字。
+    `docs/contract/frontend/http-api.json` 把这两样合在一起，并带上示例，是可以导入 ApiFox 或 Postman 的那一份。
+
+servers:
+  - url: /
+    description: 前端与后端同源，没有可以配置的后端地址。
+
+security:
+  - sentinel-gate: []
+    sentinel-auth: []
+
+tags:
+  - name: 入口与登录
+  - name: 授权承诺
+  - name: 界面语言
+  - name: 运行状态
+  - name: 上传与下载
+  - name: 项目
+  - name: 模型
+  - name: 报告中心
+  - name: 资产库
+  - name: POC
+  - name: 代码情报
+  - name: 守门审计
+  - name: 工作链路
+  - name: MITM 与 WebFuzz
+  - name: 威胁情报
+  - name: 安全检查
+  - name: 凭据
+  - name: 静态资源与插件界面
+  - name: 非浏览器调用方
+
+paths:
+  /:
+    get:
+      tags: [静态资源与插件界面]
+      summary: 控制台页面
+      description: "返回前端的 `index.html`。前端是单页应用，所有未匹配到路由的路径也都回这一个文件。"
+      security:
+        - sentinel-gate: []
+      responses:
+        "200":
+          description: 页面。前端还没构建时是一页说明如何构建的纯文本页面。
+          content:
+            text/html: {}
+
+  /assets/swagger-ui-{file}:
+    get:
+      tags: [静态资源与插件界面]
+      summary: 前端资源里的通用阅读器文件
+      description: 业务建模的文档页在沙箱 iframe 里渲染 Swagger UI，带不上 Cookie，所以这条路径不需要入口 Cookie，也不含任何控制台数据。
+      security: []
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema: { type: string }
+          example: swagger-ui-bundle.js
+          description: "前端构建产物里以 `swagger-ui-` 开头的文件名，实际的名字带构建哈希，例如 `swagger-ui-bundle-DtfaQRSx.js`。"
+      responses:
+        "200":
+          description: 静态文件。
+          content:
+            application/octet-stream: {}
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /plugin-icon/{hostId}/{pluginId}/{file}:
+    get:
+      tags: [静态资源与插件界面]
+      summary: 插件在侧栏里的图标
+      parameters:
+        - $ref: "#/components/parameters/hostId"
+        - $ref: "#/components/parameters/pluginId"
+        - name: file
+          in: path
+          required: true
+          schema: { type: string }
+          example: icon.svg
+          description: "图标文件名，只能是字母、数字、点、下划线、短横线，扩展名是 `svg` 或 `png`。"
+      responses:
+        "200":
+          description: 图标本身。
+          content:
+            image/svg+xml: {}
+            image/png: {}
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /plugin-ui/{token}/{hostId}/{pluginId}/{assetPath}:
+    get:
+      tags: [静态资源与插件界面]
+      summary: 插件的前端界面及其资源
+      description: |-
+        把请求原样转给插件主机，响应原样返回。插件界面在沙箱 iframe 里加载，带不上 Cookie，
+        所以不用入口 Cookie 和会话 Cookie，改由路径里的临时令牌鉴权：令牌由 WebSocket 消息
+        `plugin_ui_open` 发出，12 小时有效，只能打开它对应的那一个插件的界面。
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+          example: tok-example
+          description: 临时令牌，由 WebSocket 消息 `plugin_ui_open` 发出。
+        - $ref: "#/components/parameters/hostId"
+        - $ref: "#/components/parameters/pluginId"
+        - name: assetPath
+          in: path
+          required: true
+          schema: { type: string }
+          example: index.html
+          description: "界面里的相对路径。每一段都不能是 `.`、`..`，也不能含斜杠。"
+      responses:
+        "200":
+          description: 插件主机返回的内容。
+          content:
+            application/octet-stream: {}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          description: 读不到插件主机的界面。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/auth/state:
+    get:
+      tags: [入口与登录]
+      summary: 账号状态
+      description: 前端据此决定显示「创建管理员账号」还是登录页。
+      security:
+        - sentinel-gate: []
+      responses:
+        "200":
+          description: "`configured` 表示是否已经创建过账号；`username` 在账号创建之前是 `null`。前端据此决定显示创建账号的页面还是登录页。"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [configured, username]
+                properties:
+                  configured: { type: boolean }
+                  username: { type: [string, "null"] }
+              example: { configured: true, username: operator }
+
+  /api/auth/setup:
+    post:
+      tags: [入口与登录]
+      summary: 创建管理员账号（只在第一次）
+      description: 账号只能创建一次。成功后直接下发会话 Cookie，不需要再登录。
+      security:
+        - sentinel-gate: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Credentials" }
+            example: { username: operator, password: change-me-please }
+      responses:
+        "200":
+          description: "账号已创建。`Set-Cookie` 下发 `sentinel-auth`，`Max-Age` 为 30 天。"
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: "`sentinel-auth=<令牌>; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000`"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, username]
+                properties:
+                  ok: { type: boolean }
+                  username: { type: string }
+              example: { ok: true, username: operator }
+        "400":
+          description: 请求体不是 JSON，或用户名、密码不合格。用户名只能是字母、数字、点、下划线或连字符，最长 40 个字符；密码至少 8 个字符。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/auth/login:
+    post:
+      tags: [入口与登录]
+      summary: 登录
+      description: |-
+        只有最新的一次登录有效：登录成功后，其它浏览器之前持有的会话 Cookie 全部失效，
+        它们的 WebSocket 连接以关闭码 `4001`、原因 `session_replaced` 关闭。
+        同一个来源地址连续 5 次登录失败后锁定 30 秒。
+      security:
+        - sentinel-gate: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+                remember:
+                  type: boolean
+                  default: true
+                  description: "为 `false` 时不带 `Max-Age`，Cookie 只在浏览器会话期间有效。"
+            example: { username: operator, password: change-me-please, remember: true }
+      responses:
+        "200":
+          description: 已登录。
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: "`sentinel-auth=<令牌>; Path=/; HttpOnly; SameSite=Strict`，勾选记住登录时再加 `Max-Age=2592000`。"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, username]
+                properties:
+                  ok: { type: boolean }
+                  username: { type: string }
+              example: { ok: true, username: operator }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: 用户名或密码不正确。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: 还没有管理员账号。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: 尝试次数过多，稍后再试。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/auth/logout:
+    post:
+      tags: [入口与登录]
+      summary: 退出登录
+      description: "让之前签发的所有会话 Cookie 失效，并断开所有 WebSocket 连接（关闭码 `4001`、原因 `session_expired`）。请求本身没有带有效会话时只清除浏览器里的 Cookie，不影响当前的登录。"
+      security:
+        - sentinel-gate: []
+      responses:
+        "200":
+          description: "已退出。`Set-Cookie` 清除 `sentinel-auth`。"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+              example: { ok: true }
+
+  /api/auth/session:
+    get:
+      tags: [入口与登录]
+      summary: 当前会话的状态
+      description: "接受授权承诺之前就能访问。前端在 WebSocket 以关闭码 `4001` 断开后用它判断登录是否还有效。"
+      responses:
+        "200":
+          description: 会话有效。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, username, consent]
+                properties:
+                  ok: { type: boolean }
+                  username: { type: string }
+                  consent:
+                    type: object
+                    required: [required, acceptedAt, version]
+                    properties:
+                      required:
+                        type: boolean
+                        description: "为 `true` 时还需要接受授权承诺。"
+                      acceptedAt:
+                        type: [string, "null"]
+                        description: "接受的时间，ISO 8601；还没接受时是 `null`。"
+                      version: { type: integer }
+              example:
+                ok: true
+                username: operator
+                consent: { required: false, acceptedAt: "2026-11-24T08:00:00.000Z", version: 2 }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/change-password:
+    post:
+      tags: [入口与登录]
+      summary: 修改密码
+      description: "修改后，之前签发的所有会话 Cookie 失效，所有 WebSocket 连接以关闭码 `4001`、原因 `session_expired` 关闭；本次请求的调用者拿到一个新的会话 Cookie。"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current, next]
+              properties:
+                current: { type: string }
+                next: { type: string, description: 至少 8 个字符。 }
+            example: { current: change-me-please, next: a-longer-password }
+      responses:
+        "200":
+          description: "已修改。`Set-Cookie` 下发新的 `sentinel-auth`。"
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+              example: { ok: true }
+        "400":
+          description: 请求体不是 JSON、当前密码不正确，或新密码太短。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/consent:
+    get:
+      tags: [授权承诺]
+      summary: 授权声明和当前状态
+      description: 接受授权承诺之前就能访问。
+      responses:
+        "200":
+          description: 声明全文和状态。`text` 是按当前界面语言给出的分段文字，其中的 `**` 是加粗标记，不是 HTML。
+          content:
+            application/json:
+              schema: { x-schema: Http.ConsentStatement }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/consent/accept:
+    post:
+      tags: [授权承诺]
+      summary: 记录授权承诺
+      description: 记录在服务端，带着账号名和声明文字的哈希。换了账号或声明文字改了，承诺作废。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accepted]
+              properties:
+                accepted:
+                  type: boolean
+                  description: "必须是 `true`，勾选框就是这一步的意义。"
+            example: { accepted: true }
+      responses:
+        "200":
+          description: 已记录。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, acceptedAt, version]
+                properties:
+                  ok: { type: boolean }
+                  acceptedAt: { type: string, description: 接受的时间，ISO 8601。 }
+                  version: { type: integer }
+              example: { ok: true, acceptedAt: "2026-11-24T08:00:00.000Z", version: 2 }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/ui-language:
+    get:
+      tags: [界面语言]
+      summary: 当前界面语言
+      description: 登录页和授权承诺页在建立 WebSocket 之前用它取语言。不需要会话 Cookie。
+      security:
+        - sentinel-gate: []
+      responses:
+        "200":
+          description: 当前语言。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [language]
+                properties:
+                  language: { type: string, enum: [zh, en] }
+              example: { language: zh }
+    post:
+      tags: [界面语言]
+      summary: 切换界面语言
+      description: "语言是全局的。切换后向所有 WebSocket 连接广播 `ui_config`。不需要会话 Cookie。"
+      security:
+        - sentinel-gate: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [language]
+              properties:
+                language: { type: string, enum: [zh, en] }
+            example: { language: en }
+      responses:
+        "200":
+          description: 已切换。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, language]
+                properties:
+                  ok: { type: boolean }
+                  language: { type: string, enum: [zh, en] }
+              example: { ok: true, language: en }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/health:
+    get:
+      tags: [运行状态]
+      summary: 健康检查
+      responses:
+        "200":
+          description: "`ok` 总是 `true`。`sessionId` 是当前选中的对话的 ID，没有时是 `null`。`mode` 是命令执行的审批方式：`review` 由操作员审批，`ai` 由守门模型判定，`auto` 直接执行。"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, sessionId, mode]
+                properties:
+                  ok: { type: boolean }
+                  sessionId: { type: [string, "null"] }
+                  mode: { type: string, enum: [review, ai, auto] }
+              example: { ok: true, sessionId: null, mode: review }
+
+  /api/upload:
+    post:
+      tags: [上传与下载]
+      summary: 对话附件上传
+      description: "请求体是文件的原始字节，不是 multipart。文件写进当前项目工作目录的 `uploads/`，重名时自动加 `-2`、`-3`。单文件上限 1 GB。上传中断或超限时删掉写了一半的文件。"
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: name
+          in: query
+          required: true
+          schema: { type: string }
+          example: notes.txt
+          description: "文件名。服务端只取最后一段，`../../evil.sh` 变成 `evil.sh`。"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: "`name` 是落盘的文件名，重名时带上了 `-2` 这样的后缀。`path` 是文件在工作目录里的绝对路径，`size` 是字节数。"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, name, path, size]
+                properties:
+                  ok: { type: boolean }
+                  name: { type: string }
+                  path: { type: string }
+                  size: { type: integer }
+              example: { ok: true, name: notes.txt, path: /work/uploads/notes.txt, size: 12 }
+        "400":
+          description: 上传中断。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: 还没有选中项目，或者查询参数里的项目不是当前项目。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: 超过 1 GB。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/pocs/import:
+    post:
+      tags: [POC]
+      summary: 上传 POC 包
+      description: |-
+        请求体是 zip 或 YAML 文件的原始字节，上限 512 MiB。服务端只返回一张受理回执，
+        解析在后台排队进行，进度用 `/api/pocs/import/{id}` 轮询。同时排队和运行中的任务最多 8 个。
+      parameters:
+        - name: name
+          in: query
+          schema: { type: string, default: poc.zip }
+          example: poc.zip
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "202":
+          description: "已受理。`id` 是导入任务的 ID，用它轮询 `/api/pocs/import/{id}`。"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, id]
+                properties:
+                  ok: { type: boolean }
+                  id: { type: string, format: uuid }
+              example: { ok: true, id: "6f1c2a3e-8b4d-4c2a-9f1e-2d3c4b5a6978" }
+        "413":
+          description: 超过大小上限。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: 排队的导入任务太多。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/pocs/import/{id}:
+    get:
+      tags: [POC]
+      summary: POC 导入任务的状态
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          example: "6f1c2a3e-8b4d-4c2a-9f1e-2d3c4b5a6978"
+      responses:
+        "200":
+          description: "任务状态。`status` 是 `queued`、`running`、`done` 或 `error`；`progress` 是实时计数；`outcome` 在 `done` 时给出导入了多少、替换了多少、跳过了哪些及原因；`error` 在 `error` 时给出原因。"
+          content:
+            application/json:
+              schema: { x-schema: Http.PocImportJob }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/folder-archives/{id}:
+    get:
+      tags: [上传与下载]
+      summary: 下载打包好的文件夹
+      description: "由 WebSocket 消息 `download_folder` 发起打包，打包完成后用回执里的 `id` 下载。一个压缩包同一时间只能被一个请求下载。"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          example: "6f1c2a3e-8b4d-4c2a-9f1e-2d3c4b5a6978"
+      responses:
+        "200":
+          description: tar.gz 文件流。
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+          content:
+            application/gzip: {}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: 压缩包不存在或已过期。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: 压缩包还在生成，或正在被另一个请求下载。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/projects/rename:
+    post:
+      tags: [项目]
+      summary: 项目改名
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, name]
+              properties:
+                id: { type: string, description: 项目的 ID。 }
+                name: { type: string, description: 新名字。 }
+            example: { id: project-1, name: 内网渗透 }
+      responses:
+        "200":
+          description: "已改名。同时向所有 WebSocket 连接广播新的 `projects` 列表。"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name]
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+              example: { id: project-1, name: 内网渗透 }
+        "400":
+          description: 请求体不合格，或新名字不被接受。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ConsentRequired"
+        "405":
+          description: 只接受 POST。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/projects/egress-ip:
+    get:
+      tags: [项目]
+      summary: 项目最近一次测得的出口 IP
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: "没测过时 `result` 是 `null`；测过时是 `ip`、`location` 和测试时间 `testedAt`（毫秒时间戳）。"
+          content:
+            application/json:
+              schema: { x-schema: Http.EgressIpResult }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [项目]
+      summary: 测试项目的出口 IP
+      description: 用项目自己的出口真实访问一次外部服务。
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: 测试结果，`result` 里有 `ip`、`location` 和 `testedAt`（毫秒时间戳）。
+          content:
+            application/json:
+              schema: { x-schema: Http.EgressIpResult }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          description: 只接受 GET 和 POST。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: "测试失败，`error` 是原因。"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/models/remote:
+    post:
+      tags: [模型]
+      summary: 拉取远端模型列表
+      description: 用尚未保存的端点配置去查询服务商的模型列表。只读，不写任何配置，响应里不带回密钥。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [baseUrl, api, apiKey]
+              properties:
+                baseUrl: { type: string }
+                api:
+                  type: string
+                  description: "接口协议。不在允许列表里时回 `400`。"
+                  enum: [openai-completions, openai-responses, anthropic-messages, google-generative-ai]
+                apiKey:
+                  type: [string, "null"]
+                  description: "为 `null` 时复用 `entryId` 对应的模型已经保存的密钥。"
+                entryId: { type: string, description: "复用密钥的那个模型条目的 ID，和 `apiKey: null` 配合使用。" }
+            example: { baseUrl: "https://api.example.com/v1", api: openai-completions, apiKey: "sk-example", entryId: entry-1 }
+      responses:
+        "200":
+          description: "模型列表。`models` 每项有 `id` 和 `name`；服务商返回的条数超过上限时 `truncated` 为 `true`。"
+          content:
+            application/json:
+              schema: { x-schema: Http.RemoteModelList }
+        "400":
+          description: 请求体不合格、JSON 格式错误，或拉取失败。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "405":
+          description: 只接受 POST。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+
+  /api/code-monitors/project:
+    get:
+      tags: [代码情报]
+      summary: 项目的代码情报总开关
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: 当前状态。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [projectId, enabled]
+                properties:
+                  projectId: { type: string }
+                  enabled: { type: boolean }
+              example: { projectId: project-1, enabled: true }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [代码情报]
+      summary: 设置项目的代码情报总开关
+      description: 只改开关，仓库配置和历史记录不动。
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+            example: { enabled: false }
+      responses:
+        "200":
+          description: 已保存。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [projectId, enabled]
+                properties:
+                  projectId: { type: string }
+                  enabled: { type: boolean }
+              example: { projectId: project-1, enabled: false }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ConsentRequired"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          description: 只接受 GET 和 POST。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/gate-audit/export:
+    get:
+      tags: [守门审计]
+      summary: 导出守门判定记录
+      description: 导出 CSV，表头按当前界面语言给出。
+      parameters:
+        - name: filter
+          in: query
+          schema: { type: string }
+          example: '{"decision":"block"}'
+          description: "值是一个 JSON 对象，发送前 URL 编码。字段和 WebSocket 消息 `gate_audit_query` 的 `filter` 字段相同：`decision`（`allow`、`block`、`failed`）、`projectId`、`sessionId`、`source`、`approval`、`search`、`since`。"
+      responses:
+        "200":
+          description: CSV 文件。
+          content:
+            text/csv: {}
+        "400":
+          description: 筛选条件无效。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "405":
+          description: 只接受 GET。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/assets/import:
+    get:
+      tags: [资产库]
+      summary: 当前项目
+      description: 资产导入对话框用它确认导入到哪个项目。
+      responses:
+        "200":
+          description: 当前项目。前端可以用它拿到当前项目的 `id`。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name]
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+              example: { id: project-1, name: 内网渗透 }
+        "409":
+          description: 还没有选中项目。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      tags: [资产库]
+      summary: 批量导入资产
+      description: "导入后向所有 WebSocket 连接广播 `assets_changed`。"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssetImportRequest" }
+            example:
+              projectId: project-1
+              text: |
+                example.com
+                10.0.0.1
+      responses:
+        "200":
+          description: "导入结果。`created` 是新建的条数，`merged` 是并入已有资产的条数，`duplicates` 是文本里重复的条数，`invalid` 是无法识别的条数。"
+          content:
+            application/json:
+              schema: { x-schema: Http.AssetImportResult }
+        "400":
+          description: 请求体不合格，或导入内容不是有效的资产。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: 当前项目已切换。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/assets/import/preview:
+    post:
+      tags: [资产库]
+      summary: 预览批量导入
+      description: "只解析，不写入。`items` 是每一条会被导入的资产和它的类型、名字、是否已存在；`invalid` 是无法识别的行及原因；另有 `created`、`merged`、`duplicates` 三个计数。"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssetImportRequest" }
+            example:
+              projectId: project-1
+              text: |
+                example.com
+                10.0.0.1
+      responses:
+        "200":
+          description: 预览结果。
+          content:
+            application/json:
+              schema: { x-schema: Http.AssetImportPreview }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/assets/remarks:
+    post:
+      tags: [资产库]
+      summary: 给一批资产写备注
+      description: "`ids` 是 WebSocket 消息 `list_assets` 返回的资产 ID，必须都属于当前项目。改完后向所有 WebSocket 连接广播 `assets_changed`。"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, ids, remark, mode]
+              properties:
+                projectId: { type: string }
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { type: string }
+                remark: { type: string }
+                mode: { type: string, enum: [append, replace], description: "`append` 追加到已有备注之后，`replace` 覆盖。" }
+            example: { projectId: project-1, ids: [asset-1], remark: 已确认, mode: append }
+      responses:
+        "200":
+          description: 改了多少条。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count]
+                properties:
+                  count: { type: integer }
+              example: { count: 1 }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: 还没接受授权承诺。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "405":
+          description: 只接受 POST。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/reports:
+    get:
+      tags: [报告中心]
+      summary: 报告列表
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: source
+          in: query
+          schema: { type: string, enum: [session, goal, engine] }
+          example: session
+          description: 不传表示全部来源。
+        - name: search
+          in: query
+          schema: { type: string }
+          example: 内网
+          description: 按标题模糊匹配，只看前 200 个字符。
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+          example: 1
+      responses:
+        "200":
+          description: "一页报告。`items` 是摘要，每项有 `id`、`title`、`createdAt`、`size`（字节）、`imageCount`、`projectId`、`projectName`、`source`（`session`、`goal` 或 `engine`），以及它属于哪次对话或哪个工程任务的 `sessionId`、`sessionName`、`engineId`、`engineName`、`taskId`、`taskName`、`goalId`，和生成时套用的模板快照 `reportTemplate`（`null` 表示没套模板）。`total`、`page`、`pageSize` 是分页信息。"
+          content:
+            application/json:
+              schema: { x-schema: Http.ReportPage }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: 项目不存在。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/reports/{id}:
+    parameters:
+      - $ref: "#/components/parameters/reportId"
+    get:
+      tags: [报告中心]
+      summary: 报告详情
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: "报告全文：在列表项的字段之外多了 `markdown`（正文）、`revision`（版本号，保存时要带回）、`images`（归档的图片）和 `attachments`（附件）。"
+          content:
+            application/json:
+              schema: { x-schema: Http.ReportDetail }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [报告中心]
+      summary: 保存报告的标题和正文
+      description: 带版本号，防止两个人的修改互相覆盖。
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, markdown, revision]
+              properties:
+                title: { type: string, description: 报告标题。 }
+                markdown: { type: string, description: Markdown 正文。 }
+                revision:
+                  type: string
+                  description: 打开编辑时拿到的版本号。
+            example:
+              title: 内网渗透测试报告
+              markdown: |
+                # 概述
+
+                ## 发现
+
+                ## 结论
+              revision: "1"
+      responses:
+        "200":
+          description: 保存后的报告，`revision` 已经是新版本号。
+          content:
+            application/json:
+              schema: { x-schema: Http.ReportUpdated }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: 报告已被别人修改，或项目已删除。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+    delete:
+      tags: [报告中心]
+      summary: 删除报告
+      description: 请求头 `Content-Type` 必须是 `application/json`（请求体可以是空对象），否则回 `415`。
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+            example: {}
+      responses:
+        "200":
+          description: 是否删掉了。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+              example: { ok: true }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+
+  /api/reports/{id}/download:
+    get:
+      tags: [报告中心]
+      summary: 下载报告
+      parameters:
+        - $ref: "#/components/parameters/reportId"
+        - $ref: "#/components/parameters/projectId"
+        - name: format
+          in: query
+          schema: { type: string, enum: [md] }
+          example: md
+          description: "为 `md` 时下载单个 Markdown 文件；不传时下载 ZIP 包，里面有正文、图片和附件。"
+      responses:
+        "200":
+          description: 文件流。
+          content:
+            application/zip: {}
+            text/markdown: {}
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: 登录、授权或项目已失效。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/reports/{id}/images/{image}:
+    get:
+      tags: [报告中心]
+      summary: 报告里归档的一张图片
+      parameters:
+        - $ref: "#/components/parameters/reportId"
+        - $ref: "#/components/parameters/projectId"
+        - name: image
+          in: path
+          required: true
+          schema: { type: string }
+          example: 6f1c2a3e-8b4d-4c2a-9f1e-2d3c4b5a6978.png
+      responses:
+        "200":
+          description: "图片本身，`Content-Type` 是图片自己的类型。"
+          content:
+            application/octet-stream: {}
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/reports/templates:
+    get:
+      tags: [报告中心]
+      summary: 报告模板列表
+      parameters:
+        - name: projectId
+          in: query
+          schema: { type: string }
+          example: project-1
+          description: 传了就一并返回这个项目的默认模板。
+      responses:
+        "200":
+          description: "模板是全局共享的。`items` 每项有 `id`、`name`、`markdown`、`revision`、`createdAt` 和 `updatedAt`；`defaultTemplateId` 是查询参数里那个项目的默认模板 ID，没传项目或没设置时是 `null`。"
+          content:
+            application/json:
+              schema: { x-schema: Http.ReportTemplateList }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    post:
+      tags: [报告中心]
+      summary: 新建报告模板
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, markdown]
+              properties:
+                name: { type: string, description: 模板名称，1–120 个字符的单行文字。 }
+                markdown: { type: string, description: Markdown 正文，最大 64 KB。 }
+            example:
+              name: 渗透测试报告
+              markdown: |
+                # 概述
+
+                ## 测试范围
+
+                ## 发现
+
+                ## 修复建议
+      responses:
+        "201":
+          description: 新建的模板。
+          content:
+            application/json:
+              schema: { x-schema: Http.ReportTemplate }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+
+  /api/reports/templates/default:
+    put:
+      tags: [报告中心]
+      summary: 设置项目的默认报告模板
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [templateId]
+              properties:
+                templateId:
+                  type: [string, "null"]
+                  description: "为 `null` 表示取消默认模板。"
+            example: { templateId: tpl-1 }
+      responses:
+        "200":
+          description: 已设置。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [defaultTemplateId]
+                properties:
+                  defaultTemplateId: { type: [string, "null"] }
+              example: { defaultTemplateId: tpl-1 }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/reports/templates/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+        example: tpl-1
+        description: "模板 ID。`default` 是保留字，见上一条路径。"
+    get:
+      tags: [报告中心]
+      summary: 报告模板详情
+      responses:
+        "200":
+          description: 模板，有 `id`、`name`、`markdown`、`revision`、`createdAt` 和 `updatedAt`。
+          content:
+            application/json:
+              schema: { x-schema: Http.ReportTemplate }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [报告中心]
+      summary: 修改报告模板
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, markdown, revision]
+              properties:
+                name: { type: string }
+                markdown: { type: string }
+                revision: { type: string, description: 打开模板时拿到的版本号。 }
+            example:
+              name: 渗透测试报告
+              markdown: |
+                # 概述
+
+                ## 测试范围
+
+                ## 发现
+
+                ## 修复建议
+
+                ## 复测结果
+              revision: "1"
+      responses:
+        "200":
+          description: 保存后的模板，`revision` 已经是新版本号。
+          content:
+            application/json:
+              schema: { x-schema: Http.ReportTemplate }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+    delete:
+      tags: [报告中心]
+      summary: 删除报告模板
+      description: 请求头 `Content-Type` 必须是 `application/json`（请求体可以是空对象），否则回 `415`。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+            example: {}
+      responses:
+        "200":
+          description: 是否删掉了。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+              example: { ok: true }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+
+  /api/work-processes:
+    get:
+      tags: [工作链路]
+      summary: 工作链路列表
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - $ref: "#/components/parameters/kind"
+      responses:
+        "200":
+          description: "指定项目里某一类的工作链路。`items` 每项有 `id`、`kind`、`title`、`intent`（这次对话或工程要做什么）、`state`（`off`、`watching`、`paused`、`analyzing`、`retrying`、`error`）、`enabled`、`active`、`nodeCount`、`pending`、`projectId`、`projectName` 和 `updatedAt`（毫秒时间戳）。"
+          content:
+            application/json:
+              schema: { x-schema: Http.WorkProcessList }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/work-processes/detail:
+    get:
+      tags: [工作链路]
+      summary: 工作链路详情
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/workId"
+      responses:
+        "200":
+          description: 一条工作链路，`process` 是它的完整记录：节点、连线和当前状态。
+          content:
+            application/json:
+              schema: { x-schema: Http.WorkProcessDetail }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/work-processes/revisions:
+    get:
+      tags: [工作链路]
+      summary: 工作链路里一个节点的修订记录
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/workId"
+        - name: nodeId
+          in: query
+          required: true
+          schema: { type: string }
+          example: node-1
+      responses:
+        "200":
+          description: "修订列表，按时间从新到旧。每项是一次修订时的整张图：`revision`（序号）、`at`（毫秒时间戳）、`nodes` 和 `edges`。"
+          content:
+            application/json:
+              schema: { x-schema: Http.WorkProcessRevisions }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/work-processes/evidence:
+    get:
+      tags: [工作链路]
+      summary: 工作链路里一条证据的原文
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/workId"
+        - name: evidenceId
+          in: query
+          schema: { type: string }
+          example: evidence-1
+      responses:
+        "200":
+          description: "证据原文：`text` 是内容，`truncated` 为 `true` 表示内容太长被截断。"
+          content:
+            application/json:
+              schema: { x-schema: Http.WorkProcessEvidence }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/work-processes/control:
+    post:
+      tags: [工作链路]
+      summary: 控制，或重新分析一条工作链路
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/workId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [enable, pause, analyze, retry] }
+            example: { action: pause }
+      responses:
+        "200":
+          description: 操作后的工作链路。
+          content:
+            application/json:
+              schema: { x-schema: Http.WorkProcessDetail }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+
+  /api/mitm:
+    get:
+      tags: [MITM 与 WebFuzz]
+      summary: MITM 代理的状态
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: "状态。`state` 是 `unavailable`、`running`、`missing` 或 `stopped`；`project` 是 `{ id, name }`；`config` 是当前配置（`bind`、`port`、`skipStatic`、`maxCaptureMb`、`maxConnections`、`authEnabled`、`authUsername`、`hasPassword`，密码本身不返回）；`port` 是代理实际监听的端口，没在运行时是 `null`；`lanIps` 是可以填进代理设置的局域网地址；`ca` 是 HTTPS 解密证书的 `fingerprint`、`subject` 和 `expires`，没有时是 `null`；`error` 在启动失败时给出原因。"
+          content:
+            application/json:
+              schema: { x-schema: Http.MitmStatus }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/mitm/config:
+    post:
+      tags: [MITM 与 WebFuzz]
+      summary: 保存 MITM 代理配置
+      description: |-
+        配置字段和 `projectId` 平铺在请求体的同一层，都可以省略，省略的沿用当前值：`bind`（`127.0.0.1` 或 `0.0.0.0`）、`port`（0–65535，`0` 表示自动分配）、
+        `skipStatic`（是否不保存静态资源的报文）、`maxCaptureMb`（单个请求或响应保存的上限，1–32 MB）、`maxConnections`（同时连接的上限，1–1024）、
+        `authEnabled` 和 `authUsername`（代理的访问控制，启用时账号必填），以及 `password`（只在设置或修改代理密码时发送，8–128 位可见 ASCII 字符）。
+
+        代理在运行时保存会重启代理。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { x-schema: Http.MitmConfigInput }
+            example:
+              projectId: project-1
+              bind: 127.0.0.1
+              port: 8080
+              skipStatic: true
+              maxCaptureMb: 16
+              maxConnections: 64
+              authEnabled: false
+              password: proxy-secret
+      responses:
+        "200":
+          description: 保存后的状态。
+          content:
+            application/json:
+              schema: { x-schema: Http.MitmStatus }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/start:
+    post:
+      tags: [MITM 与 WebFuzz]
+      summary: 启动 MITM 代理
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MitmProject" }
+            example: { projectId: project-1 }
+      responses:
+        "200":
+          description: 启动后的状态。
+          content:
+            application/json:
+              schema: { x-schema: Http.MitmStatus }
+        "400":
+          $ref: "#/components/responses/MitmInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/MitmNoRoute"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/stop:
+    post:
+      tags: [MITM 与 WebFuzz]
+      summary: 停止 MITM 代理
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MitmProject" }
+            example: { projectId: project-1 }
+      responses:
+        "200":
+          description: 停止后的状态。
+          content:
+            application/json:
+              schema: { x-schema: Http.MitmStatus }
+        "400":
+          $ref: "#/components/responses/MitmInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/MitmNoRoute"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/clear:
+    post:
+      tags: [MITM 与 WebFuzz]
+      summary: 清空流量记录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, confirm]
+              properties:
+                confirm:
+                  type: boolean
+                  description: "必须是 `true`。"
+            example: { projectId: project-1, confirm: true }
+      responses:
+        "200":
+          description: 已清空。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+              example: { ok: true }
+        "400":
+          $ref: "#/components/responses/MitmInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/storage:
+    get:
+      tags: [MITM 与 WebFuzz]
+      summary: 流量记录占用的存储
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: "占用情况：`usedBytes`、`freeBytes`、`capacityBytes`（字节数）、`lowSpace`（空间是否紧张）和 `updatedAt`（毫秒时间戳）。"
+          content:
+            application/json:
+              schema: { x-schema: Http.MitmStorage }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/flows:
+    get:
+      tags: [MITM 与 WebFuzz]
+      summary: 流量记录列表
+      description: "筛选参数都是可选的，组合使用时取交集。`nextCursor` 不为 `null` 时把它原样作为 `cursor` 传回来取下一页；同一组筛选条件下翻页，响应里的 `total` 取自缓存，新抓到的记录可能还没算进去，`totalCached` 说明是不是缓存值，`totalUpdatedAt` 是缓存的更新时间（毫秒时间戳）；带 `refreshCount=1` 会重新统计。"
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000000, default: 1 }
+          example: 1
+          description: 页码，从 1 开始。和 `cursor` 同时给时只用 `cursor`。
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 50 }
+          example: 50
+          description: 每页条数，最大 50。
+        - name: q
+          in: query
+          schema: { type: string }
+          example: login
+          description: 在主机、路径和查询串里做不区分大小写的子串匹配。
+        - name: host
+          in: query
+          schema: { type: string }
+          example: example.com
+          description: 主机名的子串。
+        - name: path
+          in: query
+          schema: { type: string }
+          example: /api/login
+          description: 路径的子串。
+        - name: since
+          in: query
+          schema: { type: integer, minimum: 0 }
+          example: 1763942400000
+          description: 只要这个时间（毫秒时间戳）之后的记录。
+        - name: until
+          in: query
+          schema: { type: integer, minimum: 0 }
+          example: 1764028800000
+          description: 只要这个时间（毫秒时间戳）之前的记录。
+        - name: method
+          in: query
+          schema: { type: string }
+          example: POST
+          description: 请求方法，不区分大小写。
+        - name: status
+          in: query
+          schema: { type: string, enum: ["1xx", "2xx", "3xx", "4xx", "5xx", error] }
+          example: "2xx"
+          description: 按状态码筛选：三位状态码（如 `200`）、一位加 `xx`（如 `2xx`），或 `error` 表示出错的请求。
+        - name: refreshCount
+          in: query
+          schema: { type: string, enum: ["1"] }
+          example: "1"
+          description: "为 `1` 时不用缓存的记录总数，重新统计。"
+        - name: cursor
+          in: query
+          schema: { type: string }
+          example: MTc2Mzk0MjQwMDAwMF9mMWEyYjNjNA
+          description: 上一页响应里的 `nextCursor`，原样带回。
+      responses:
+        "200":
+          description: "一页流量记录。`items` 每项有 `id`、`ts`（毫秒时间戳）、`method`、`scheme`、`host`、`port`、`path`、`query`、`status`（没拿到响应时是 `null`）、`durationMs`、`reqSize`、`respSize`、`error`（`null` 表示没有）和 `note`；`total`、`page`、`pageSize` 是分页信息，`nextCursor` 是取下一页用的游标，没有下一页时是 `null`。"
+          content:
+            application/json:
+              schema: { x-schema: Http.MitmFlows }
+        "400":
+          $ref: "#/components/responses/MitmInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/flows/{flowId}:
+    get:
+      tags: [MITM 与 WebFuzz]
+      summary: 一条流量记录
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - $ref: "#/components/parameters/flowId"
+      responses:
+        "200":
+          description: "一条流量记录。在列表项的字段之外有 `reqHeaders`、`respHeaders`（`name` 和 `value` 的数组）和 `request`、`response` 两个正文对象（抓到的文本、编码、是否截断等）。"
+          content:
+            application/json:
+              schema: { x-schema: Http.MitmFlow }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/MitmNoRoute"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/flows/{flowId}/{part}:
+    get:
+      tags: [MITM 与 WebFuzz]
+      summary: 一条流量记录的原始报文
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - $ref: "#/components/parameters/flowId"
+        - name: part
+          in: path
+          required: true
+          schema: { type: string, enum: [request, response] }
+          example: request
+      responses:
+        "200":
+          description: 原始报文，文件流。
+          content:
+            application/octet-stream: {}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/MitmNoRoute"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/flows/delete:
+    post:
+      tags: [MITM 与 WebFuzz]
+      summary: 删除选中的流量记录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, confirm, ids]
+              properties:
+                confirm:
+                  type: boolean
+                  description: "必须是 `true`。"
+                ids:
+                  type: array
+                  items: { type: string }
+                  description: 要删除的流量记录的 ID。
+            example: { projectId: project-1, confirm: true, ids: [f1a2b3c4] }
+      responses:
+        "200":
+          description: 删了多少条。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, deleted]
+                properties:
+                  ok: { type: boolean }
+                  deleted: { type: integer }
+              example: { ok: true, deleted: 1 }
+        "400":
+          $ref: "#/components/responses/MitmInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/ca.pem:
+    get:
+      tags: [MITM 与 WebFuzz]
+      summary: 下载 HTTPS 解密证书
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: "PEM 格式的证书，文件下载。代理启动过一次之后才有证书，之前回 `404`。"
+          content:
+            application/octet-stream: {}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/MitmNoRoute"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/ca.crt:
+    get:
+      tags: [MITM 与 WebFuzz]
+      summary: 下载 HTTPS 解密证书（DER 格式）
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: "DER 格式的证书，文件下载。代理启动过一次之后才有证书，之前回 `404`。"
+          content:
+            application/octet-stream: {}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/MitmNoRoute"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/webfuzz:
+    get:
+      tags: [MITM 与 WebFuzz]
+      summary: WebFuzz 工作台的状态
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: "工作台状态。`tabs` 是各个标签的请求草稿（`id`、`name` 和 `Http.WebFuzzSendInput` 里 `request` 的各字段），`activeId` 是当前标签的 ID，没有标签时是 `null`；`history` 是最近 30 次发送的结果，字段同 `/api/mitm/webfuzz/send` 的响应。"
+          content:
+            application/json:
+              schema: { x-schema: Http.WebFuzzState }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/webfuzz/workspace:
+    post:
+      tags: [MITM 与 WebFuzz]
+      summary: 保存 WebFuzz 工作台
+      description: "保存全部标签的草稿，整个工作台一起覆盖。最多 20 个标签，`activeId` 必须是其中一个标签的 ID 或 `null`。请求体上限 16 MB。"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { x-schema: Http.WebFuzzWorkspaceInput }
+            example:
+              projectId: project-1
+              activeId: tab-1
+              tabs:
+                - id: tab-1
+                  name: 未命名请求
+                  raw: |-
+                    GET / HTTP/1.1
+                    Host: example.com
+                  target: http://example.com:80
+                  route: project
+                  timeoutMs: 30000
+                  insecureTLS: false
+                  fixContentLength: true
+      responses:
+        "200":
+          description: 已保存。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+              example: { ok: true }
+        "400":
+          $ref: "#/components/responses/MitmInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/webfuzz/import:
+    post:
+      tags: [MITM 与 WebFuzz]
+      summary: 把一条流量记录带进 WebFuzz
+      description: 按流量记录的请求生成一个草稿，前端拿它新建一个标签。请求或响应是二进制、或抓取时被截断的记录带不进来。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, flowId]
+              properties:
+                projectId: { type: string }
+                flowId: { type: string, description: 要带进来的流量记录的 ID。 }
+            example: { projectId: project-1, flowId: f1a2b3c4 }
+      responses:
+        "200":
+          description: 生成的请求草稿，字段和 `/api/mitm/webfuzz/send` 请求体里的 `request` 相同：`raw`、`target`、`route`、`timeoutMs`、`insecureTLS`、`fixContentLength`。
+          content:
+            application/json:
+              schema: { x-schema: Http.WebFuzzRequest }
+        "400":
+          $ref: "#/components/responses/MitmInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/MitmNoRoute"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/mitm/webfuzz/send:
+    post:
+      tags: [MITM 与 WebFuzz]
+      summary: 发送一个原始 HTTP 请求
+      description: "真的会访问目标。`request` 是一个对象：`raw` 是原始 HTTP 请求报文，`target` 是目标地址（只有协议、主机和端口，路径写在请求行里），`route` 是出口（`project` 走项目容器，`direct` 直连，`mitm` 经过本项目的 MITM 代理），`timeoutMs` 是超时（1000–120000 毫秒），`insecureTLS` 是否跳过证书校验，`fixContentLength` 是否按正文重算 `Content-Length`。`password` 是走 `mitm` 出口时代理的访问密码。一个项目最多同时发 4 个请求。请求体上限 4 MB。"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { x-schema: Http.WebFuzzSendInput }
+            example:
+              projectId: project-1
+              request:
+                raw: |-
+                  GET / HTTP/1.1
+                  Host: example.com
+                  Accept: */*
+                  Connection: close
+                target: http://example.com:80
+                route: project
+                timeoutMs: 30000
+                insecureTLS: false
+                fixContentLength: true
+      responses:
+        "200":
+          description: "发送结果。`request` 是实际发出的请求；`response` 是响应（`proto`、`status`、`reason`、`headers`、`bodyText`、`rawText`、`truncated`、`size` 等），没有拿到响应时是 `null`；`timings` 是连接、TLS、首字节和总耗时（毫秒）；`warnings` 是警告；`error` 在失败时给出原因；`id` 和 `at`（毫秒时间戳）标识这一次发送。"
+          content:
+            application/json:
+              schema: { x-schema: Http.WebFuzzReplayResult }
+        "400":
+          $ref: "#/components/responses/MitmInvalid"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/MitmNoRoute"
+        "409":
+          $ref: "#/components/responses/MitmProjectChanged"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          description: 当前项目同时发送的请求太多，最多 4 个。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          $ref: "#/components/responses/MitmFailed"
+        "503":
+          $ref: "#/components/responses/MitmUnavailable"
+  /api/intelligence/sources:
+    get:
+      tags: [威胁情报]
+      summary: 情报数据源列表
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: "数据源的数组，每项有 `id`、`projectId`、`name`、`enabled`、`createdAt`（毫秒时间戳）和最近一次收到推送的时间 `lastReceivedAt`（没有时是 `null`）。推送令牌不返回。"
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligenceSources }
+    post:
+      tags: [威胁情报]
+      summary: 新建数据源
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 120, description: 数据源的名字。 }
+            example: { name: 内部告警源 }
+      responses:
+        "200":
+          description: "`source` 是新建的数据源；`token` 是它的推送令牌，以 `intel_` 开头，只在这一次返回，数据源用它调用 `POST /api/intelligence/v1/ingest`。"
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligenceSourceCreate }
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+
+  /api/intelligence/sources/{id}:
+    post:
+      tags: [威胁情报]
+      summary: 启停数据源，或轮换它的令牌
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          example: 3d5c1a2e-9b4d-4c2a-9f1e-2d3c4b5a6978
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, rotate]
+              properties:
+                enabled: { type: boolean, description: 数据源启用还是停用。 }
+                rotate: { type: boolean, description: "为 `true` 时换一个新的推送令牌，旧令牌立即失效。" }
+            example: { enabled: true, rotate: true }
+      responses:
+        "200":
+          description: "`rotate` 为 `true` 时返回新的推送令牌，形如 `{ \"token\": \"intel_…\" }`；否则返回空对象 `{}`。"
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligenceSourceUpdate }
+
+  /api/intelligence/policy:
+    get:
+      tags: [威胁情报]
+      summary: 项目的情报策略
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: "策略。`enabled` 为 `false` 时不做分析；`threshold`、`batchSize`、`concurrency`、`cooldownMinutes` 的含义见保存接口；`template` 是分析用的指挥思路（`id`、`name`、`prompt`）和它的限制 `limits`。"
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligencePolicy }
+    post:
+      tags: [威胁情报]
+      summary: 保存项目的情报策略
+      description: |-
+        `enabled` 关闭时不做分析。`threshold` 是攒够多少条告警才开一个批次（1–200），`batchSize` 是一个批次
+        最多覆盖多少个 IP（不小于 `threshold`，最大 200），`concurrency` 是同时分析的批次数（1–8），
+        `cooldownMinutes` 是同一个 IP 两次分析之间至少间隔的分钟数。
+
+        `template.id` 是分析用的指挥思路的 ID，从 `/api/intelligence/doctrines` 里选，它的名称和提示词由服务端填好、
+        不用传。`template.limits` 是每个分析工程的限制：`concurrency`（1–8）、`roundLimit`（1–99）、`tokenLimit` 和
+        `timeLimitMin`（`null` 表示不限，否则分别是 1–10000000 和 1–1440）。
+
+        保存后立刻尝试开始一轮分析。
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { x-schema: Http.IntelligencePolicyInput }
+            example:
+              enabled: false
+              threshold: 20
+              batchSize: 50
+              concurrency: 1
+              cooldownMinutes: 1440
+              template:
+                id: threat-ip-analysis
+                limits: { concurrency: 1, roundLimit: 5, tokenLimit: null, timeLimitMin: 30 }
+      responses:
+        "200":
+          description: 保存后的策略。
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligencePolicy }
+
+  /api/intelligence/doctrines:
+    get:
+      tags: [威胁情报]
+      summary: 内置的判定思路
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: "指挥思路的数组，每项有 `id`、`name`、`text`（提示词全文）和 `builtin`（是否内置）。保存策略时 `template.id` 从这里选。"
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligenceDoctrines }
+
+  /api/intelligence/guide:
+    get:
+      tags: [威胁情报]
+      summary: 给情报分析 Agent 的接口说明
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: 说明文本。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [text]
+                properties:
+                  text: { type: string }
+              example:
+                text: "你是情报分析工程，输入是设备上报的告警……"
+
+  /api/intelligence/ips:
+    get:
+      tags: [威胁情报]
+      summary: 情报指标（IP）列表
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 80 }
+          example: 203.0.113
+          description: 按 IP 的子串匹配。
+        - $ref: "#/components/parameters/page"
+      responses:
+        "200":
+          description: "一页指标，每页 50 条。`items` 每个 IP 一项：`ip`、`status`（`pending`、`attention`、`processing`、`cooling`、`processed`）、`count`（告警条数）、`pending`（还没分析的条数）、`firstSeen` 和 `lastSeen`（毫秒时间戳）、`cooldownUntil`、`sources`（上报过它的数据源）和 `batchId`（处理它的批次，没有时是 `null`）；另有 `total`、`page`、`pageSize`。"
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligenceIndicators }
+
+  /api/intelligence/alerts:
+    get:
+      tags: [威胁情报]
+      summary: 告警列表
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: ip
+          in: query
+          required: true
+          schema: { type: string }
+          example: 203.0.113.7
+          description: 只看这个 IP 的告警。必须带，不带会回 `400`。
+        - $ref: "#/components/parameters/page"
+      responses:
+        "200":
+          description: "一页告警，每页 50 条。`items` 每项有 `event_id`、`indicator`（`{ type: \"ip\", value }`）、`occurred_at`（数据源报告的时间，ISO 8601）、`receivedAt`（服务端收到的时间，毫秒时间戳）、`category`、`severity`（`info`、`low`、`medium`、`high`、`critical`）、`seq`，以及来源 `sourceId` 和 `sourceName`；另有 `total`、`page`、`pageSize`。"
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligenceAlerts }
+
+  /api/intelligence/batches:
+    get:
+      tags: [威胁情报]
+      summary: 分析批次列表
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - $ref: "#/components/parameters/page"
+      responses:
+        "200":
+          description: "一页批次，每页 20 条。`items` 每项是一个批次的概要（`id`、`status`、`createdAt`、`policy`、`template`、`attempts`）加上它覆盖的 IP 数 `ipCount`；另有 `total`、`page`、`pageSize`。"
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligenceBatches }
+
+  /api/intelligence/batches/{id}:
+    get:
+      tags: [威胁情报]
+      summary: 一个分析批次的详情
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          example: batch-1
+      responses:
+        "200":
+          description: "批次的详情：`id`、`projectId`、`status`（`queued`、`creating`、`running`、`paused`、`succeeded`、`failed`、`aborted`、`discarded`）、`createdAt`（毫秒时间戳）、`policy`、`template`、`items`（每个 IP 的告警，含 `alerts`）和 `attempts`（每次尝试的状态、对应的工程 `engineId` 和失败原因 `error`）。"
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligenceBatch }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/intelligence/batches/{id}/{action}:
+    post:
+      tags: [威胁情报]
+      summary: 对一个分析批次执行操作
+      description: |-
+        `action` 是路径的最后一段：
+
+        | `action` | 作用 | 什么时候可用 |
+        | --- | --- | --- |
+        | `retry` | 重新排队分析 | 已结束的批次 |
+        | `discard` | 丢弃这个批次 | 已结束的批次 |
+        | `abort` | 终止正在跑的工程 | 进行中的批次 |
+        | `pause` | 暂停工程 | 进行中，且已有工程 |
+        | `resume` | 恢复工程 | 进行中，且已有工程 |
+
+        请求体必须是一个 JSON 对象，内容不读，发 `{}` 即可。
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          example: batch-1
+        - name: action
+          in: path
+          required: true
+          schema: { type: string, enum: [retry, discard, abort, pause, resume] }
+          example: pause
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+            example: {}
+      responses:
+        "200":
+          description: 已执行。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+              example: { ok: true }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "批次还在进行中，不能 `retry` 或 `discard`；批次已结束，不能 `abort`、`pause`、`resume`；或者没有可以暂停、恢复的工程。"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/intelligence/clear:
+    post:
+      tags: [威胁情报]
+      summary: 清空当前项目的情报
+      description: 删除这个项目收到的全部告警、指标和批次。数据源和策略保留。
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmProjectId]
+              properties:
+                confirmProjectId:
+                  type: string
+                  description: "必须等于查询参数里的 `projectId`，防止清空别的项目。"
+            example: { confirmProjectId: project-1 }
+      responses:
+        "200":
+          description: 已清空。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+              example: { ok: true }
+
+  /api/intelligence/cleanup:
+    post:
+      tags: [威胁情报]
+      summary: 清理过期的情报
+      description: 删除符合条件的告警和指标。三个条件都可以省略，都省略时清理全部。
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IntelligenceCleanup" }
+            example: { before: 1761964800000 }
+      responses:
+        "200":
+          description: "清理结果：`events` 是删掉的告警条数，`blockedBatches` 是因为有进行中的批次而没动的 IP 数。"
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligenceCleanupResult }
+
+  /api/intelligence/cleanup/preview:
+    post:
+      tags: [威胁情报]
+      summary: 预览会清理掉哪些情报
+      description: 只统计，不删除。请求体和响应与 `POST /api/intelligence/cleanup` 相同。
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IntelligenceCleanup" }
+            example: { before: 1761964800000 }
+      responses:
+        "200":
+          description: 预览结果。
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligenceCleanupResult }
+
+  /api/security-checks:
+    get:
+      tags: [安全检查]
+      summary: 安全检查的规则摘要和数据源
+      responses:
+        "200":
+          description: "`rules` 是规则的摘要数组（`id`、`ruleId`、`sourceId`、`name`、`category`、`description`、`version`、`path`、`commit`、`copiedFrom`），不含正文 `text`，正文用 `GET /api/security-checks/rule` 取；`sources` 是规则数据源的数组（`id`、`name`、`repository`、`branch`、`directory`、`enabled`、`intervalHours`、`syncing`、`lastCheckedAt`、`lastSuccessAt`、`nextSyncAt`、`commit`、`error`、`failures`）。"
+          content:
+            application/json:
+              schema: { x-schema: Http.SecurityCheckRules }
+        "403":
+          description: "未授权，或请求的 `Origin` 和主机不一致。"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/security-checks/rule:
+    get:
+      tags: [安全检查]
+      summary: 一条规则的全文
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: string }
+          example: "local:example-rule"
+          description: 规则的 ID。自己写的规则是 `local:<规则 ID>`，同步来的规则是 `<数据源 ID>:<规则 ID>`。
+      responses:
+        "200":
+          description: "规则，在摘要的字段之外多了正文 `text`。"
+          content:
+            application/json:
+              schema: { x-schema: Http.SecurityCheckRule }
+
+  /api/security-checks/history:
+    get:
+      tags: [安全检查]
+      summary: 同步历史
+      parameters:
+        - name: sourceId
+          in: query
+          schema: { type: string }
+          example: 3d5c1a2e-9b4d-4c2a-9f1e-2d3c4b5a6978
+          description: 数据源的 ID。不传时返回空列表。
+      responses:
+        "200":
+          description: "同步历史，最多 20 条，从新到旧。每项有 `ok`（是否成功）、`count`（这次同步拉到或更新的规则数）、`message`（说明）和 `at`（毫秒时间戳）。"
+          content:
+            application/json:
+              schema: { x-schema: Http.SecurityCheckHistoryList }
+
+  /api/security-checks/rules/save:
+    post:
+      tags: [安全检查]
+      summary: 新建或修改一条规则
+      description: |-
+        `markdown` 是规则全文：开头是 YAML 文件头（`---` 之间），后面是正文。文件头四个字段：
+
+        | 字段 | 必填 | 说明 |
+        | --- | --- | --- |
+        | `id` | 是 | 规则 ID，字母、数字、点、下划线、短横线，以字母或数字开头，最长 128 |
+        | `name` | 是 | 规则名称，最长 128 |
+        | `category` | 是 | 分类，逗号分隔，最多 16 个，每个是用 `/` 分层的路径 |
+        | `description` | 否 | 简介，最长 1024 |
+
+        保存后的规则 ID 是 `local:<id>`。不带 `id` 和 `version` 是新建，文件头的 `id` 已存在会回 `400`；
+        带上要修改的规则的 `id` 和它的 `version` 是修改，文件头里的 `id` 不能变。从同步规则复制出来时带 `copiedFrom`。
+        规则全文最大 128 KB，请求体上限 2 MB。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [markdown]
+              properties:
+                markdown: { type: string, maxLength: 163840, description: 规则全文，带 YAML 文件头的 Markdown。 }
+                id: { type: string, description: 修改时，要修改的规则的 ID。 }
+                version: { type: string, description: 修改时，打开规则时拿到的版本号。 }
+                copiedFrom: { type: string, description: 从哪条同步规则复制来的。 }
+            example:
+              markdown: |-
+                ---
+                id: example-rule
+                name: 示例检查规则
+                category: Web/配置
+                description: 检查示例配置是否安全。
+                ---
+
+                # 示例检查规则
+
+                检查目标的示例配置项，记录发现的问题。
+      responses:
+        "200":
+          description: 保存后的规则，`version` 是内容哈希，修改或删除时要带回。
+          content:
+            application/json:
+              schema: { x-schema: Http.SecurityCheckRule }
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+
+  /api/security-checks/rules/delete:
+    post:
+      tags: [安全检查]
+      summary: 删除一条规则
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, version]
+              properties:
+                id: { type: string, description: 规则的 ID，形如 `local:example-rule`。 }
+                version: { type: string, description: 打开规则时拿到的版本号。规则在那之后变过就不删。 }
+            example: { id: "local:example-rule", version: "<规则的 version>" }
+      responses:
+        "200":
+          description: 已删除。同步来的规则不能在这里删，回 `400`。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+              example: { ok: true }
+
+  /api/security-checks/sources/save:
+    post:
+      tags: [安全检查]
+      summary: 保存一个规则数据源
+      description: 不带 `id` 是新建，带上是修改。`repository` 只接受 `https://github.com/所有者/仓库`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { x-schema: Http.SecurityCheckSourceInput }
+            example:
+              name: 官方规则库
+              repository: https://github.com/owner/security-rules
+              branch: main
+              directory: rules
+              enabled: true
+              intervalHours: 24
+      responses:
+        "200":
+          description: 保存后的数据源。
+          content:
+            application/json:
+              schema: { x-schema: Http.SecurityCheckSource }
+
+  /api/security-checks/sources/delete:
+    post:
+      tags: [安全检查]
+      summary: 删除一个规则数据源
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string, description: 数据源的 ID。 }
+            example: { id: 3d5c1a2e-9b4d-4c2a-9f1e-2d3c4b5a6978 }
+      responses:
+        "200":
+          description: 已删除，连同从它同步来的规则。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+              example: { ok: true }
+
+  /api/security-checks/sync:
+    post:
+      tags: [安全检查]
+      summary: 同步规则数据源
+      description: "不带 `id` 时同步全部启用的、当前没有在同步的数据源。"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: { type: string, description: 只同步这一个数据源。 }
+            example: {}
+      responses:
+        "200":
+          description: 每个数据源的成功或失败。`items` 每项有 `id` 和 `ok`，失败时有 `error`。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, ok]
+                      properties:
+                        id: { type: string }
+                        ok: { type: boolean }
+                        error: { type: string }
+              example:
+                items:
+                  - { id: 3d5c1a2e-9b4d-4c2a-9f1e-2d3c4b5a6978, ok: true }
+
+  /api/security-checks/submit:
+    post:
+      tags: [安全检查]
+      summary: 提交一次安全检查
+      description: |-
+        提交后新建一个安全检查工程并立即开始，进度和结果通过 WebSocket 的 `engines`、`engine_*` 等消息跟进。
+
+        - `projectId`：在哪个项目里检查。
+        - `requestId`：调用方生成的唯一 ID。同一个 `requestId` 重复提交返回同一个工程，不会重复执行；
+          内容和第一次不同则回 `400`。
+        - `rules`：选中的规则，每项带 `id` 和 `version`。规则在选中之后变过会回 `400`。
+        - `input`：工程的设置，`name`（工程名称）和 `limits`（`concurrency`、`roundLimit`、`maxRetries`、
+          `tokenLimit`、`timeLimitMin`）必填；可选 `targets`（每行一个目标）、`presetIds`、`presetOptional`、
+          `gateMode`（`auto` 或 `ai`）、`recordWorkLinks`、`reportTemplateId` 和 `schedule`（定时计划）。
+        - `credentials`：选中的凭据，每项带 `id` 和 `revision`，只作为本轮的检查目标。
+        - `requirements`：本轮的补充要求。
+
+        `targets`、`credentials`、`requirements` 至少要有一样。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { x-schema: Http.SecurityCheckSubmitInput }
+            example:
+              projectId: project-1
+              requestId: submit-1
+              rules:
+                - { id: "local:example-rule", version: "<规则的 version>" }
+              input:
+                name: 示例安全检查
+                targets: 10.0.0.0/24
+                presetOptional: true
+                gateMode: auto
+                limits: { concurrency: 1, roundLimit: 5, maxRetries: 0, tokenLimit: null, timeLimitMin: 60 }
+              requirements: 重点检查暴露的管理入口
+      responses:
+        "200":
+          description: "`engineId` 是新建的工程 ID。"
+          content:
+            application/json:
+              schema: { x-schema: Http.SecurityCheckSubmitResult }
+
+  /api/credentials:
+    get:
+      tags: [凭据]
+      summary: 项目的凭据列表
+      description: "只返回凭据的视图，不返回密码本身。请求的 `Origin` 必须和主机一致。"
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: "`items` 是凭据的视图数组。每项有 `id`、`projectId`、`revision`、`status`、`validations`、`updatedAt`，凭据本身的字段（`name`、`group`、`type`、`host`、`port`、`username`、`database`、`instance`、`domain`、`manufacturer`、`model`、`notes`、`fields`），以及 `hasPassword`、`hasPrivateKey`、`hasPassphrase`、`hasToken` 四个是否设置的标记。密码、私钥、口令和令牌本身不返回。"
+          content:
+            application/json:
+              schema: { x-schema: Http.CredentialList }
+        "403":
+          description: 项目不存在或未授权。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/credentials/save:
+    post:
+      tags: [凭据]
+      summary: 新建或修改一条凭据
+      description: 所有写操作的请求体上限 3 MB。
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [input]
+              properties:
+                input:
+                  type: object
+                  additionalProperties: true
+                  description: "凭据的内容，见 `Http.CredentialInput`：`type` 和 `host` 必填，其余可省略。"
+                id: { type: string, description: 修改时，要修改的凭据的 ID。不带是新建。 }
+                revision: { type: string, description: 修改时，凭据当前的版本号。凭据在那之后变过会回 `400`。 }
+            example:
+              input:
+                name: 测试数据库
+                group: 数据库
+                type: MySQL
+                host: 10.0.0.12
+                port: 3306
+                username: root
+                password: example-password
+      responses:
+        "200":
+          description: 保存后的凭据列表。
+          content:
+            application/json:
+              schema: { x-schema: Http.CredentialList }
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+
+  /api/credentials/import/preview:
+    post:
+      tags: [凭据]
+      summary: 预览批量导入
+      description: "返回的 `version` 要在正式导入时原样带回。"
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [format, content]
+              properties:
+                format: { type: string, enum: [json, csv], description: 导入文件的格式。 }
+                content: { type: string, description: "文件的内容。JSON 是凭据对象的数组；CSV 第一行是字段名。" }
+            example:
+              format: json
+              content: '[{ "type": "MySQL", "host": "10.0.0.12", "port": 3306, "username": "root", "password": "example-password" }]'
+      responses:
+        "200":
+          description: "`items` 每项是一条凭据的视图（字段同凭据列表）加上 `operation`（`新增` 或 `更新`）；`version` 是当前凭据列表的版本号，正式导入时要原样带回。"
+          content:
+            application/json:
+              schema: { x-schema: Http.CredentialImportPreview }
+
+  /api/credentials/import/apply:
+    post:
+      tags: [凭据]
+      summary: 正式批量导入
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [format, content, version]
+              properties:
+                format: { type: string, enum: [json, csv] }
+                content: { type: string }
+                version:
+                  type: string
+                  description: "预览时拿到的版本号。凭据在预览之后变过就回 `400`。"
+            example:
+              format: json
+              content: '[{ "type": "MySQL", "host": "10.0.0.12", "port": 3306, "username": "root", "password": "example-password" }]'
+              version: "<预览返回的 version>"
+      responses:
+        "200":
+          description: 导入后的凭据列表。
+          content:
+            application/json:
+              schema: { x-schema: Http.CredentialList }
+
+  /api/credentials/confirm:
+    post:
+      tags: [凭据]
+      summary: 确认凭据可用
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refs]
+              properties:
+                refs:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: { type: object, additionalProperties: true }
+                  description: "要确认的凭据，每项带 `id` 和 `revision`，1–1000 条，不能重复。"
+            example:
+              refs:
+                - { id: "<凭据的 id>", revision: "<凭据的 revision>" }
+      responses:
+        "200":
+          description: 更新后的凭据列表。
+          content:
+            application/json:
+              schema: { x-schema: Http.CredentialList }
+
+  /api/credentials/delete:
+    post:
+      tags: [凭据]
+      summary: 删除凭据
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: { type: string }
+                  description: 要删除的凭据的 ID。
+            example: { ids: ["<凭据的 id>"] }
+      responses:
+        "200":
+          description: 已删除。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+              example: { ok: true }
+
+  /api/credentials/delete-failed:
+    post:
+      tags: [凭据]
+      summary: 删除验证失败的凭据
+      description: "`confirm` 是失败记录的清单，服务端和当前的失败记录逐项比对，防止误删预览之后状态变过的记录。"
+      parameters:
+        - $ref: "#/components/parameters/projectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: array
+                  items: { type: string }
+                  description: "要删除的失败记录的清单，每项是 `<id>:<revision>:<updatedAt>`。和当前的失败记录对不上会回 `400`，防止误删。"
+            example: { confirm: ["<id>:<revision>:<updatedAt>"] }
+      responses:
+        "200":
+          description: 删了多少条。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted: { type: integer }
+              example: { deleted: 1 }
+
+  /api/intelligence/v1/ingest:
+    post:
+      tags: [非浏览器调用方]
+      summary: 情报数据源推送指标
+      description: "调用方是外部情报数据源，不是浏览器。在入口串和登录之前处理，用请求头 `Authorization: Bearer <令牌>` 鉴权，令牌由「新建数据源」给出。同时推送的数量有上限，超过时回 `429` 并带 `Retry-After: 60`。"
+      security: []
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          schema: { type: string }
+          example: Bearer intel_example
+          description: "`Bearer` 加数据源的推送令牌，令牌在新建数据源或轮换令牌时返回。"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { x-schema: Http.IntelligencePush }
+            example:
+              schema_version: 1
+              request_id: req-20261124-0001
+              events:
+                - event_id: evt-0001
+                  indicator: { type: ip, value: 203.0.113.7 }
+                  occurred_at: "2026-11-24T07:00:00Z"
+                  category: brute-force
+                  severity: high
+      responses:
+        "200":
+          description: "入库结果：`requestId` 原样带回；`accepted` 是入库的告警条数；`duplicates` 是 `event_id` 之前收到过的条数；`newIps` 是第一次见到的 IP 数。同一个 `request_id` 重复推送返回第一次的结果。"
+          content:
+            application/json:
+              schema: { x-schema: Http.IntelligenceReceipt }
+        "401":
+          description: 令牌无效，或数据源已停用。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          description: 推送过于频繁。
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/ios/upload/{name}:
+    post:
+      tags: [非浏览器调用方]
+      summary: iOS 设备上传文件
+      description: 调用方是 iOS 设备上的 SentinelBridge，不是浏览器。在入口串和登录之前处理，用设备自己的令牌鉴权。设备上传的协议不在本契约里。
+      security: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+          example: notes.txt
+      responses:
+        "200":
+          description: 已接收。
+        "4xx":
+          description: 鉴权或请求不合格。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  securitySchemes:
+    sentinel-gate:
+      type: apiKey
+      in: cookie
+      name: sentinel-gate
+      description: "打开入口地址 `/<入口串>` 时下发的 Cookie，值是入口串的 HMAC-SHA256。`Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`。入口串每次启动都变，所以重启后要重新打开入口地址。"
+    sentinel-auth:
+      type: apiKey
+      in: cookie
+      name: sentinel-auth
+      description: "登录后下发的会话 Cookie，值是 `<过期时间毫秒>.<HMAC>`。`Path=/; HttpOnly; SameSite=Strict`，勾选「记住登录」时带 `Max-Age=2592000`。只有最后一次登录有效。"
+
+  parameters:
+    projectId:
+      name: projectId
+      in: query
+      required: true
+      schema: { type: string }
+      example: project-1
+      description: "当前项目的 ID。必须是被选中的那个项目，`GET /api/assets/import` 可以拿到它。"
+    page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 1000000, default: 1 }
+      example: 1
+      description: 页码，从 1 开始。
+    hostId:
+      name: hostId
+      in: path
+      required: true
+      schema: { type: string }
+      example: host-1
+      description: 插件主机的 ID。
+    pluginId:
+      name: pluginId
+      in: path
+      required: true
+      schema: { type: string }
+      example: plugin-example
+      description: 插件的 ID。
+    reportId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      example: "6f1c2a3e-8b4d-4c2a-9f1e-2d3c4b5a6978"
+      description: 报告的 ID。
+    kind:
+      name: kind
+      in: query
+      required: true
+      schema: { type: string, enum: [session, engine] }
+      example: session
+      description: 工作链路属于一次对话还是一个工程。
+    workId:
+      name: id
+      in: query
+      required: true
+      schema: { type: string, pattern: "^[a-zA-Z0-9._:-]{1,200}$" }
+      example: session-1
+      description: 对话或工程的 ID。
+    flowId:
+      name: flowId
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[a-zA-Z0-9_-]{1,100}$" }
+      example: f1a2b3c4
+      description: 流量记录的 ID。
+
+  responses:
+    BadRequest:
+      description: 请求不合格。
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 请求不合格。 }
+    Unauthorized:
+      description: "没有会话 Cookie，或会话已失效。多数路由的正文是 `未登录`；读取请求体的过程中登录失效的，正文说明登录已失效，要重新登录。"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 未登录 }
+    ConsentRequired:
+      description: "还没接受授权承诺。正文是 `consent_required`。"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: consent_required }
+    NotFound:
+      description: 不存在。
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 不存在。 }
+    Conflict:
+      description: 与当前状态冲突。
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 与当前状态冲突，请刷新后重试。 }
+    PayloadTooLarge:
+      description: 请求体超过这条路由的上限。
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 请求内容过大。 }
+    UnsupportedMediaType:
+      description: "请求头 `Content-Type` 不是 `application/json`。"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 请发送 JSON 请求。 }
+    MethodNotAllowed:
+      description: 不支持这个请求方法。
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 请求方法不支持。 }
+    Internal:
+      description: 服务端内部错误。
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 服务端内部错误。 }
+    ServiceUnavailable:
+      description: 后端没有配置目录，对应的功能不可用。
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 服务不可用。 }
+    MitmInvalid:
+      description: "请求体不是 JSON 对象，或者内容无效：配置、筛选条件、游标、要删除或导入的记录不合法，确认标志不是 `true`。"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 请求格式错误。 }
+    MitmNoRoute:
+      description: 没有这个 MITM 接口，它不接受这个请求方法，或者要读的流量记录、原始报文、证书不存在。
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 接口不存在或请求方法错误。 }
+    MitmProjectChanged:
+      description: "当前项目已被切换，或者 MITM 容器名被别的实例占用。"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 当前项目已变更，请刷新页面。 }
+    MitmUnavailable:
+      description: "后端没有配置数据目录，或者没法检查 MITM 容器（Docker 不可用）。"
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: 控制台未配置数据目录。 }
+    MitmFailed:
+      description: MITM 操作失败，原因写在服务端日志里。
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: MITM 操作失败，请检查服务日志。 }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: "给操作员看的完整句子，按当前界面语言生成，前端原样显示。前端要按内容识别的只有两个值：`未登录`（会话失效）和 `consent_required`（还没接受授权承诺）。"
+      example: { error: 请求不合格。 }
+    Credentials:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          pattern: '^[\w.-]{1,40}$'
+          description: 字母、数字、点、下划线或连字符，1–40 个字符。
+        password:
+          type: string
+          minLength: 8
+          description: 至少 8 个字符。
+    AssetImportRequest:
+      type: object
+      required: [projectId, text]
+      properties:
+        projectId: { type: string }
+        text:
+          type: string
+          maxLength: 200000
+          description: 要导入的文本，每行一条资产。请求体上限 1 MB。
+    MitmProject:
+      type: object
+      required: [projectId]
+      properties:
+        projectId: { type: string, description: 当前项目的 ID。MITM 的 POST 路由把它放在请求体里。 }
+    IntelligenceCleanup:
+      type: object
+      properties:
+        sourceId: { type: string }
+        before: { type: integer, description: 毫秒时间戳，只清理这个时间之前的。 }
+        after: { type: integer, description: 毫秒时间戳，只清理这个时间之后的。不能晚于 `before`。 }

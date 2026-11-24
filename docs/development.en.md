@@ -43,6 +43,8 @@ npm run build:offline       # full build, offline, without regenerating the mode
 
 This repository does not run CI (only the release workflow). Run `npm run check` and `./test.sh` yourself before committing.
 
+The interface between the browser console and the backend is written up in the [interface contract](../packages/web/docs/contract/README.md). After changing an `/api/*` route or a `/ws` message, update the contract documents as well, or `npm run check` and the tests under `packages/web/test/contract/` fail. For a new message, add it to a domain in `packages/web/test/contract/domains.ts` and write its entry and example.
+
 Run a single test from the package root:
 
 ```bash

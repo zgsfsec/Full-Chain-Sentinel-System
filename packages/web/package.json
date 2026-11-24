@@ -19,7 +19,12 @@
 		"test": "vitest --run",
 		"start": "node dist/index.js",
 		"plugin-host": "node src/index.ts plugin-host",
-		"build:official": "node scripts/generate-official-plugins.mjs"
+		"build:official": "node scripts/generate-official-plugins.mjs",
+		"generate:contract": "node scripts/generate-contract-appendix.mjs",
+		"generate:contract-schemas": "node scripts/generate-contract-schemas.cjs",
+		"generate:contract-api": "node scripts/generate-contract-api.mjs",
+		"check:contract-api": "node scripts/generate-contract-schemas.cjs --check-source && node scripts/generate-contract-api.mjs --check",
+		"check:contract": "node scripts/generate-contract-appendix.mjs --check && npm run check:contract-api"
 	},
 	"dependencies": {
 		"@earendil-works/pi-coding-agent": "^1.1.0",

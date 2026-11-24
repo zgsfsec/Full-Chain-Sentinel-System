@@ -1,0 +1,653 @@
+{
+	"assets": {
+		"importMaxCharacters": 200000
+	},
+	"codeIntel": {
+		"defaultCronExpression": "0 * * * *",
+		"maxHistoryCommits": 1000,
+		"vulnTags": [
+			{
+				"categories": [
+					"web",
+					"memory",
+					"other"
+				],
+				"en": "RCE",
+				"id": "rce",
+				"zh": "RCE"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "SSRF",
+				"id": "ssrf",
+				"zh": "SSRF"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "File upload",
+				"id": "file-upload",
+				"zh": "文件上传"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "Broken access control",
+				"id": "access-control",
+				"zh": "越权"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "SQL injection",
+				"id": "sql-injection",
+				"zh": "SQL 注入"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "XSS",
+				"id": "xss",
+				"zh": "XSS"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "Unauthenticated access",
+				"id": "unauthorized-access",
+				"zh": "未授权访问"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "Authentication bypass",
+				"id": "auth-bypass",
+				"zh": "认证绕过"
+			},
+			{
+				"categories": [
+					"web",
+					"other"
+				],
+				"en": "Command injection",
+				"id": "command-injection",
+				"zh": "命令注入"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "NoSQL injection",
+				"id": "nosql-injection",
+				"zh": "NoSQL 注入"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "XXE",
+				"id": "xxe",
+				"zh": "XXE"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "SSTI",
+				"id": "ssti",
+				"zh": "SSTI"
+			},
+			{
+				"categories": [
+					"web",
+					"other"
+				],
+				"en": "Path traversal",
+				"id": "path-traversal",
+				"zh": "路径穿越"
+			},
+			{
+				"categories": [
+					"web",
+					"other"
+				],
+				"en": "Arbitrary file read",
+				"id": "file-read",
+				"zh": "任意文件读取"
+			},
+			{
+				"categories": [
+					"web",
+					"other"
+				],
+				"en": "Arbitrary file write",
+				"id": "file-write",
+				"zh": "任意文件写入"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "File inclusion",
+				"id": "file-inclusion",
+				"zh": "文件包含"
+			},
+			{
+				"categories": [
+					"web",
+					"other"
+				],
+				"en": "Unsafe deserialization",
+				"id": "deserialization",
+				"zh": "反序列化"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "CSRF",
+				"id": "csrf",
+				"zh": "CSRF"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "Open redirect",
+				"id": "open-redirect",
+				"zh": "开放重定向"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "HTTP request smuggling",
+				"id": "request-smuggling",
+				"zh": "HTTP 请求走私"
+			},
+			{
+				"categories": [
+					"web"
+				],
+				"en": "Business logic flaw",
+				"id": "business-logic",
+				"zh": "业务逻辑漏洞"
+			},
+			{
+				"categories": [
+					"memory"
+				],
+				"en": "Heap buffer overflow",
+				"id": "heap-overflow",
+				"zh": "堆溢出"
+			},
+			{
+				"categories": [
+					"memory"
+				],
+				"en": "Stack buffer overflow",
+				"id": "stack-overflow",
+				"zh": "栈缓冲区溢出"
+			},
+			{
+				"categories": [
+					"memory"
+				],
+				"en": "Out-of-bounds read",
+				"id": "out-of-bounds-read",
+				"zh": "越界读"
+			},
+			{
+				"categories": [
+					"memory"
+				],
+				"en": "Out-of-bounds write",
+				"id": "out-of-bounds-write",
+				"zh": "越界写"
+			},
+			{
+				"categories": [
+					"memory"
+				],
+				"en": "Use after free",
+				"id": "use-after-free",
+				"zh": "释放后使用"
+			},
+			{
+				"categories": [
+					"memory"
+				],
+				"en": "Double free",
+				"id": "double-free",
+				"zh": "双重释放"
+			},
+			{
+				"categories": [
+					"memory"
+				],
+				"en": "Type confusion",
+				"id": "type-confusion",
+				"zh": "类型混淆"
+			},
+			{
+				"categories": [
+					"memory",
+					"other"
+				],
+				"en": "Integer overflow",
+				"id": "integer-overflow",
+				"zh": "整数溢出"
+			},
+			{
+				"categories": [
+					"memory"
+				],
+				"en": "Uninitialized memory",
+				"id": "uninitialized-memory",
+				"zh": "未初始化内存"
+			},
+			{
+				"categories": [
+					"memory"
+				],
+				"en": "Null pointer dereference",
+				"id": "null-dereference",
+				"zh": "空指针解引用"
+			},
+			{
+				"categories": [
+					"memory"
+				],
+				"en": "Format string flaw",
+				"id": "format-string",
+				"zh": "格式化字符串漏洞"
+			},
+			{
+				"categories": [
+					"memory"
+				],
+				"en": "Memory leak",
+				"id": "memory-leak",
+				"zh": "内存泄漏"
+			},
+			{
+				"categories": [
+					"web",
+					"memory",
+					"other"
+				],
+				"en": "Race condition",
+				"id": "race-condition",
+				"zh": "竞态条件"
+			},
+			{
+				"categories": [
+					"web",
+					"memory",
+					"other"
+				],
+				"en": "Information disclosure",
+				"id": "info-disclosure",
+				"zh": "信息泄露"
+			},
+			{
+				"categories": [
+					"web",
+					"other"
+				],
+				"en": "Credential leak",
+				"id": "credential-leak",
+				"zh": "凭据泄露"
+			},
+			{
+				"categories": [
+					"web",
+					"memory",
+					"other"
+				],
+				"en": "Privilege escalation",
+				"id": "privilege-escalation",
+				"zh": "权限提升"
+			},
+			{
+				"categories": [
+					"web",
+					"memory",
+					"other"
+				],
+				"en": "Denial of service",
+				"id": "dos",
+				"zh": "拒绝服务"
+			},
+			{
+				"categories": [
+					"other"
+				],
+				"en": "Cryptographic flaw",
+				"id": "crypto-flaw",
+				"zh": "加密实现缺陷"
+			},
+			{
+				"categories": [
+					"other"
+				],
+				"en": "Certificate validation flaw",
+				"id": "certificate-validation",
+				"zh": "证书校验缺陷"
+			},
+			{
+				"categories": [
+					"other"
+				],
+				"en": "Supply chain flaw",
+				"id": "supply-chain",
+				"zh": "供应链漏洞"
+			},
+			{
+				"categories": [
+					"web",
+					"memory",
+					"other"
+				],
+				"en": "Other",
+				"id": "other",
+				"zh": "其他"
+			}
+		]
+	},
+	"credentials": {
+		"groups": [
+			"操作系统",
+			"数据库",
+			"网络与安全设备",
+			"应用与服务",
+			"其他"
+		],
+		"types": [
+			{
+				"group": "操作系统",
+				"value": "Windows"
+			},
+			{
+				"group": "操作系统",
+				"value": "Linux"
+			},
+			{
+				"group": "操作系统",
+				"value": "Unix"
+			},
+			{
+				"group": "操作系统",
+				"value": "macOS"
+			},
+			{
+				"group": "数据库",
+				"value": "MySQL"
+			},
+			{
+				"group": "数据库",
+				"value": "PostgreSQL"
+			},
+			{
+				"group": "数据库",
+				"value": "Microsoft SQL Server"
+			},
+			{
+				"group": "数据库",
+				"value": "Oracle"
+			},
+			{
+				"group": "数据库",
+				"value": "MariaDB"
+			},
+			{
+				"group": "数据库",
+				"value": "SQLite"
+			},
+			{
+				"group": "数据库",
+				"value": "Redis"
+			},
+			{
+				"group": "数据库",
+				"value": "MongoDB"
+			},
+			{
+				"group": "数据库",
+				"value": "Elasticsearch"
+			},
+			{
+				"group": "数据库",
+				"value": "OpenSearch"
+			},
+			{
+				"group": "数据库",
+				"value": "ClickHouse"
+			},
+			{
+				"group": "数据库",
+				"value": "Apache Cassandra"
+			},
+			{
+				"group": "数据库",
+				"value": "Apache HBase"
+			},
+			{
+				"group": "数据库",
+				"value": "Apache Hive"
+			},
+			{
+				"group": "数据库",
+				"value": "Apache Doris"
+			},
+			{
+				"group": "数据库",
+				"value": "StarRocks"
+			},
+			{
+				"group": "数据库",
+				"value": "TiDB"
+			},
+			{
+				"group": "数据库",
+				"value": "OceanBase"
+			},
+			{
+				"group": "数据库",
+				"value": "达梦"
+			},
+			{
+				"group": "数据库",
+				"value": "人大金仓"
+			},
+			{
+				"group": "数据库",
+				"value": "GaussDB"
+			},
+			{
+				"group": "数据库",
+				"value": "openGauss"
+			},
+			{
+				"group": "数据库",
+				"value": "DB2"
+			},
+			{
+				"group": "数据库",
+				"value": "SAP HANA"
+			},
+			{
+				"group": "数据库",
+				"value": "Sybase ASE"
+			},
+			{
+				"group": "数据库",
+				"value": "Informix"
+			},
+			{
+				"group": "数据库",
+				"value": "Teradata"
+			},
+			{
+				"group": "数据库",
+				"value": "Snowflake"
+			},
+			{
+				"group": "数据库",
+				"value": "Amazon Redshift"
+			},
+			{
+				"group": "数据库",
+				"value": "Couchbase"
+			},
+			{
+				"group": "数据库",
+				"value": "CouchDB"
+			},
+			{
+				"group": "数据库",
+				"value": "Neo4j"
+			},
+			{
+				"group": "数据库",
+				"value": "InfluxDB"
+			},
+			{
+				"group": "数据库",
+				"value": "TimescaleDB"
+			},
+			{
+				"group": "数据库",
+				"value": "TDengine"
+			},
+			{
+				"group": "数据库",
+				"value": "Milvus"
+			},
+			{
+				"group": "数据库",
+				"value": "Greenplum"
+			},
+			{
+				"group": "数据库",
+				"value": "Vertica"
+			},
+			{
+				"group": "数据库",
+				"value": "DynamoDB"
+			},
+			{
+				"group": "数据库",
+				"value": "Memcached"
+			},
+			{
+				"group": "网络与安全设备",
+				"value": "防火墙"
+			},
+			{
+				"group": "网络与安全设备",
+				"value": "WAF"
+			},
+			{
+				"group": "网络与安全设备",
+				"value": "VPN"
+			},
+			{
+				"group": "网络与安全设备",
+				"value": "路由器"
+			},
+			{
+				"group": "网络与安全设备",
+				"value": "交换机"
+			},
+			{
+				"group": "网络与安全设备",
+				"value": "堡垒机"
+			},
+			{
+				"group": "网络与安全设备",
+				"value": "NAS"
+			},
+			{
+				"group": "网络与安全设备",
+				"value": "存储设备"
+			},
+			{
+				"group": "网络与安全设备",
+				"value": "负载均衡"
+			},
+			{
+				"group": "网络与安全设备",
+				"value": "态势感知"
+			},
+			{
+				"group": "应用与服务",
+				"value": "Web 应用"
+			},
+			{
+				"group": "应用与服务",
+				"value": "API"
+			},
+			{
+				"group": "应用与服务",
+				"value": "Git"
+			},
+			{
+				"group": "应用与服务",
+				"value": "Kubernetes"
+			},
+			{
+				"group": "应用与服务",
+				"value": "Docker Registry"
+			},
+			{
+				"group": "应用与服务",
+				"value": "云服务"
+			},
+			{
+				"group": "应用与服务",
+				"value": "LDAP"
+			},
+			{
+				"group": "应用与服务",
+				"value": "邮件服务"
+			},
+			{
+				"group": "应用与服务",
+				"value": "消息队列"
+			},
+			{
+				"group": "应用与服务",
+				"value": "对象存储"
+			},
+			{
+				"group": "其他",
+				"value": "其他"
+			}
+		]
+	},
+	"description": "浏览器和服务端必须取值一致的常量，从服务端源码生成。",
+	"models": {
+		"remoteModelApis": [
+			"openai-completions",
+			"openai-responses",
+			"anthropic-messages",
+			"google-generative-ai"
+		]
+	},
+	"ui": {
+		"default": "zh",
+		"languages": [
+			"zh",
+			"en"
+		]
+	}
+}

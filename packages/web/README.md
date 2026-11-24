@@ -85,6 +85,8 @@ sentinel-session.ts —— createAgentSession() + baseToolsOverride(bash 包装�
 pi coding-agent（AgentSession / SessionManager / 工具 / 压缩 / 会话树）
 ```
 
+浏览器控制台与后端之间的接口约定单独成文，见[接口契约](docs/contract/README.md)：HTTP 接口的 OpenAPI 文档、WebSocket `/ws` 全部消息的分域说明（每种带 JSON 样例）、鉴权与连接约定、两份协议类型的差异清单，以及怎么用现有前端验收一个重写的后端。`test/contract/` 里的检查保证文档与代码一致。照着接口开发前端的人从[前端开发用的接口文档](docs/contract/frontend/README.md)开始，那里有能直接导入 ApiFox 或 Postman 的 OpenAPI 文档、Postman 集合和 WebSocket 消息目录。
+
 bash 工具通过 `BashOperations.exec` 包装实现拦截，三种模式在同一个包装里分派：审批模式下命令先广播到所有已连接的控制台，等待操作员决定（批准 / 编辑后批准 / 拒绝），中止运行会取消未决审批；自动执行直接放行；AI 审批把命令交给守门员模型，`ALLOW` 放行、`BLOCK` 以理由回绝、判定失败放行并记录。模式按会话解析（本会话覆盖 → 全局默认），所以包装拿到的是一个 `() => SentinelMode` 闭包而不是启动时的固定值。
 
 守门员的判定记录写在配置目录的 `gatekeeper.db`（`~/.sentinel/agent/gatekeeper.db`），与漏洞中枢同样的理由：不进容器。每条记录含来源、命令、判定、理由、耗时、模型来源与 tokens，`ALLOW` 也入库；判定失败同样入库（`failed`），因此「守门员掉线期间放行了什么」可以事后核对。

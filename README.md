@@ -329,6 +329,7 @@ Windows 解压 `sentinel-web-windows-x64.zip` 后，在 PowerShell 运行 `.\sen
 | 安装本地 / 远端插件 | [插件中心](docs/plugin-center.md) |
 | 开发插件与插件前端 | [插件开发](docs/plugin-authoring.md) · [插件前端](docs/plugin-ui.md) |
 | 仓库结构、构建与测试 | [开发指南](docs/development.md) |
+| 前后端之间的接口约定，或要重写后端 | [接口契约](packages/web/docs/contract/README.md) |
 | 授权、审批范围与数据边界 | [授权声明与安全边界](docs/security.md) |
 
 <a id="license"></a>
