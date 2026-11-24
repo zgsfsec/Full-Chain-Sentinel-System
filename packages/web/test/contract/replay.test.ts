@@ -83,6 +83,11 @@ const RECENT = 8;
 /** How long to keep collecting after the last frame, and the most to wait for one. */
 const QUIET_MS = 500;
 const LIMIT_MS = 3000;
+/**
+ * The most to wait for the pushes a new connection is owed. Two of them wait
+ * for Docker (`projects` and `proxy_config`, see the README's 连接建立后服务端先推什么).
+ */
+const CONNECT_LIMIT_MS = 15_000;
 
 /** The key of a failure text the server sent in English: the text with the most fixed characters wins. */
 function keyOf(text: string): string | undefined {
@@ -114,8 +119,16 @@ async function signIn(target: ContractTarget): Promise<ConsoleSocket> {
 	target.keepCookie(setup.headers.get("set-cookie"));
 	await target.request("POST", "/api/consent/accept", { ...json, body: JSON.stringify({ accepted: true }) });
 	const socket = await target.socket();
-	// The first pushes of a new connection are not about any message.
-	await new Promise((resolve) => setTimeout(resolve, 2500));
+	// The first pushes of a new connection are not about any message. They are
+	// waited for by name, not for a fixed pause: on a busy machine the two that
+	// wait for Docker arrived after it, on the first replayed message.
+	const awaited = new Set(["projects", "proxy_config"]);
+	const started = Date.now();
+	while (awaited.size > 0 && Date.now() - started < CONNECT_LIMIT_MS) {
+		for (const message of socket.pending()) awaited.delete(message.type);
+		if (awaited.size === 0) break;
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	}
 	socket.pending().length = 0;
 	return socket;
 }
