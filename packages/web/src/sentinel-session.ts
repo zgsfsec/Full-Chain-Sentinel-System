@@ -137,6 +137,7 @@ import { createIosDecryptTools, IOS_DECRYPT_TOOL_NAMES } from "./ios-decrypt-too
 import { createIosFridaTools, IOS_FRIDA_TOOL_NAMES } from "./ios-frida-tool.ts";
 import type { IosGateway } from "./ios-gateway.ts";
 import { createIosTools, IOS_TOOL_NAMES, type IosToolContext } from "./ios-tool.ts";
+import { isInsideDirectory } from "./managed-path.ts";
 import {
 	loadSentinelMcpConfig,
 	mcpConfigView,
@@ -4533,8 +4534,7 @@ export class SentinelRuntime {
 	/** Only files inside the managed session directory may be renamed or deleted. */
 	private guardSessionPath(path: string): string {
 		const normalized = resolveFsPath(path);
-		const dir = resolveFsPath(this.sessionDir);
-		if (!normalized.startsWith(`${dir}/`) || !normalized.endsWith(".jsonl")) {
+		if (!isInsideDirectory(resolveFsPath(this.sessionDir), normalized) || !normalized.endsWith(".jsonl")) {
 			throw new Error(t("路径不在受管的会话目录内，已拒绝该操作"));
 		}
 		return normalized;

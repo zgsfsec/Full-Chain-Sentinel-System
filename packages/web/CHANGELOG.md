@@ -374,3 +374,4 @@
 - 隧道容器的解析器根本传不进去，WireGuard 档案因此建不出作业容器：`docker run --dns` 与 `--network container:` 不能同时用（Docker 直接报 `conflicting options: dns and the network mode`），而隧道档案的 DNS 是必填项，所以每次创建都用这个组合、每次都失败（`容器创建失败：conflicting options: dns and the network mode`）；`addProject` 与 `recreateProject` 这两条重建路径更是压根没把 DNS 传下去。现在改成把隧道 DNS 写成 `<配置目录>/proxy/<id>.resolv.conf`，以 `-v <文件>:/etc/resolv.conf:ro` 挂进作业容器：挂载写在 HostConfig 里，`docker start` 之后依然生效，改内容对运行中的容器下一次解析就可见，而 sidecar 自己继续用 Docker 内嵌 DNS（否则它解析不了 VPN 网关的主机名）。DNS 值按 IP 校验（多个用逗号或空格分隔，每个地址一行 `nameserver`），填了非 IP 直接报错，而不是写出一份 glibc 解析不了的 resolv.conf。
 - iOS `--with-deps` 改为逐个 apt 安装 tcpdump/appinst：之前一条命令里 appinst 不存在会连累 tcpdump。
 - iOS daemon 截屏失败时给出可操作原因（daemon 无 UI 会话，iOS 16 真机 `_UICreateScreenUIImage` 返回 nil），不再只报“空图片”。
+- Windows 上重命名、标记状态、删除会话一律被拒（`路径不在受管的会话目录内，已拒绝该操作`）：会话路径的守卫拿「以 `/` 结尾的前缀」做比对，而 Windows 的分隔符是 `\`，控制台自己的会话文件也被当成目录外的文件。改为按目录判断（`path.relative`），三个操作在各平台一致。
