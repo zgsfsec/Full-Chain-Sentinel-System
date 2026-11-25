@@ -75,3 +75,30 @@ export OPENCODE_API_KEY="你的 OpenCode Go API Key"
 如果你对于 Skill 的认知是知识库，那么预设 Agent 对你毫无作用，你的知识库对渗透测试而言也毫无作用。
 
 如果你对于 Skill 的认知是任务+目标，那么你完全可以使用预设 Agent，这对你来说是一个非常好的选择，我们也支持这么做。
+
+## 关于守门模型问题
+
+1.为什么要必须选择按量付费
+
+Agent 是串行的，每一个命令都要过 AI 审批，那么也就对守门模型的速率有一定要求，要求几百毫秒内完成一次命令审批，如果你是 TokenPlan 、CodingPlan 等订阅制的收费方式使用的模型，那么在守门模型里起不到什么作用。你需要使用按量付费的模型，因为这类模型通常给的 RPM 很高，首字 Token 也很快。
+
+2.守门模型建议
+
+建议使用 DeepSeek 官方渠道
+
+建议使用 qwen3.7flash 
+
+3.关于千问模型按量付费问题
+
+qwen 有很多生产线，全是乱掉的，这一点非常不好。
+
+你在
+```http
+https://platform.qianwenai.com/home/api-keys
+```
+
+可以看到 qwen 的 api 为：https://maas.qianwenaiapi.com/compatible-mode/v1
+
+4.关于推理问题
+
+所有守门模型全都需要关闭思考，因为思考会影响产出速度
