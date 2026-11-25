@@ -282,3 +282,33 @@ test("invalid ranges, absent projects, replay IDs and aborted calls fail without
 	expect((await invoke("mitm_flows", {}, { center, projectId: "a" }, aborted.signal)).isError).toBe(true);
 	expect(docker).not.toHaveBeenCalled();
 });
+
+test("mitm_flows leaves out the hosts the operator hid in the centre", async () => {
+	const db = database();
+	for (const [id, ts] of [
+		["junk", 2000],
+		["upper", 3000],
+		["under", 4000],
+		["keep", 5000],
+	] as const)
+		insert(db, id, ts);
+	for (const [id, host] of [
+		["junk", "hahah.test.com"],
+		["upper", "CCCC.Test.com"],
+		["under", "img.cdn.test.com"],
+	] as const)
+		db.prepare("UPDATE flows SET host = ? WHERE id = ?").run(host, id);
+	expect(view(await invoke("mitm_flows")).items.map((item) => item.id)).toEqual(["keep", "under", "upper", "junk"]);
+	center.saveHostFilter("a", { hosts: ["hahah.test.com", "cccc.test.com", "*.cdn.test.com"] });
+	const hidden = view(await invoke("mitm_flows"));
+	expect(hidden.items.map((item) => item.id)).toEqual(["keep"]);
+	expect(hidden.total).toBe(1);
+	// Asking for a hidden host by name finds nothing, which is what hiding it asks for.
+	expect(view(await invoke("mitm_flows", { host: "hahah" })).total).toBe(0);
+	// The list belongs to one project.
+	const other = database("b");
+	insert(other, "b_flow", 1000);
+	center.saveHostFilter("b", ["a.example"]);
+	expect(view(await invoke("mitm_flows", {}, { center, projectId: "b" })).total).toBe(0);
+	expect(view(await invoke("mitm_flows")).total).toBe(1);
+});

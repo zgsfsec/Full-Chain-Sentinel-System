@@ -12977,7 +12977,7 @@
 								}
 							]
 						},
-						"description": "筛选参数都是可选的，组合使用时取交集。`nextCursor` 不为 `null` 时把它原样作为 `cursor` 传回来取下一页；同一组筛选条件下翻页，响应里的 `total` 取自缓存，新抓到的记录可能还没算进去，`totalCached` 说明是不是缓存值，`totalUpdatedAt` 是缓存的更新时间（毫秒时间戳）；带 `refreshCount=1` 会重新统计。\n鉴权：需要入口 Cookie（先打开过入口地址）、登录后的会话 Cookie、账号已接受授权承诺。"
+						"description": "筛选参数都是可选的，组合使用时取交集。`nextCursor` 不为 `null` 时把它原样作为 `cursor` 传回来取下一页；同一组筛选条件下翻页，响应里的 `total` 取自缓存，新抓到的记录可能还没算进去，`totalCached` 说明是不是缓存值，`totalUpdatedAt` 是缓存的更新时间（毫秒时间戳）；带 `refreshCount=1` 会重新统计。项目隐藏的域名（见 `/api/mitm/host-filter`）不出现在结果里，也不计入 `total`。\n鉴权：需要入口 Cookie（先打开过入口地址）、登录后的会话 Cookie、账号已接受授权承诺。"
 					},
 					"response": [
 						{
@@ -13541,6 +13541,659 @@
 											"value": "MTc2Mzk0MjQwMDAwMF9mMWEyYjNjNA",
 											"disabled": true
 										}
+									]
+								}
+							},
+							"status": "Service Unavailable",
+							"code": 503,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"error\": \"控制台未配置数据目录。\"\n}"
+						}
+					]
+				},
+				{
+					"name": "不在流量记录里显示的域名  GET /api/mitm/host-filter",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/mitm/host-filter?projectId=project-1",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"mitm",
+								"host-filter"
+							],
+							"query": [
+								{
+									"key": "projectId",
+									"value": "project-1",
+									"disabled": false
+								}
+							]
+						},
+						"description": "名单里的域名不出现在流量记录列表里，也不计入 `total`：`GET /api/mitm/flows` 已经排除了它们，Agent 的 `mitm_flows` 工具同样。流量照常抓取和保存，按 ID 读取一条记录不受影响。写完整域名（如 `hahah.test.com`）只隐藏它自己；以 `*.` 开头（如 `*.test.com`）隐藏该域名下的全部子域名，域名本身不隐藏。\n鉴权：需要入口 Cookie（先打开过入口地址）、登录后的会话 Cookie、账号已接受授权承诺。"
+					},
+					"response": [
+						{
+							"name": "200 当前项目的名单。",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter?projectId=project-1",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
+									],
+									"query": [
+										{
+											"key": "projectId",
+											"value": "project-1",
+											"disabled": false
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"hosts\": [\n    \"hahah.test.com\",\n    \"*.cdn.test.com\"\n  ]\n}"
+						},
+						{
+							"name": "401 没有会话 Cookie，或会话已失效。",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter?projectId=project-1",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
+									],
+									"query": [
+										{
+											"key": "projectId",
+											"value": "project-1",
+											"disabled": false
+										}
+									]
+								}
+							},
+							"status": "Unauthorized",
+							"code": 401,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"error\": \"未登录\"\n}"
+						},
+						{
+							"name": "409 当前项目已被切换，或者 MITM 容器名被别的实例占用。",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter?projectId=project-1",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
+									],
+									"query": [
+										{
+											"key": "projectId",
+											"value": "project-1",
+											"disabled": false
+										}
+									]
+								}
+							},
+							"status": "Conflict",
+							"code": 409,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"error\": \"当前项目已变更，请刷新页面。\"\n}"
+						},
+						{
+							"name": "500 MITM 操作失败，原因写在服务端日志里。",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter?projectId=project-1",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
+									],
+									"query": [
+										{
+											"key": "projectId",
+											"value": "project-1",
+											"disabled": false
+										}
+									]
+								}
+							},
+							"status": "Internal Server Error",
+							"code": 500,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"error\": \"MITM 操作失败，请检查服务日志。\"\n}"
+						},
+						{
+							"name": "503 后端没有配置数据目录，或者没法检查 MITM 容器（Docker 不可用）。",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter?projectId=project-1",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
+									],
+									"query": [
+										{
+											"key": "projectId",
+											"value": "project-1",
+											"disabled": false
+										}
+									]
+								}
+							},
+							"status": "Service Unavailable",
+							"code": 503,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"error\": \"控制台未配置数据目录。\"\n}"
+						}
+					]
+				},
+				{
+					"name": "替换不在流量记录里显示的域名名单  POST /api/mitm/host-filter",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"projectId\": \"project-1\",\n  \"hosts\": [\n    \"hahah.test.com\",\n    \"*.cdn.test.com\"\n  ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/mitm/host-filter",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"mitm",
+								"host-filter"
+							]
+						},
+						"description": "整份替换，`hosts` 为空数组时清空。每一项是一个域名：小写字母、数字、`-`、`_` 和分隔用的 `.`，最多 500 项；以 `*.` 开头表示该域名下的全部子域名。服务端按统一写法存下来并原样返回，立即对流量列表生效，代理不重启。\n鉴权：需要入口 Cookie（先打开过入口地址）、登录后的会话 Cookie、账号已接受授权承诺。"
+					},
+					"response": [
+						{
+							"name": "200 存下来的名单。",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"projectId\": \"project-1\",\n  \"hosts\": [\n    \"hahah.test.com\",\n    \"*.cdn.test.com\"\n  ]\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"hosts\": [\n    \"*.cdn.test.com\",\n    \"hahah.test.com\"\n  ]\n}"
+						},
+						{
+							"name": "400 请求体不是 JSON 对象，或者内容无效",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"projectId\": \"project-1\",\n  \"hosts\": [\n    \"hahah.test.com\",\n    \"*.cdn.test.com\"\n  ]\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
+									]
+								}
+							},
+							"status": "Bad Request",
+							"code": 400,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"error\": \"请求格式错误。\"\n}"
+						},
+						{
+							"name": "401 没有会话 Cookie，或会话已失效。",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"projectId\": \"project-1\",\n  \"hosts\": [\n    \"hahah.test.com\",\n    \"*.cdn.test.com\"\n  ]\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
+									]
+								}
+							},
+							"status": "Unauthorized",
+							"code": 401,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"error\": \"未登录\"\n}"
+						},
+						{
+							"name": "409 当前项目已被切换，或者 MITM 容器名被别的实例占用。",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"projectId\": \"project-1\",\n  \"hosts\": [\n    \"hahah.test.com\",\n    \"*.cdn.test.com\"\n  ]\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
+									]
+								}
+							},
+							"status": "Conflict",
+							"code": 409,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"error\": \"当前项目已变更，请刷新页面。\"\n}"
+						},
+						{
+							"name": "413 请求体超过这条路由的上限。",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"projectId\": \"project-1\",\n  \"hosts\": [\n    \"hahah.test.com\",\n    \"*.cdn.test.com\"\n  ]\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
+									]
+								}
+							},
+							"status": "Payload Too Large",
+							"code": 413,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"error\": \"请求内容过大。\"\n}"
+						},
+						{
+							"name": "415 请求头 Content-Type 不是 application/json。",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"projectId\": \"project-1\",\n  \"hosts\": [\n    \"hahah.test.com\",\n    \"*.cdn.test.com\"\n  ]\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
+									]
+								}
+							},
+							"status": "Unsupported Media Type",
+							"code": 415,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"error\": \"请发送 JSON 请求。\"\n}"
+						},
+						{
+							"name": "500 MITM 操作失败，原因写在服务端日志里。",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"projectId\": \"project-1\",\n  \"hosts\": [\n    \"hahah.test.com\",\n    \"*.cdn.test.com\"\n  ]\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
+									]
+								}
+							},
+							"status": "Internal Server Error",
+							"code": 500,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json; charset=utf-8"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"error\": \"MITM 操作失败，请检查服务日志。\"\n}"
+						},
+						{
+							"name": "503 后端没有配置数据目录，或者没法检查 MITM 容器（Docker 不可用）。",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"projectId\": \"project-1\",\n  \"hosts\": [\n    \"hahah.test.com\",\n    \"*.cdn.test.com\"\n  ]\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/api/mitm/host-filter",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"api",
+										"mitm",
+										"host-filter"
 									]
 								}
 							},

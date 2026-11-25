@@ -67,6 +67,10 @@ export async function handleMitmApi(
 				json(await center.listFlows(id, url.searchParams));
 				return;
 			}
+			if (path === "/host-filter") {
+				json({ hosts: center.hostFilter(id) });
+				return;
+			}
 			if (path === "/ca.pem" || path === "/ca.crt") {
 				const format = path.endsWith("pem") ? "pem" : "crt";
 				const cert = center.certificate(id, format);
@@ -119,6 +123,10 @@ export async function handleMitmApi(
 			}
 			if (path === "/config") {
 				json(await center.save(id, body));
+				return;
+			}
+			if (path === "/host-filter") {
+				json(center.saveHostFilter(id, body));
 				return;
 			}
 			if (path === "/start") {

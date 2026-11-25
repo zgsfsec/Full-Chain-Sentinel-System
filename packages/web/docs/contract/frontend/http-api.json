@@ -4239,7 +4239,7 @@
 					"MITM 与 WebFuzz"
 				],
 				"summary": "流量记录列表",
-				"description": "筛选参数都是可选的，组合使用时取交集。`nextCursor` 不为 `null` 时把它原样作为 `cursor` 传回来取下一页；同一组筛选条件下翻页，响应里的 `total` 取自缓存，新抓到的记录可能还没算进去，`totalCached` 说明是不是缓存值，`totalUpdatedAt` 是缓存的更新时间（毫秒时间戳）；带 `refreshCount=1` 会重新统计。",
+				"description": "筛选参数都是可选的，组合使用时取交集。`nextCursor` 不为 `null` 时把它原样作为 `cursor` 传回来取下一页；同一组筛选条件下翻页，响应里的 `total` 取自缓存，新抓到的记录可能还没算进去，`totalCached` 说明是不是缓存值，`totalUpdatedAt` 是缓存的更新时间（毫秒时间戳）；带 `refreshCount=1` 会重新统计。项目隐藏的域名（见 `/api/mitm/host-filter`）不出现在结果里，也不计入 `total`。",
 				"parameters": [
 					{
 						"$ref": "#/components/parameters/projectId"
@@ -4421,6 +4421,113 @@
 					},
 					"409": {
 						"$ref": "#/components/responses/MitmProjectChanged"
+					},
+					"500": {
+						"$ref": "#/components/responses/MitmFailed"
+					},
+					"503": {
+						"$ref": "#/components/responses/MitmUnavailable"
+					}
+				}
+			}
+		},
+		"/api/mitm/host-filter": {
+			"get": {
+				"tags": [
+					"MITM 与 WebFuzz"
+				],
+				"summary": "不在流量记录里显示的域名",
+				"description": "名单里的域名不出现在流量记录列表里，也不计入 `total`：`GET /api/mitm/flows` 已经排除了它们，Agent 的 `mitm_flows` 工具同样。流量照常抓取和保存，按 ID 读取一条记录不受影响。写完整域名（如 `hahah.test.com`）只隐藏它自己；以 `*.` 开头（如 `*.test.com`）隐藏该域名下的全部子域名，域名本身不隐藏。",
+				"parameters": [
+					{
+						"$ref": "#/components/parameters/projectId"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "当前项目的名单。`hosts` 是存下来的写法：小写、排序、没有重复；没有名单时是空数组。",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/MitmHostFilter"
+								},
+								"example": {
+									"hosts": [
+										"hahah.test.com",
+										"*.cdn.test.com"
+									]
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"409": {
+						"$ref": "#/components/responses/MitmProjectChanged"
+					},
+					"500": {
+						"$ref": "#/components/responses/MitmFailed"
+					},
+					"503": {
+						"$ref": "#/components/responses/MitmUnavailable"
+					}
+				}
+			},
+			"post": {
+				"tags": [
+					"MITM 与 WebFuzz"
+				],
+				"summary": "替换不在流量记录里显示的域名名单",
+				"description": "整份替换，`hosts` 为空数组时清空。每一项是一个域名：小写字母、数字、`-`、`_` 和分隔用的 `.`，最多 500 项；以 `*.` 开头表示该域名下的全部子域名。服务端按统一写法存下来并原样返回，立即对流量列表生效，代理不重启。",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/Http.MitmHostFilterInput"
+							},
+							"example": {
+								"projectId": "project-1",
+								"hosts": [
+									"hahah.test.com",
+									"*.cdn.test.com"
+								]
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "存下来的名单。",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/MitmHostFilter"
+								},
+								"example": {
+									"hosts": [
+										"*.cdn.test.com",
+										"hahah.test.com"
+									]
+								}
+							}
+						}
+					},
+					"400": {
+						"$ref": "#/components/responses/MitmInvalid"
+					},
+					"401": {
+						"$ref": "#/components/responses/Unauthorized"
+					},
+					"409": {
+						"$ref": "#/components/responses/MitmProjectChanged"
+					},
+					"413": {
+						"$ref": "#/components/responses/PayloadTooLarge"
+					},
+					"415": {
+						"$ref": "#/components/responses/UnsupportedMediaType"
 					},
 					"500": {
 						"$ref": "#/components/responses/MitmFailed"
@@ -8131,7 +8238,7 @@
 				}
 			},
 			"MitmInvalid": {
-				"description": "请求体不是 JSON 对象，或者内容无效：配置、筛选条件、游标、要删除或导入的记录不合法，确认标志不是 `true`。",
+				"description": "请求体不是 JSON 对象，或者内容无效：配置、筛选条件、隐藏的域名、游标、要删除或导入的记录不合法，确认标志不是 `true`。",
 				"content": {
 					"application/json": {
 						"schema": {
@@ -9841,6 +9948,39 @@
 					"respSize",
 					"error",
 					"note"
+				]
+			},
+			"MitmHostFilter": {
+				"description": "Hosts a project keeps out of its traffic list. `a.test.com` is that host alone; `*.test.com` is every host under `test.com`, the domain itself not included. The traffic is still captured; it is only not listed.",
+				"type": "object",
+				"properties": {
+					"hosts": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					}
+				},
+				"required": [
+					"hosts"
+				]
+			},
+			"Http.MitmHostFilterInput": {
+				"allOf": [
+					{
+						"type": "object",
+						"properties": {
+							"projectId": {
+								"type": "string"
+							}
+						},
+						"required": [
+							"projectId"
+						]
+					},
+					{
+						"$ref": "#/components/schemas/MitmHostFilter"
+					}
 				]
 			},
 			"MitmFlowDetail": {

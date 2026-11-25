@@ -1,4 +1,12 @@
-import { DeleteOutlined, DownloadOutlined, QuestionCircleOutlined, ReloadOutlined, SendOutlined, SettingOutlined } from "@ant-design/icons";
+import {
+	DeleteOutlined,
+	DownloadOutlined,
+	EyeInvisibleOutlined,
+	QuestionCircleOutlined,
+	ReloadOutlined,
+	SendOutlined,
+	SettingOutlined,
+} from "@ant-design/icons";
 import {
 	Alert,
 	Badge,
@@ -10,6 +18,7 @@ import {
 	Form,
 	Input,
 	InputNumber,
+	Modal,
 	Popconfirm,
 	Select,
 	Space,
@@ -27,6 +36,7 @@ import type {
 	MitmFlow,
 	MitmFlowDetail,
 	MitmFlowPage,
+	MitmHostFilter,
 	MitmStatus,
 	MitmStorage,
 } from "../../../src/mitm-types.ts";
@@ -96,7 +106,32 @@ export function MitmFlowLink({ flow, onOpen }: { flow: MitmFlow; onOpen: () => v
 	const url = `${flow.scheme}://${host}${port}${flow.path}${flow.query ? `?${flow.query}` : ""}`;
 	return (
 		<Button type="link" className="mitm-flow-link" onClick={onOpen} title={url}>
-			<span>{url}</span>
+				<span>{url}</span>
+			</Button>
+		);
+}
+
+/** How many hosts are kept out of the traffic list, and the way to change that. */
+export function MitmHiddenHosts({
+	hosts,
+	disabled,
+	onEdit,
+}: {
+	hosts: string[];
+	disabled: boolean;
+	onEdit: () => void;
+}) {
+	return (
+		// The default size, so it is as tall as the search box and the two selects next to it.
+		<Button
+			icon={<EyeInvisibleOutlined />}
+			disabled={disabled}
+			onClick={onEdit}
+			title={hosts.length > 0 ? hosts.join("\n") : undefined}
+		>
+			{hosts.length > 0
+				? tx(`已隐藏 ${hosts.length} 个域名的流量`, `${hosts.length} hosts hidden`)
+				: tx("隐藏域名", "Hidden hosts")}
 		</Button>
 	);
 }
@@ -131,6 +166,10 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 		hasPassword: false,
 	});
 	const [password, setPassword] = useState("");
+	/** Hosts the server keeps out of the list, as it stores them. */
+	const [hiddenHosts, setHiddenHosts] = useState<string[]>([]);
+	/** The list as it is being edited; `null` when the editor is closed. */
+	const [hostDraft, setHostDraft] = useState<string | null>(null);
 	const [selected, setSelected] = useState<string | null>(null);
 	const [checked, setChecked] = useState<string[]>([]);
 	const [detail, setDetail] = useState<MitmFlowDetail | null>(null);
@@ -196,12 +235,14 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 		const refresh = async () => {
 			setLoading(true);
 			try {
-				const [nextStatus, nextFlows] = await Promise.all([
+				const [nextStatus, nextFilter, nextFlows] = await Promise.all([
 					api<MitmStatus>(`/api/mitm?projectId=${encodeURIComponent(projectId)}`, controller.signal),
+					api<MitmHostFilter>(`/api/mitm/host-filter?projectId=${encodeURIComponent(projectId)}`, controller.signal),
 					api<MitmFlowPage>(`/api/mitm/flows?${filter}${refreshCount ? "&refreshCount=1" : ""}`, controller.signal),
 				]);
 				if (!controller.signal.aborted) {
 					setStatus(nextStatus);
+					setHiddenHosts(nextFilter.hosts);
 					setFlows(nextFlows);
 					setPollError("");
 					refreshCount = false;
@@ -251,9 +292,18 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 		setActionName(name);
 		setError("");
 		try {
-			const result = await api<MitmStatus | { ok: true }>(`/api/mitm/${name}`, undefined, { ...extra, projectId });
+			const result = await api<MitmStatus | MitmHostFilter | { ok: true }>(
+				`/api/mitm/${name}`,
+				undefined,
+				{ ...extra, projectId },
+			);
 			if (!alive.current) return;
 			if ("state" in result) setStatus(result);
+			// The server answers with the list as it stored it: what the editor sent is only a draft.
+			if ("hosts" in result) {
+				setHiddenHosts(result.hosts);
+				setHostDraft(null);
+			}
 			if (name === "config") {
 				setDrawer(null);
 				setPassword("");
@@ -436,6 +486,14 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 							{ value: "error", label: tx("连接异常", "Connection errors") },
 						]}
 					/>
+					<MitmHiddenHosts
+						hosts={hiddenHosts}
+						disabled={busy || unavailable}
+						onEdit={() => {
+							setHostDraft(hiddenHosts.join("\n"));
+							setError("");
+						}}
+					/>
 				</Flex>
 				<Table<MitmFlow>
 					rowKey="id"
@@ -464,10 +522,15 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 								description={
 									query.q || query.method || query.status
 										? tx("没有符合条件的流量", "No matching traffic")
-										: tx(
-												"等待流量：将浏览器或设备的 HTTP 代理设为上方地址",
-												"Waiting for traffic. Configure your device's HTTP proxy with the address above.",
-											)
+										: hiddenHosts.length > 0
+											? tx(
+													`等待流量：将浏览器或设备的 HTTP 代理设为上方地址。已隐藏 ${hiddenHosts.length} 个域名的记录`,
+													`Waiting for traffic. Configure your device's HTTP proxy with the address above. Records of ${hiddenHosts.length} hosts are hidden`,
+												)
+											: tx(
+													"等待流量：将浏览器或设备的 HTTP 代理设为上方地址",
+													"Waiting for traffic. Configure your device's HTTP proxy with the address above.",
+												)
 								}
 							/>
 						),
@@ -696,9 +759,57 @@ export function MitmPage({ project, onSendToWebFuzz }: { project: { id: string; 
 					)}
 				</Typography.Paragraph>
 			</Drawer>
+			<Modal
+				title={tx("隐藏域名", "Hidden hosts")}
+				open={hostDraft !== null}
+				okText={tx("保存", "Save")}
+				cancelText={tx("取消", "Cancel")}
+				confirmLoading={busy}
+				okButtonProps={{ disabled: busy }}
+				onOk={() => {
+					if (hostDraft === null) return;
+					void action("host-filter", { hosts: hostDraft.split(/\r?\n/).map((host) => host.trim()).filter(Boolean) });
+				}}
+				onCancel={() => {
+					setHostDraft(null);
+					setError("");
+				}}
+				destroyOnHidden
+			>
+				<Input.TextArea
+					aria-label={tx("要隐藏的域名", "Hosts to hide")}
+					rows={8}
+					value={hostDraft ?? ""}
+					placeholder={"hahah.test.com\n*.cdn.test.com"}
+					onChange={(event) => setHostDraft(event.target.value)}
+				/>
+				<Typography.Paragraph type="secondary">
+					{tx(
+						"每行一个域名，不区分大小写。写完整域名只隐藏它自己（如 hahah.test.com）；以 *. 开头隐藏该域名下的全部子域名（如 *.test.com），域名本身不隐藏。只影响流量列表和 Agent 的 mitm_flows，流量照常抓取和保存；把域名从名单里删掉就恢复显示。",
+						"One host per line, case-insensitive. A full host hides only that host (hahah.test.com); a leading *. hides every subdomain (*.test.com), not the domain itself. Only the traffic list and the Agent's mitm_flows are affected: traffic is still captured and saved. Remove a host to show its traffic again.",
+					)}
+				</Typography.Paragraph>
+				{error ? <Typography.Paragraph type="danger">{error}</Typography.Paragraph> : null}
+			</Modal>
 			<Drawer
 				className="mitm-detail"
-				extra={onSendToWebFuzz ? <Button icon={<SendOutlined />} disabled={!detail} onClick={() => { if (detail) onSendToWebFuzz(detail.id); }}>{tx("发送到 WebFuzz", "Send to WebFuzz")}</Button> : null}
+				extra={
+					<Space>
+						<Button
+							icon={<EyeInvisibleOutlined />}
+							disabled={!detail || busy}
+							onClick={() => {
+								if (!detail) return;
+								// The flow is about to leave the list, so its details close with it.
+								setSelected(null);
+								void action("host-filter", { hosts: [...hiddenHosts, detail.host] });
+							}}
+						>
+							{tx("隐藏此域名", "Hide this host")}
+						</Button>
+						{onSendToWebFuzz ? <Button icon={<SendOutlined />} disabled={!detail} onClick={() => { if (detail) onSendToWebFuzz(detail.id); }}>{tx("发送到 WebFuzz", "Send to WebFuzz")}</Button> : null}
+					</Space>
+				}
 				title={tx("流量详情", "Traffic details")}
 				open={selected !== null}
 				onClose={() => setSelected(null)}

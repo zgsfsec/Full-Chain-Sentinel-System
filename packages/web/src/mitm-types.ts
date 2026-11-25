@@ -13,6 +13,15 @@ export interface MitmConfig {
 	hasPassword: boolean;
 }
 
+/**
+ * Hosts a project keeps out of its traffic list. `a.test.com` is that host
+ * alone; `*.test.com` is every host under `test.com`, the domain itself not
+ * included. The traffic is still captured; it is only not listed.
+ */
+export interface MitmHostFilter {
+	hosts: string[];
+}
+
 export interface MitmStatus {
 	project: { id: string; name: string };
 	config: MitmConfig;

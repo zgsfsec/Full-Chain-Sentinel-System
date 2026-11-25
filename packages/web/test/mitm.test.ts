@@ -661,3 +661,135 @@ test("proxy credentials are hashed, redacted, project-scoped and retained only w
 	expect((await restarted.status("a")).config.hasPassword).toBe(false);
 	await expect(restarted.save("a", { ...status.config, password: "" })).rejects.toThrow();
 });
+
+test("hidden hosts leave the list and its count by name or by subdomain, and nothing is deleted", async () => {
+	// Every row has the same timestamp, so the list is in reverse id order.
+	insert("app", 200, "proxy", "app.test.com");
+	insert("apex", 200, "proxy", "cdn.example");
+	insert("child", 200, "proxy", "x.hahah.test.com");
+	insert("junk", 200, "proxy", "hahah.test.com");
+	insert("lookalike", 200, "proxy", "notcdn.example");
+	insert("lower", 200, "proxy", "HAHAH.TEST.COM");
+	insert("pattern", 200, "proxy", "a_b.cdn.example");
+	insert("under", 200, "proxy", "img.cdn.example");
+	// The exact name hides the host in either case; the wildcard hides what is under the
+	// domain, not the domain itself, not a name that merely ends the same way, whatever
+	// characters the name holds.
+	const hidden = ["*.cdn.example", "HAHAH.TEST.COM"];
+	const query = new URLSearchParams();
+	const page = await listMitmFlows(directory, query, undefined, undefined, hidden);
+	expect(page.items.map((flow) => flow.id)).toEqual(["lookalike", "child", "app", "apex"]);
+	expect(page.total).toBe(4);
+	// The other filters narrow what is left.
+	const narrowed = await listMitmFlows(directory, new URLSearchParams("q=test.com"), undefined, undefined, hidden);
+	expect(narrowed.items.map((flow) => flow.id)).toEqual(["child", "app"]);
+	// A list is another count, never a count cached for the other.
+	const cache = new MitmCountCache();
+	expect(await listMitmFlows(directory, query, undefined, cache, hidden)).toMatchObject({ total: 4 });
+	expect(await listMitmFlows(directory, query, undefined, cache)).toMatchObject({ total: 8, totalCached: false });
+	expect(await listMitmFlows(directory, query, undefined, cache, hidden)).toMatchObject({
+		total: 4,
+		totalCached: true,
+	});
+});
+
+test("the host filter is stored per project, refused unless it is a list of hosts, and read back after a restart", async () => {
+	const projects = [
+		{ id: "a", name: "A" },
+		{ id: "b", name: "B" },
+	];
+	const center = new MitmCenter(root, () => projects, missingDocker);
+	insert("keep");
+	insert("junk", 200, "proxy", "hahah.test.com");
+	const query = new URLSearchParams();
+	expect(center.hostFilter("a")).toEqual([]);
+	expect((await center.listFlows("a", query)).total).toBe(2);
+	// Written as the operator may type it: mixed case, a trailing dot, a repeat.
+	expect(
+		await center.saveHostFilter("a", { hosts: [" HAHAH.Test.COM. ", "hahah.test.com", "*.CDN.test.com"] }),
+	).toEqual({
+		hosts: ["*.cdn.test.com", "hahah.test.com"],
+	});
+	const path = join(root, "mitm", "a", "host-filter.json");
+	expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ hosts: ["*.cdn.test.com", "hahah.test.com"] });
+	expect(statSync(path).mode & 0o777).toBe(0o600);
+	expect((await center.listFlows("a", query)).items.map((flow) => flow.id)).toEqual(["keep"]);
+	for (const bad of [
+		{ hosts: "hahah.test.com" },
+		{ hosts: [1] },
+		{ hosts: [""] },
+		{ hosts: ["a..b"] },
+		{ hosts: ["-a.test.com"] },
+		{ hosts: ["http://a.test.com"] },
+		{ hosts: ["a.test.com:80"] },
+		{ hosts: ["*.test.com/path"] },
+		{ hosts: ["*."] },
+		{ hosts: ["*"] },
+		{ hosts: ["中文.test.com"] },
+		{ hosts: Array.from({ length: 501 }, () => "a.test.com") },
+	])
+		expect(() => center.saveHostFilter("a", bad)).toThrow(MitmError);
+	expect(() => center.saveHostFilter("missing", [])).toThrow();
+	// A refused list leaves the saved one as it was, and another project has its own.
+	expect(center.hostFilter("a")).toEqual(["*.cdn.test.com", "hahah.test.com"]);
+	expect(center.hostFilter("b")).toEqual([]);
+	const restarted = new MitmCenter(root, () => projects, missingDocker);
+	expect(restarted.hostFilter("a")).toEqual(["*.cdn.test.com", "hahah.test.com"]);
+	// Emptying the list brings the traffic back.
+	expect(restarted.saveHostFilter("a", [])).toEqual({ hosts: [] });
+	expect((await restarted.listFlows("a", query)).total).toBe(2);
+	restarted.saveHostFilter("a", ["hahah.test.com"]);
+	// A list that cannot be read hides nothing, and the log says so.
+	const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+	writeFileSync(path, "{not json");
+	expect(restarted.hostFilter("a")).toEqual([]);
+	expect(logged).toHaveBeenCalled();
+	logged.mockRestore();
+	// Clearing the packets keeps the list: it is the operator's, not the capture's.
+	restarted.saveHostFilter("a", ["hahah.test.com"]);
+	await restarted.clear("a");
+	expect(restarted.hostFilter("a")).toEqual(["hahah.test.com"]);
+});
+
+test("the host-filter route answers, saves and keeps projects apart like the other MITM routes", async () => {
+	let active = "a";
+	const center = new MitmCenter(
+		root,
+		() => [
+			{ id: "a", name: "A" },
+			{ id: "b", name: "B" },
+		],
+		missingDocker,
+	);
+	insert("keep");
+	insert("junk", 200, "proxy", "hahah.test.com");
+	server = createServer((req, res) => {
+		void handleMitmApi(req, res, center, { project: () => ({ id: active }), authorized: () => true });
+	});
+	await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("No listen address");
+	const origin = `http://127.0.0.1:${address.port}`;
+	const read = (projectId: string) => fetch(`${origin}/api/mitm/host-filter?projectId=${projectId}`);
+	const save = (body: unknown) =>
+		fetch(`${origin}/api/mitm/host-filter`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(body),
+		});
+	expect(await (await read("a")).json()).toEqual({ hosts: [] });
+	expect((await read("b")).status).toBe(409);
+	expect((await save({ projectId: "b", hosts: ["hahah.test.com"] })).status).toBe(409);
+	expect((await save({ projectId: "a", hosts: ["not a host"] })).status).toBe(400);
+	expect((await save({ projectId: "a", hosts: [`${"a".repeat(64)}.com`] })).status).toBe(400);
+	const saved = await save({ projectId: "a", hosts: ["Hahah.Test.com", "*.cdn.test.com"] });
+	expect(saved.status).toBe(200);
+	expect(await saved.json()).toEqual({ hosts: ["*.cdn.test.com", "hahah.test.com"] });
+	expect(await (await read("a")).json()).toEqual({ hosts: ["*.cdn.test.com", "hahah.test.com"] });
+	expect(await (await fetch(`${origin}/api/mitm/flows?projectId=a`)).json()).toMatchObject({
+		total: 1,
+		items: [{ id: "keep" }],
+	});
+	active = "b";
+	expect(await (await read("b")).json()).toEqual({ hosts: [] });
+});

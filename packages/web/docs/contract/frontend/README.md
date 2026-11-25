@@ -6,8 +6,8 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| [http-api.json](http-api.json) | 96 个 HTTP 操作，OpenAPI 3.0：每个操作要过哪几道门、每个参数和请求体的示例、每种状态码的响应结构和示例 |
-| [sentinel.postman_collection.json](sentinel.postman_collection.json) | Postman 集合：同样的 96 个操作按功能分组，每个请求的 Examples 里存着各种状态码的响应样例；最后一个分组是 WebSocket |
+| [http-api.json](http-api.json) | 98 个 HTTP 操作，OpenAPI 3.0：每个操作要过哪几道门、每个参数和请求体的示例、每种状态码的响应结构和示例 |
+| [sentinel.postman_collection.json](sentinel.postman_collection.json) | Postman 集合：同样的 98 个操作按功能分组，每个请求的 Examples 里存着各种状态码的响应样例；最后一个分组是 WebSocket |
 | [sentinel.postman_environment.json](sentinel.postman_environment.json) | Postman 环境：下面 5 个变量 |
 | [websocket-messages.json](websocket-messages.json) | 不导入，查：347 种 WebSocket 消息的结构、样例和服务端会回什么 |
 | [schemas.generated.json](schemas.generated.json) | 不导入：上面几个文件里响应结构的来源，从后端的 TypeScript 类型生成，可以拿去做校验或生成类型 |

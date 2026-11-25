@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { containerPrefix, execInContainer, runDocker, SENTINEL_IMAGE } from "./docker.ts";
 import { installProjectMitmCa, projectMitmDirectory } from "./mitm-certificate.ts";
+import { normalizeHostFilter } from "./mitm-host-filter.ts";
 import {
 	deleteMitmFlows,
 	getMitmFlow,
@@ -18,7 +19,7 @@ import {
 	type MitmReader,
 	readMitmStore,
 } from "./mitm-store.ts";
-import type { MitmConfig, MitmStatus, MitmStorage } from "./mitm-types.ts";
+import type { MitmConfig, MitmHostFilter, MitmStatus, MitmStorage } from "./mitm-types.ts";
 import { readReplaydBinary, replaydArchFromUname, replaydBinaryHint } from "./replayd-binary.ts";
 import {
 	prepareWebFuzzRaw,
@@ -239,6 +240,42 @@ export class MitmCenter {
 		renameSync(`${path}.tmp`, path);
 	}
 
+	private hostFilterPath(id: string): string {
+		return join(this.root, id, "host-filter.json");
+	}
+
+	/**
+	 * The hosts the project keeps out of its traffic list. A list that cannot be
+	 * read hides nothing: it must not keep the operator from their traffic.
+	 */
+	hostFilter(id: string): string[] {
+		this.project(id);
+		const path = this.hostFilterPath(id);
+		if (!existsSync(path)) return [];
+		try {
+			return normalizeHostFilter(JSON.parse(readFileSync(path, "utf8")));
+		} catch (error) {
+			console.error("[mitm] 过滤域名名单无法读取，按没有名单处理：", error instanceof Error ? error.message : error);
+			return [];
+		}
+	}
+
+	/**
+	 * Replace the list. It is a file next to the capture, not part of the proxy
+	 * configuration: hiding hosts from a list changes nothing the proxy does,
+	 * so the proxy keeps running and its connections stay up.
+	 */
+	saveHostFilter(id: string, value: unknown): MitmHostFilter {
+		this.project(id);
+		const hosts = normalizeHostFilter(value);
+		mkdirSync(join(this.root, id), { recursive: true, mode: 0o700 });
+		const path = this.hostFilterPath(id);
+		writeFileSync(`${path}.tmp`, JSON.stringify({ hosts }), { mode: 0o600 });
+		renameSync(`${path}.tmp`, path);
+		this.flowCounts.clear();
+		return { hosts };
+	}
+
 	private async inspect(id: string): Promise<DockerState | null> {
 		const result = await this.docker(["inspect", this.container(id)], { timeoutMs: 15000 });
 		if (result.code !== 0) {
@@ -272,7 +309,7 @@ export class MitmCenter {
 
 	/** Docker Desktop cannot safely share WAL shared memory between Linux and the host. */
 	async listFlows(id: string, params: URLSearchParams) {
-		return listMitmFlows(this.directory(id), params, await this.reader(id), this.flowCounts);
+		return listMitmFlows(this.directory(id), params, await this.reader(id), this.flowCounts, this.hostFilter(id));
 	}
 
 	async storage(id: string): Promise<MitmStorage> {

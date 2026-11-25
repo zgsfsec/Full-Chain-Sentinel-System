@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import type { MitmStatus } from "../../../src/mitm-types.ts";
-import { MitmFlowLink, MitmPage, MitmRawMessage, mitmProxyEndpoint } from "./MitmPage.tsx";
+import { MitmFlowLink, MitmHiddenHosts, MitmPage, MitmRawMessage, mitmProxyEndpoint } from "./MitmPage.tsx";
 
 test("proxy address uses the console IP or host LAN IP and respects loopback binding", () => {
 	const status: MitmStatus = {
@@ -92,4 +92,20 @@ test("flow address is a single complete URL including path and query", () => {
 	);
 	expect(html).toContain("<span>https://example.com/api/users?page=1</span>");
 	expect(html).not.toContain("mitm-flow-path");
+});
+
+test("the hidden-hosts control names the count once anything is hidden and lists them on hover", () => {
+	const render = (hosts: string[]) =>
+		renderToStaticMarkup(createElement(MitmHiddenHosts, { hosts, disabled: false, onEdit: () => {} }));
+	const empty = render([]);
+	expect(empty).toContain("隐藏域名");
+	expect(empty).not.toContain("已隐藏");
+	expect(empty).not.toContain("title=");
+	const hidden = render(["*.cdn.test.com", "hahah.test.com"]);
+	expect(hidden).toContain("已隐藏 2 个域名的流量");
+	// The names are the control's tooltip, so the operator can see what is hidden without opening it.
+	expect(hidden).toContain('title="*.cdn.test.com\nhahah.test.com"');
+	expect(renderToStaticMarkup(createElement(MitmHiddenHosts, { hosts: [], disabled: true, onEdit: () => {} }))).toContain(
+		"disabled",
+	);
 });

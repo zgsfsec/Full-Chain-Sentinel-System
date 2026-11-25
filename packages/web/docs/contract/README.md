@@ -280,7 +280,7 @@
 | 文档覆盖与交叉核对 | `packages/web/test/contract/docs.test.ts` | 每种消息有且只有一个条目；上行条目列全了处理函数回复和广播的消息、可能回的失败文案；每条的 JSON 样例与类型校验过的样例一致 |
 | 文档对照真实后端 | `packages/web/test/contract/replay.test.ts` | 把每种可以安全发送的上行消息的样例发给真实后端：它回的每种消息、每条失败文案都是条目里列了的，每条消息都符合生成的结构 |
 | HTTP 路由核对 | `packages/web/test/contract/http-doc.test.ts` | `openapi.yaml` 的路径与 `server.ts` 里实际匹配的路由一一对应；版本号与控制台版本一致 |
-| HTTP 文档对照真实后端 | `packages/web/test/contract/http-replay.test.ts` | 把 96 个 HTTP 操作里可以发送的 88 个按文档的示例发给真实后端：状态码是文档列了的、也是步骤预期的，每个 JSON 响应符合文档给这个状态码的结构 |
+| HTTP 文档对照真实后端 | `packages/web/test/contract/http-replay.test.ts` | 把 98 个 HTTP 操作里可以发送的 90 个按文档的示例发给真实后端：状态码是文档列了的、也是步骤预期的，每个 JSON 响应符合文档给这个状态码的结构 |
 | 导入文件自洽 | `packages/web/test/contract/frontend-docs.test.ts` | `http-api.json` 的引用都能解析，只用了 OpenAPI 3.0 的关键字；每个示例符合旁边的结构；Postman 集合发的请求和存的响应就是文档里的示例；`websocket-messages.json` 有全部 347 种消息，内容与各功能域文档一致 |
 | 生成物不过期 | `npm --prefix packages/web run check:contract` | 文案表、常量表、结构定义、导入文件都与源码一致 |
 

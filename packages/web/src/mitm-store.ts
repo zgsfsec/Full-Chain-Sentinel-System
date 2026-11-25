@@ -307,6 +307,8 @@ export async function listMitmFlows(
 	params: URLSearchParams,
 	reader: MitmReader = readMitmStore(directory),
 	counts?: MitmCountCache,
+	/** Hosts kept out of the page and its count; see mitm-host-filter.ts for the two forms. */
+	hiddenHosts: readonly string[] = [],
 ): Promise<MitmFlowPage> {
 	const requestedPage = Number(params.get("page") ?? 1);
 	const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? Math.min(requestedPage, 1_000_000) : 1;
@@ -353,6 +355,21 @@ export async function listMitmFlows(
 	} else if (status && /^\d{3}$/.test(status)) {
 		where.push("status = ?");
 		values.push(Number(status));
+	}
+	// A hidden host leaves the list and the count. What the proxy records never
+	// carries a port, so a full host is compared as it is.
+	const hidden = hiddenHosts.filter((host) => !host.startsWith("*.")).map((host) => host.toLowerCase());
+	if (hidden.length > 0) {
+		where.push(`lower(host) NOT IN (${hidden.map(() => "?").join(", ")})`);
+		values.push(...hidden);
+	}
+	// `*.test.com` is the suffix `.test.com`: the last characters are compared,
+	// so a `_` in a name cannot widen the match the way a pattern would.
+	for (const entry of hiddenHosts) {
+		if (!entry.startsWith("*.") || entry.length < 3) continue;
+		const domain = `.${entry.slice(2).toLowerCase()}`;
+		where.push("substr(lower(host), -?) <> ?");
+		values.push(domain.length, domain);
 	}
 	const clause = where.join(" AND ");
 	const countKey = JSON.stringify([directory, clause, values]);

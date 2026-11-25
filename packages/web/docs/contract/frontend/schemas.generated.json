@@ -2664,6 +2664,24 @@
 				}
 			}
 		},
+		"Http.MitmHostFilterInput": {
+			"allOf": [
+				{
+					"type": "object",
+					"properties": {
+						"projectId": {
+							"type": "string"
+						}
+					},
+					"required": [
+						"projectId"
+					]
+				},
+				{
+					"$ref": "#/$defs/MitmHostFilter"
+				}
+			]
+		},
 		"Http.ReportTemplateList": {
 			"type": "object",
 			"properties": {
@@ -3925,6 +3943,21 @@
 			"required": [
 				"n",
 				"v"
+			]
+		},
+		"MitmHostFilter": {
+			"type": "object",
+			"description": "Hosts a project keeps out of its traffic list. `a.test.com` is that host alone; `*.test.com` is every host under `test.com`, the domain itself not included. The traffic is still captured; it is only not listed.",
+			"properties": {
+				"hosts": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			},
+			"required": [
+				"hosts"
 			]
 		},
 		"MitmStatus": {
@@ -22622,6 +22655,12 @@
 		"Http.MitmFlowsQuery": {
 			"$ref": "#/$defs/Http.MitmFlowsQuery"
 		},
+		"Http.MitmHostFilter": {
+			"$ref": "#/$defs/MitmHostFilter"
+		},
+		"Http.MitmHostFilterInput": {
+			"$ref": "#/$defs/Http.MitmHostFilterInput"
+		},
 		"Http.MitmStatus": {
 			"$ref": "#/$defs/MitmStatus"
 		},
@@ -23740,7 +23779,7 @@
 		}
 	},
 	"typesSource": {
-		"hash": "0cea9cf7dd070e86e1bf65cad5d909569f7b5ecbcb35c840cf893f405d99efcc",
+		"hash": "e4baa8e27a46afa53a7edf3274ced4acb6e5142daa1ffb540e53710fc645bd53",
 		"files": [
 			"packages/agent/src/agent-loop.ts",
 			"packages/agent/src/agent.ts",
@@ -24354,6 +24393,7 @@
 			"packages/web/src/managed-path.ts",
 			"packages/web/src/mcp-config.ts",
 			"packages/web/src/mitm-certificate.ts",
+			"packages/web/src/mitm-host-filter.ts",
 			"packages/web/src/mitm-store.ts",
 			"packages/web/src/mitm-tool.ts",
 			"packages/web/src/mitm-types.ts",

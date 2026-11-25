@@ -388,6 +388,8 @@ const STEPS: Step[] = [
 	{ method: "GET", path: "/api/mitm", status: 200 },
 	{ method: "GET", path: "/api/mitm/storage", status: 200 },
 	{ method: "GET", path: "/api/mitm/flows", status: 200 },
+	{ method: "GET", path: "/api/mitm/host-filter", status: 200 },
+	{ method: "POST", path: "/api/mitm/host-filter", status: 200, changes: true },
 	{ method: "GET", path: "/api/mitm/webfuzz", status: 200 },
 	{ method: "POST", path: "/api/mitm/config", status: 200, changes: true },
 	{ method: "POST", path: "/api/mitm/clear", status: 200, changes: true },
