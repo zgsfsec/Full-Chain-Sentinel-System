@@ -112,8 +112,18 @@ test("stopped history queries run off the console event loop", async () => {
 		ticked = true;
 	}, 0);
 	try {
-		const rows = await readMitmStore(directory)([{ sql: "SELECT COUNT(*) AS n FROM flows", params: [] }]);
-		expect(rows[0][0]).toMatchObject({ n: 1 });
+		// The first query takes long enough that the loop it ran on would have had
+		// no time for the timer. A plain count answers from a warm thread before a
+		// zero-millisecond timer fires, which made this test fail at random.
+		const rows = await readMitmStore(directory)([
+			{
+				sql: "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 1000000) SELECT MAX(x) AS m FROM n",
+				params: [],
+			},
+			{ sql: "SELECT COUNT(*) AS n FROM flows", params: [] },
+		]);
+		expect(rows[0][0]).toMatchObject({ m: 1000000 });
+		expect(rows[1][0]).toMatchObject({ n: 1 });
 		expect(ticked).toBe(true);
 	} finally {
 		clearTimeout(timer);
