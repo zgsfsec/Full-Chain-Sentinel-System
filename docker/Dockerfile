@@ -75,8 +75,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 		wafw00f \
 		testssl.sh \
 		sqlmap \
-		# brute force / intranet movement
-		hashcat \
+		# brute force / intranet movement. hashcat is deliberately absent: the
+		# container gets no GPU (docker run passes no --gpus/--device), so it would
+		# crack through PoCL on the CPU and lose to john, while pulling ~400 MB of
+		# OpenCL/LLVM/clang dependencies. john covers CPU cracking.
 		john \
 		hydra \
 		netexec \
