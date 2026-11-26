@@ -131,9 +131,13 @@ test("a code audit engagement retains its doctrine and injects the audit brief o
 			read: false,
 		});
 		expect(brief).toContain("代码审计");
-		expect(brief).toContain("命令执行 RCE 和其他高危、严重漏洞");
-		// The doctrine says when to record the project as models, and that an existing record is read, not redone.
-		expect(brief).toContain("source_model_submit");
+		expect(brief).toContain("你的目标是源代码审计");
+		expect(brief).toContain("第一优先级为远程命令执行 RCE");
+		// The workflow starts from a sink scan and from whether the project already
+		// has a business model: absent, one is dispatched; present, it is used.
+		expect(brief).toContain("graudit");
+		expect(brief).toContain("api_model_read");
+		expect(brief).toContain("做业务建模");
 		expect(brief).toContain("不重复做");
 		expect(brief).toContain("/work/source");
 		expect(brief).not.toContain("CTF 竞赛-夺旗");
