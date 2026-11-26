@@ -24313,7 +24313,7 @@
 		}
 	},
 	"typesSource": {
-		"hash": "82b87362189149f16123c94aa093136ea58d2933db479a94284f90c787ef7fff",
+		"hash": "441160eb5729173b34af5e0f27cddca2821b554547366c2fcf50cbbe27af717a",
 		"files": [
 			"packages/agent/src/agent-loop.ts",
 			"packages/agent/src/agent.ts",

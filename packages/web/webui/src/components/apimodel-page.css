@@ -16,15 +16,66 @@
 	min-height: 0;
 }
 
-.apimodel-detail .apimodel-meta {
-	margin-block: 0;
-}
-
 .apimodel-detail .apimodel-doc {
 	display: block;
 	min-width: 0;
 	height: 100%;
 	box-sizing: border-box;
+}
+
+/* What a record is, what it covers and what it holds: one line each, the label
+   in a column of its own, so a label is never left somewhere inside a wrapped
+   row. Inside a line a label sits before its value; the value is set off by
+   its weight or its monospace, not by another colour. */
+.apimodel-meta {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin: 0;
+	font-size: 12px;
+	line-height: 22px;
+}
+
+.apimodel-meta__row {
+	display: flex;
+	align-items: baseline;
+	gap: 12px;
+	min-width: 0;
+}
+
+.apimodel-meta__row > dt {
+	flex: none;
+	color: var(--ant-color-text-tertiary);
+}
+
+.apimodel-meta__row > dd {
+	display: flex;
+	flex: 1 1 auto;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 2px 16px;
+	min-width: 0;
+	margin: 0;
+}
+
+.apimodel-meta__row > dd > span {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 6px;
+	min-width: 0;
+	max-width: 100%;
+	color: var(--ant-color-text-secondary);
+}
+
+.apimodel-meta__row .table-mono {
+	color: var(--ant-color-text);
+}
+
+/* A count on a tab is a numeral beside its label, not a chip. */
+.apimodel-tab-count {
+	color: var(--ant-color-text-tertiary);
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
 }
 
 /* The scope cell: the traffic target on top, the source range under it. Either
@@ -34,10 +85,4 @@
 	flex-direction: column;
 	gap: 2px;
 	min-width: 0;
-}
-
-.apimodel-scope__line {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
 }

@@ -7,23 +7,29 @@
  * tables it touches, the places that check the caller, and the calls it makes
  * to other services. No diagram: the chain is short and ordered, and a list
  * with a location on every line is what an auditor reads next to the source.
+ *
+ * The list is a list, not a table. Four columns in half the width left the path
+ * two hundred pixels, so every path was cut and the list scrolled sideways;
+ * two lines per endpoint give the path the whole width.
  */
 
 import { SearchOutlined } from "@ant-design/icons";
-import { Alert, Empty, Input, Select, Space, Table, Tag, Typography } from "antd";
+import { Alert, Empty, Input, Pagination, Select, Tag, Typography } from "antd";
 import { type ReactNode, useMemo, useState } from "react";
 import { t } from "../../i18n.ts";
-import type { SentinelApiSourceMapping } from "../../types.ts";
+import type { SentinelApiSourceMapping, SentinelCodeLocation } from "../../types.ts";
 import {
 	authKindColor,
 	authKindLabel,
 	callLayerLabel,
-	CodeLocationFull,
+	CodeLocation,
 	externalKindLabel,
-	methodColor,
+	Method,
 } from "./labels.tsx";
 
 const { Text } = Typography;
+
+const PAGE_SIZE = 20;
 
 /** The key an endpoint is stored and selected under. */
 export const mappingKey = (api: SentinelApiSourceMapping): string => `${api.method} ${api.path}`;
@@ -48,9 +54,8 @@ export function mappingMatches(api: SentinelApiSourceMapping, needle: string): b
 }
 
 /**
- * A handler name in two parts: the class or file in front, and the function at
- * the end. In a narrow cell the front is what gives way, so `OrderController.getOrder`
- * stays readable as `OrderCon…getOrder` instead of losing the function.
+ * A handler name in two parts: everything up to and including its last
+ * separator (`.`, `@` or `::`), and the function after it.
  */
 export function splitHandler(name: string): { head: string; tail: string } {
 	const at = Math.max(name.lastIndexOf("."), name.lastIndexOf("@"), name.lastIndexOf("::"));
@@ -61,14 +66,78 @@ export function splitHandler(name: string): { head: string; tail: string } {
 		: { head: "", tail: name };
 }
 
-function Section({ title, extra, children }: { title: string; extra?: ReactNode; children: ReactNode }) {
+/**
+ * A handler as a list row shows it: its class and function, without the
+ * packages in front. `com.future.action.appraise.AppraiseAction.list` reads as
+ * `AppraiseAction.list` there and in full on hover: a row has room for that
+ * and the module, not for the whole name.
+ */
+export function shortHandler(name: string): string {
+	const { head, tail } = splitHandler(name);
+	if (!head) return tail;
+	const separator = head.endsWith("::") ? "::" : head.slice(-1);
+	// The class is what follows the last dot in front of it, or PHP's backslash.
+	const front = head.slice(0, -separator.length);
+	const owner = front.slice(Math.max(front.lastIndexOf("."), front.lastIndexOf("\\")) + 1);
+	return `${owner}${separator}${tail}`;
+}
+
+function Section({ title, count, children }: { title: string; count?: string; children: ReactNode }) {
 	return (
-		<div className="codemodel-sec">
-			<div className="codemodel-sec__head">
-				<Text strong>{title}</Text>
-				{extra}
-			</div>
+		<section className="codemodel-sec">
+			<h5 className="codemodel-sec__head">
+				{title}
+				{count ? <span className="codemodel-sec__count">{count}</span> : null}
+			</h5>
 			{children}
+		</section>
+	);
+}
+
+/** What a section says when it has nothing to list. */
+function Nothing({ children }: { children: string }) {
+	return (
+		<Text type="secondary" className="codemodel-sec__empty">
+			{children}
+		</Text>
+	);
+}
+
+/** What a list of places in the code counts to. */
+const places = (count: number): string => t("{count} 处", { count });
+
+/** What a row of a section is made of. */
+interface RowProps {
+	/** A tag or a layer, in the slot every line of a section starts with. */
+	badge?: ReactNode;
+	/** What the row is about, when it is a name in the code. */
+	name?: string;
+	/** What the row is about, when it is a sentence. */
+	text?: string;
+	/** More about the name: the columns of a table, the call it goes through. */
+	detail?: string;
+	note?: string;
+	location: SentinelCodeLocation;
+}
+
+/**
+ * One row of a section: the badge, what it names, and the place in the source.
+ *
+ * The place comes right after what it belongs to — on the same line when the
+ * name is short enough to leave it room, on the line under it when it is not —
+ * and what else there is to say about the name comes after the place.
+ */
+function Row({ badge, name, text, detail, note, location }: RowProps) {
+	return (
+		<div className="codemodel-row">
+			<span className="codemodel-row__badge">{badge}</span>
+			<span className="codemodel-row__body">
+				{name ? <span className="codemodel-row__name">{name}</span> : null}
+				{text ? <span className="codemodel-row__text">{text}</span> : null}
+			</span>
+			<CodeLocation location={location} />
+			{detail ? <span className="codemodel-row__detail">{detail}</span> : null}
+			{note ? <span className="codemodel-row__note">{note}</span> : null}
 		</div>
 	);
 }
@@ -76,69 +145,64 @@ function Section({ title, extra, children }: { title: string; extra?: ReactNode;
 function MappingDetail({ api }: { api: SentinelApiSourceMapping }) {
 	return (
 		<div className="codemodel-mapping">
-			<Space wrap align="center" className="codemodel-mapping__title">
-				<Tag color={methodColor(api.method)} variant="filled">
-					{api.method}
-				</Tag>
-				<Text code className="codemodel-path">
-					{api.path}
-				</Text>
-				{api.confidence === "inferred" ? <Tag color="orange">{t("部分为推断")}</Tag> : null}
-			</Space>
-			{api.summary ? <Text strong>{api.summary}</Text> : null}
-			{api.module ? (
-				<Text type="secondary">
-					{t("模块")} {api.module}
-				</Text>
-			) : null}
-			<Section title={t("入口")}>
-				<div className="codemodel-line">
-					<Text code>{api.handler.name}</Text>
-					<CodeLocationFull location={api.handler.location} />
+			<header className="codemodel-mapping__head">
+				<div className="codemodel-mapping__path">
+					<Method method={api.method} />
+					<span className="codemodel-mapping__title">{api.path}</span>
+					{api.confidence === "inferred" ? <Tag color="orange">{t("部分为推断")}</Tag> : null}
 				</div>
+				{api.summary ? <div className="codemodel-mapping__summary">{api.summary}</div> : null}
+				{api.module ? (
+					<div className="codemodel-mapping__module">
+						{t("模块")} {api.module}
+					</div>
+				) : null}
+			</header>
+			<Section title={t("入口")}>
+				<Row name={api.handler.name} location={api.handler.location} />
 			</Section>
-			<Section title={t("调用链")} extra={<Text type="secondary">{t("{count} 步", { count: api.callChain.length })}</Text>}>
+			<Section title={t("调用链")} count={t("{count} 步", { count: api.callChain.length })}>
 				{api.callChain.length === 0 ? (
-					<Text type="secondary">{t("入口函数之外没有更深的调用。")}</Text>
+					<Nothing>{t("入口函数之外没有更深的调用。")}</Nothing>
 				) : (
 					<ol className="codemodel-chain">
 						{api.callChain.map((step, index) => (
-							<li key={`${step.name}-${index}`} className="codemodel-line">
-								<Tag>{callLayerLabel(step.layer)}</Tag>
-								<Text code>{step.name}</Text>
-								<CodeLocationFull location={step.location} />
-								{step.note ? <Text type="secondary">{step.note}</Text> : null}
+							<li key={`${step.name}-${index}`} className="codemodel-step">
+								<Row
+									badge={<span className="codemodel-row__layer">{callLayerLabel(step.layer)}</span>}
+									name={step.name}
+									note={step.note}
+									location={step.location}
+								/>
 							</li>
 						))}
 					</ol>
 				)}
 			</Section>
-			<Section title={t("数据访问")} extra={<Text type="secondary">{t("{count} 处", { count: api.dataAccess.length })}</Text>}>
+			<Section title={t("数据访问")} count={places(api.dataAccess.length)}>
 				{api.dataAccess.length === 0 ? (
-					<Text type="secondary">{t("这条调用链不读写数据库。")}</Text>
+					<Nothing>{t("这条调用链不读写数据库。")}</Nothing>
 				) : (
-					<ul className="codemodel-lines">
+					<div className="codemodel-lines">
 						{api.dataAccess.map((access, index) => (
-							<li key={`${access.table}-${index}`} className="codemodel-line">
-								<Tag color={access.operation === "write" ? "volcano" : "default"} variant="filled">
-									{access.operation === "write" ? t("写") : t("读")}
-								</Tag>
-								<Text code>{access.table}</Text>
-								{access.columns && access.columns.length > 0 ? (
-									<span className="codemodel-tags">
-										{access.columns.map((column) => (
-											<Tag key={column}>{column}</Tag>
-										))}
-									</span>
-								) : null}
-								{access.via ? <Text type="secondary">{t("经 {name}", { name: access.via })}</Text> : null}
-								<CodeLocationFull location={access.location} />
-							</li>
+							<Row
+								key={`${access.table}-${index}`}
+								badge={
+									<Tag color={access.operation === "write" ? "volcano" : "default"} variant="filled">
+										{access.operation === "write" ? t("写") : t("读")}
+									</Tag>
+								}
+								name={access.table}
+								detail={[(access.columns ?? []).join(", "), access.via ? t("经 {name}", { name: access.via }) : ""]
+									.filter(Boolean)
+									.join(" · ")}
+								location={access.location}
+							/>
 						))}
-					</ul>
+					</div>
 				)}
 			</Section>
-			<Section title={t("权限校验")} extra={<Text type="secondary">{t("{count} 处", { count: api.authChecks.length })}</Text>}>
+			<Section title={t("权限校验")} count={places(api.authChecks.length)}>
 				{api.authChecks.length === 0 ? (
 					// An empty list is the agent's finding, not a gap in the model: it is
 					// the first thing an auditor wants to see, so it is said out loud.
@@ -149,31 +213,33 @@ function MappingDetail({ api }: { api: SentinelApiSourceMapping }) {
 						description={t("整条调用链上没有找到登录、权限或资源归属的校验。审计时先看这里。")}
 					/>
 				) : (
-					<ul className="codemodel-lines">
+					<div className="codemodel-lines">
 						{api.authChecks.map((check, index) => (
-							<li key={`${check.kind}-${index}`} className="codemodel-line">
-								<Tag color={authKindColor(check.kind)}>{authKindLabel(check.kind)}</Tag>
-								{check.note ? <Text>{check.note}</Text> : null}
-								<CodeLocationFull location={check.location} />
-							</li>
+							<Row
+								key={`${check.kind}-${index}`}
+								badge={<Tag color={authKindColor(check.kind)}>{authKindLabel(check.kind)}</Tag>}
+								text={check.note}
+								location={check.location}
+							/>
 						))}
-					</ul>
+					</div>
 				)}
 			</Section>
-			<Section title={t("外部调用")} extra={<Text type="secondary">{t("{count} 处", { count: api.externalCalls.length })}</Text>}>
+			<Section title={t("外部调用")} count={places(api.externalCalls.length)}>
 				{api.externalCalls.length === 0 ? (
-					<Text type="secondary">{t("这条调用链不调用外部服务。")}</Text>
+					<Nothing>{t("这条调用链不调用外部服务。")}</Nothing>
 				) : (
-					<ul className="codemodel-lines">
+					<div className="codemodel-lines">
 						{api.externalCalls.map((call, index) => (
-							<li key={`${call.kind}-${index}`} className="codemodel-line">
-								<Tag>{externalKindLabel(call.kind)}</Tag>
-								<Text code>{call.target}</Text>
-								{call.note ? <Text type="secondary">{call.note}</Text> : null}
-								<CodeLocationFull location={call.location} />
-							</li>
+							<Row
+								key={`${call.kind}-${index}`}
+								badge={<Tag>{externalKindLabel(call.kind)}</Tag>}
+								name={call.target}
+								note={call.note}
+								location={call.location}
+							/>
 						))}
-					</ul>
+					</div>
 				)}
 			</Section>
 			{api.notes ? (
@@ -188,6 +254,7 @@ function MappingDetail({ api }: { api: SentinelApiSourceMapping }) {
 export function CodeModelApiPane({ apis }: { apis: SentinelApiSourceMapping[] }) {
 	const [search, setSearch] = useState("");
 	const [module, setModule] = useState<string>("");
+	const [page, setPage] = useState(1);
 	const [selected, setSelected] = useState<string | null>(null);
 
 	const modules = useMemo(() => {
@@ -198,14 +265,18 @@ export function CodeModelApiPane({ apis }: { apis: SentinelApiSourceMapping[] })
 		() => apis.filter((api) => (!module || (api.module ?? "") === module) && mappingMatches(api, search.trim().toLowerCase())),
 		[apis, module, search],
 	);
+	// The list can shorten under the operator (a submission, a filter): the page
+	// they were on is then the last one there is, never an empty one.
+	const at = Math.min(page, Math.max(1, Math.ceil(visible.length / PAGE_SIZE)));
+	const shown = visible.slice((at - 1) * PAGE_SIZE, at * PAGE_SIZE);
 	// A selection that a filter hid shows nothing: the first row of what is left takes over.
 	const current = visible.find((api) => mappingKey(api) === selected) ?? visible[0];
 	const currentKey = current ? mappingKey(current) : null;
 
 	return (
 		<div className="codemodel-split">
-			<div className="codemodel-split__list">
-				<div className="apimodel-toolbar codemodel-toolbar">
+			<div className="codemodel-panel codemodel-panel--list">
+				<div className="apimodel-toolbar codemodel-toolbar codemodel-panel__head">
 					<Input
 						allowClear
 						className="apimodel-search"
@@ -213,100 +284,90 @@ export function CodeModelApiPane({ apis }: { apis: SentinelApiSourceMapping[] })
 						placeholder={t("搜索路径、入口函数或表名")}
 						aria-label={t("搜索接口映射")}
 						value={search}
-						onChange={(event) => setSearch(event.target.value)}
+						onChange={(event) => {
+							setSearch(event.target.value);
+							setPage(1);
+						}}
 					/>
 					<Select
 						allowClear
 						placeholder={t("全部模块")}
 						aria-label={t("模块")}
-						style={{ width: 150 }}
+						style={{ width: 140 }}
 						value={module || undefined}
-						onChange={(value) => setModule(value ?? "")}
+						onChange={(value) => {
+							setModule(value ?? "");
+							setPage(1);
+						}}
 						options={modules}
 					/>
-					<Text type="secondary">{t("共 {n} 条", { n: visible.length })}</Text>
+					<Text type="secondary" className="codemodel-toolbar__count">
+						{t("共 {n} 条", { n: visible.length })}
+					</Text>
 				</div>
-				<Table<SentinelApiSourceMapping>
-					rowKey={mappingKey}
-					size="small"
-					dataSource={visible}
-					pagination={{ pageSize: 20, size: "small", showSizeChanger: false, hideOnSinglePage: true }}
-					rowClassName={(api) => (mappingKey(api) === currentKey ? "codemodel-row is-selected" : "codemodel-row")}
-					onRow={(api) => ({
-						onClick: () => setSelected(mappingKey(api)),
-						style: { cursor: "pointer" },
-					})}
-					locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("没有符合条件的接口映射")} /> }}
-						columns={[
-							{
-								title: t("方法"),
-								dataIndex: "method",
-								key: "method",
-								width: 76,
-								render: (method: string) => (
-									<Tag color={methodColor(method)} variant="filled">
-										{method}
-									</Tag>
-								),
-							},
-							{
-								title: t("路径"),
-								key: "path",
-								// The list is read by its path, so the path is the column that
-								// takes the width the others leave; the module rides under it
-								// rather than taking a column of its own.
-								render: (_: unknown, api: SentinelApiSourceMapping) => (
-									<div className="codemodel-endpoint">
-										<Text code className="codemodel-endpoint__path" title={api.path}>
+				{shown.length === 0 ? (
+					<div className="codemodel-endpoints__empty">
+						<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("没有符合条件的接口映射")} />
+					</div>
+				) : (
+					<ul className="codemodel-endpoints">
+					{shown.map((api) => {
+						const isSelected = mappingKey(api) === currentKey;
+							return (
+								<li key={mappingKey(api)}>
+									<button
+										type="button"
+										className={isSelected ? "codemodel-endpoint is-selected" : "codemodel-endpoint"}
+										aria-current={isSelected ? "true" : undefined}
+										onClick={() => setSelected(mappingKey(api))}
+									>
+										<Method method={api.method} />
+										<span className="codemodel-endpoint__path" title={api.path}>
 											{api.path}
-										</Text>
-										{api.module ? (
-											<Text type="secondary" className="codemodel-endpoint__module">
-												{api.module}
-											</Text>
-										) : null}
-									</div>
-								),
-							},
-							{
-								title: t("入口"),
-								dataIndex: ["handler", "name"],
-								key: "handler",
-								width: 150,
-								render: (name: string) => {
-									const { head, tail } = splitHandler(name);
-									return (
-										<Text code className="codemodel-handler" title={name}>
-											{head ? <span className="codemodel-handler__head">{head}</span> : null}
-											<span className="codemodel-handler__tail">{tail}</span>
-										</Text>
-									);
-								},
-							},
-							{
-								title: t("校验"),
-								dataIndex: "authChecks",
-								key: "authChecks",
-								width: 84,
-							// The count, or the warning that there is none: the list is where
-							// an unchecked endpoint is spotted.
-							render: (checks: SentinelApiSourceMapping["authChecks"]) =>
-								checks.length > 0 ? (
-									<Tag variant="filled">{t("{count} 处", { count: checks.length })}</Tag>
-								) : (
-									<Tag color="warning" variant="filled">
-										{t("未发现")}
-									</Tag>
-								),
-						},
-					]}
-				/>
+										</span>
+										<span className="codemodel-endpoint__check">
+											{api.authChecks.length > 0 ? (
+												// The count, or the warning that there is none: the list is where
+												// an unchecked endpoint is spotted.
+												<span className="codemodel-endpoint__checks">
+													{t("{count} 处校验", { count: api.authChecks.length })}
+												</span>
+											) : (
+												<Tag color="warning" variant="filled">
+													{t("未发现校验")}
+												</Tag>
+											)}
+										</span>
+										<span className="codemodel-endpoint__sub" title={api.handler.name}>
+											<span className="codemodel-handler">{shortHandler(api.handler.name)}</span>
+											{api.module ? <span className="codemodel-endpoint__module">· {api.module}</span> : null}
+										</span>
+									</button>
+								</li>
+							);
+						})}
+					</ul>
+				)}
+				{visible.length > PAGE_SIZE ? (
+					<Pagination
+						className="codemodel-pages"
+						size="small"
+						align="end"
+						current={at}
+						pageSize={PAGE_SIZE}
+						total={visible.length}
+						showSizeChanger={false}
+						onChange={setPage}
+					/>
+				) : null}
 			</div>
-			<div className="codemodel-split__detail">
+			<div className="codemodel-panel codemodel-panel--detail">
 				{current ? (
 					<MappingDetail api={current} />
 				) : (
-					<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("选择左侧的一个接口，看它的调用链、数据访问和权限校验。")} />
+					<div className="codemodel-endpoints__empty">
+						<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("选择左侧的一个接口，看它的调用链、数据访问和权限校验。")} />
+					</div>
 				)}
 			</div>
 		</div>

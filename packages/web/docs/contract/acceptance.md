@@ -136,7 +136,7 @@ node scripts/contract-proxy.mjs --target "https://10.0.0.5:7770/AbCdEfGhIjKl" \
 | 漏洞与资产 | （需要模型和 Docker）提交后复核、改级、标误报、导出；资产改状态和标签 | 时间线记录每次改动；导出可下载 | [vulns.md](websocket/vulns.md)、[assets.md](websocket/assets.md) |
 | 资产测绘与搜索 | 保存平台和密钥，测试连接，测试搜索密钥 | 密钥不回显；验证结果立即生效 | [discovery.md](websocket/discovery.md) |
 | POC | 导入模板；新增订阅源并同步；同步官方 POC | 进度和结果回显 | [pocs.md](websocket/pocs.md) |
-| 业务建模（需要模型和 Docker） | 开始建模；查看记录的接口文档、业务实体、API 源码映射、业务逻辑模型和时间线；导出 OpenAPI 和完整记录；标记已结束、删除；在工程里把「做业务建模」写进任务指令派发 | 没有提交内容的这一轮不留下记录；没有权限校验的接口被标出；执行 Agent、子代理和指挥官都能用 `api_model_read`，子代理和指挥官不能提交 | [modeling.md](websocket/modeling.md) |
+| 业务建模（需要模型和 Docker） | 开始建模；查看记录的接口文档、业务实体、API 源码映射、业务逻辑模型和时间线；悬停并复制一个源码位置；导出 OpenAPI 和完整记录；标记已结束、删除；在工程里把「做业务建模」写进任务指令派发 | 没有提交内容的这一轮不留下记录；没有权限校验的接口被标出；页面上没有代码框，源码位置显示为相对记录公共目录的路径，悬停和复制得到完整的绝对路径；执行 Agent、子代理和指挥官都能用 `api_model_read`，子代理和指挥官不能提交 | [modeling.md](websocket/modeling.md) |
 | 设备 | 安卓和 iOS 页各操作令牌与监听地址 | 状态实时更新 | [devices.md](websocket/devices.md) |
 | 凭证、报告开关、MCP | 启用并验证凭证；开关报告；增删改 MCP 服务器并测试连接 | 验证结果逐条显示 | [credentials-mcp.md](websocket/credentials-mcp.md) |
 | 代码情报 | 新建监控、立即检查、查看判定与日志 | 列表和判定结果实时更新 | [code-intel.md](websocket/code-intel.md) |

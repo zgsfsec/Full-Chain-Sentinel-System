@@ -20,9 +20,16 @@ import type {
 	SentinelBusinessLogicModel,
 } from "../types.ts";
 import { ApiModelPage } from "./ApiModelPage.tsx";
-import { CodeModelApiPane, mappingKey, mappingMatches, splitHandler } from "./codemodel/CodeModelApiPane.tsx";
+import { CodeModelApiPane, mappingKey, mappingMatches, shortHandler, splitHandler } from "./codemodel/CodeModelApiPane.tsx";
 import { CodeModelLogicPane, StateMachines } from "./codemodel/CodeModelLogicPane.tsx";
-import { authKindLabel, codeLocationText, methodColor, ruleKindLabel } from "./codemodel/labels.tsx";
+import {
+	authKindLabel,
+	codeLocationText,
+	commonRoot,
+	locationParts,
+	methodTone,
+	ruleKindLabel,
+} from "./codemodel/labels.tsx";
 
 const STAMP = "2026-11-25T08:00:00.000Z";
 const at = (line: number, file = "src/OrderController.java") => ({ file: `/work/${file}`, line });
@@ -227,14 +234,46 @@ test("a record with only an interface document looks as it did before: three tab
 	for (const absent of ["源码映射", "源码范围", "业务逻辑", "状态机"]) expect(html).not.toContain(absent);
 });
 
-test("a record with only the source half opens on its mapping, with every place written as path:line", () => {
+/** The page's text as read, without what only a hover shows. */
+const visibleText = (html: string): string => html.replace(/<[^>]+>/g, "");
+
+test("a record with only the source half opens on its mapping, with every place written against the directory they share", () => {
 	const html = renderPage({ detail: sourceOnly });
 	expect(tabLabels(html)).toEqual(["源码映射", "业务逻辑", "时间线"]);
-	// The first endpoint is selected by default.
-	for (const place of ["/work/src/OrderController.java:42", "/work/src/OrderService.java:88", "/work/src/OrderMapper.xml:7", "/work/src/OrderController.java:60"])
-		expect(html).toContain(place);
+	// The first endpoint is selected by default. Every file of the record is under
+	// /work/src, so that is what its places are shown relative to: the directory
+	// under the root in faint print, the file and the line in normal print.
+	const text = visibleText(html);
+	for (const place of ["OrderController.java:42", "OrderService.java:88", "OrderMapper.xml:7", "entity/Order.java:9"])
+		expect(text, place).toContain(place);
+	expect(text).not.toContain("/work/src/OrderController.java");
+	// The root is said once at the top of the page.
+	expect(text).toContain("位置相对/work/src");
+	// The whole path is what a hover and a copy hand over: it is what an agent can open.
+	expect(html).toContain('title="/work/src/OrderController.java:42"');
 	// The document half is absent, and its scope says so rather than hiding.
 	expect(html).toContain("未记录目标");
+});
+
+test("locations are shown against the deepest directory every file of the record shares", () => {
+	expect(commonRoot(["/work/src/a/A.java", "/work/src/b/B.java"])).toBe("/work/src");
+	// One file: its directory. A file with no directory: nothing to shorten by.
+	expect(commonRoot(["/work/src/A.java"])).toBe("/work/src");
+	expect(commonRoot(["A.java", "B.java"])).toBe("");
+	// `/work/a` and `/work2` meet inside a name: only whole directories count.
+	expect(commonRoot(["/work/a/A.java", "/work2/b/B.java"])).toBe("");
+	// Files on different roots, or one that names no directory, leave every path as it is.
+	expect(commonRoot(["/work/a/A.java", "/opt/b/B.java"])).toBe("");
+	expect(commonRoot(["/work/src/A.java", "B.java"])).toBe("");
+	expect(commonRoot([])).toBe("");
+	expect(locationParts("/work/src/entity/Order.java", "/work/src")).toEqual({ dir: "entity/", file: "Order.java" });
+	// A file outside the root keeps its whole path rather than a misleading short one.
+	expect(locationParts("/opt/other/B.java", "/work/src")).toEqual({ dir: "/opt/other/", file: "B.java" });
+});
+
+test("a pane rendered on its own shows whole paths: it has no record to take a root from", () => {
+	const html = renderToStaticMarkup(createElement(CodeModelApiPane, { apis: [unchecked] }));
+	expect(visibleText(html)).toContain("/work/src/OrderController.java:42");
 });
 
 test("the audit trail is there even for a record with nothing in it", () => {
@@ -251,16 +290,28 @@ test("a run still modeling can be closed from the page, and a failure is shown",
 	expect(html).toContain("会话已关闭");
 });
 
-test("an endpoint nobody checks is called out, and a checked one lists where", () => {
+test("an endpoint nobody checks is called out, and a checked one counts where", () => {
 	const html = renderToStaticMarkup(createElement(CodeModelApiPane, { apis: [unchecked, checked] }));
-	// The list marks the unchecked endpoint; the detail explains it, since it is selected first.
-	expect((html.match(/未发现/g) ?? []).length).toBeGreaterThanOrEqual(2);
+	// The list marks the unchecked endpoint with a warning; a checked one only counts.
+	expect(html).toContain("未发现校验");
+	expect(html).toContain("1 处校验");
+	// The detail explains the first one, since it is selected.
 	expect(html).toContain("未发现权限校验");
 	expect(html).toContain("整条调用链上没有找到登录、权限或资源归属的校验");
-	// The other endpoint is in the list with its one check counted.
-	expect(html).toContain("1 处");
+	// Every endpoint is a row the keyboard can reach; the first is the one selected.
+	const rows = html.match(/<button[^>]*class="codemodel-endpoint[^"]*"/g) ?? [];
+	expect(rows).toHaveLength(2);
+	expect(html).toContain('aria-current="true"');
 	expect(html).toContain("/api/orders");
 	expect(html).toContain("共 2 条");
+});
+
+test("nothing on the page is an inline code box: identifiers are plain text", () => {
+	// A path, a handler, a table or a file is monospace text; boxing every one of
+	// them was what made the page unreadable.
+	const page = renderPage({ detail: record, events: [{ at: STAMP, kind: "created" }] });
+	const list = renderPage({ items: [summaryOf(record)] });
+	for (const html of [page, list]) expect(html).not.toContain("<code");
 });
 
 test("the search reaches the path, the handler, a table, and the chain", () => {
@@ -281,6 +332,17 @@ test("a handler name keeps its function when the cell is narrow", () => {
 	// Nothing to split on, or only a separator at the very start: the whole name is the function.
 	expect(splitHandler("download_report")).toEqual({ head: "", tail: "download_report" });
 	expect(splitHandler(".hidden")).toEqual({ head: "", tail: ".hidden" });
+});
+
+test("a list row shows a handler as its class and function, whatever the stack writes in front", () => {
+	// The packages in front are what a row has no room for; the whole name is the tooltip.
+	expect(shortHandler("com.future.action.appraise.AppraiseAction.list")).toBe("AppraiseAction.list");
+	expect(shortHandler("App\\Http\\CouponController@grant")).toBe("CouponController@grant");
+	expect(shortHandler("CouponService::grant")).toBe("CouponService::grant");
+	expect(shortHandler("OrderController.getOrder")).toBe("OrderController.getOrder");
+	expect(shortHandler("download_report")).toBe("download_report");
+	const html = renderToStaticMarkup(createElement(CodeModelApiPane, { apis: [unchecked] }));
+	expect(html).toContain("OrderController.getOrder");
 });
 
 test("the logic pane lists its five parts with what each holds", () => {
@@ -308,8 +370,9 @@ test("a state machine shows its states and its transitions, and a transition wit
 test("the words the panes use for the source are one set", () => {
 	expect(authKindLabel("ownership")).toBe("资源归属校验");
 	expect(ruleKindLabel("invariant")).toBe("业务不变量");
-	expect(methodColor("DELETE")).toBe("red");
-	expect(methodColor("anything")).toBe("default");
+	expect(methodTone("DELETE")).toBe("delete");
+	expect(methodTone("get")).toBe("get");
+	expect(methodTone("anything")).toBe("other");
 	expect(codeLocationText({ file: "/work/a.java", line: 3 })).toBe("/work/a.java:3");
 	expect(codeLocationText({ file: "/work/a.java", line: 3, endLine: 9 })).toBe("/work/a.java:3-9");
 });

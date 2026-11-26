@@ -4185,8 +4185,11 @@ export const EN_MESSAGES: Record<string, string> = {
 	搜索接口映射: "Search endpoint mappings",
 	全部模块: "All modules",
 	没有符合条件的接口映射: "No endpoint mapping matches",
-	校验: "Checks",
-	未发现: "Not found",
+	未发现校验: "No check found",
+	"{count} 处校验": "{count} checks",
+	位置相对: "Locations relative to",
+	内容: "Contents",
+	迁移: "Transition",
 	"选择左侧的一个接口，看它的调用链、数据访问和权限校验。":
 		"Select an endpoint on the left to see its call chain, data access and permission checks.",
 	"这一部分还没有内容。": "This part is empty.",
@@ -4221,7 +4224,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	接口映射: "Endpoint mappings",
 	时间: "Time",
 	备注: "Notes",
-	方法: "Method",
 	"这条业务建模记录已被删除，不能再提交；需要继续建模，先点「结束建模」再重新开始。":
 		"This modeling record was deleted and takes no further submissions; to continue modeling, click End modeling first, then start again.",
 	"这条业务建模记录已经结束，不能再提交；需要继续建模，先点「结束建模」再重新开始。":

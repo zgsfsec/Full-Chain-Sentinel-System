@@ -2,170 +2,533 @@
  * The source half of a modeling record: the list of endpoints beside the
  * endpoint it explains, and the business logic model under it.
  *
+ * Two framed panels, the way the work graph and the engine workspace are built.
  * The split sits inside the page's pane, which owns the height; each side
  * scrolls on its own, so a long call chain never moves the list out of view.
- * Colours come from the console's variables and antd's, so the dark theme
- * needs no rules of its own here.
+ * Colours come from antd's variables, so the dark theme needs no rules of its
+ * own here. Nothing is boxed: a path, a function or a table is plain monospace
+ * text, and the hierarchy is made by size, colour and alignment.
  */
+
+/* ---------- Split and panels ---------- */
 
 .codemodel-split {
 	flex: 1;
 	min-height: 0;
-	display: flex;
-	gap: 12px;
+	display: grid;
+	grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+	gap: 14px;
 }
 
-.codemodel-split__list {
-	flex: 0 0 46%;
-	min-width: 0;
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-	overflow: auto;
-}
-
-.codemodel-split__detail {
-	flex: 1;
-	min-width: 0;
-	overflow: auto;
-	padding: 14px 18px;
-	border: 1px solid var(--console-border);
-	border-radius: 10px;
-}
-
-.codemodel-toolbar {
-	margin-bottom: 2px;
-}
-
-.codemodel-row.is-selected > td {
-	background: var(--ant-control-item-bg-active);
-}
-
-/* An endpoint cell holds two lines: the path keeps an ellipsis of its own, and
-   the module sits under it in small print instead of in a column. */
-.codemodel-endpoint {
+.codemodel-panel {
 	display: flex;
 	flex-direction: column;
-	align-items: flex-start;
-	gap: 2px;
 	min-width: 0;
-}
-
-.codemodel-endpoint__path {
-	display: block;
-	max-width: 100%;
+	min-height: 0;
 	overflow: hidden;
-	text-overflow: ellipsis;
+	border: 1px solid var(--ant-color-border-secondary);
+	border-radius: 8px;
+	background: var(--ant-color-bg-container);
+}
+
+.codemodel-panel__head {
+	flex: none;
+	padding: 10px 12px;
+	border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+/* The search takes what the module filter and the count leave: at this width a fixed 260px overflows. */
+.codemodel-toolbar .apimodel-search {
+	flex: 1 1 140px;
+	width: auto;
+	min-width: 0;
+}
+
+.codemodel-toolbar__count {
+	margin-inline-start: auto;
+	color: var(--ant-color-text-tertiary);
 	white-space: nowrap;
 }
 
-.codemodel-endpoint__module {
+.codemodel-pages {
+	flex: none;
+	margin: 0 !important;
+	padding: 8px 12px;
+	border-top: 1px solid var(--ant-color-border-secondary);
+}
+
+/* ---------- Method ---------- */
+
+/* Fixed width, so the paths beside the methods of a list all start at one edge. */
+.codemodel-method {
+	flex: none;
+	color: var(--ant-color-text-secondary);
+	font-family: var(--mono);
 	font-size: 12px;
-	line-height: 18px;
-}
-
-/* A handler name keeps its function and gives up its class: the front shrinks
-   a thousand times more readily than the end, which only gives way when the
-   function alone is wider than the cell. */
-.codemodel-handler code {
-	display: inline-flex;
-	max-width: 100%;
-}
-
-.codemodel-handler__head,
-.codemodel-handler__tail {
+	font-weight: 600;
+	letter-spacing: 0.02em;
 	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	min-width: 0;
 }
 
-.codemodel-handler__head {
-	flex: 0 1000 auto;
+.codemodel-method--get {
+	color: var(--ant-color-success);
 }
 
-.codemodel-handler__tail {
-	flex: 0 1 auto;
+.codemodel-method--post {
+	color: var(--ant-color-primary);
 }
 
-.codemodel-mapping {
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
+.codemodel-method--put,
+.codemodel-method--patch {
+	color: var(--ant-color-warning);
 }
 
-.codemodel-sec {
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
-	padding-top: 10px;
-	border-top: 1px solid var(--console-border);
+.codemodel-method--delete {
+	color: var(--ant-color-error);
 }
 
-.codemodel-sec__head {
-	display: flex;
-	align-items: baseline;
-	justify-content: space-between;
-	gap: 8px;
+.codemodel-method--any {
+	color: var(--ant-purple, var(--ant-color-text-secondary));
 }
 
-.codemodel-line {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 6px 10px;
-}
+/* ---------- Endpoint list ---------- */
 
-/* The chain is read top to bottom: the numbers are what make the order visible. */
-.codemodel-chain {
-	margin: 0;
-	padding-left: 24px;
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
-}
-
-.codemodel-chain li::marker {
-	color: var(--console-text);
-	font-variant-numeric: tabular-nums;
-}
-
-.codemodel-lines {
+.codemodel-endpoints {
+	flex: 1;
+	min-height: 0;
 	margin: 0;
 	padding: 0;
 	list-style: none;
+	overflow: auto;
+	overscroll-behavior: contain;
+}
+
+.codemodel-endpoints li + li {
+	border-top: 1px solid var(--ant-color-border-secondary);
+}
+
+.codemodel-endpoints__empty {
+	padding: 32px 16px;
+}
+
+/* A row is two lines on one grid: the method beside both, the path over its handler. */
+.codemodel-endpoint {
+	display: grid;
+	grid-template-columns: 52px minmax(0, 1fr) auto;
+	grid-template-rows: auto auto;
+	align-items: center;
+	column-gap: 10px;
+	width: 100%;
+	padding: 7px 14px 7px 10px;
+	border: 0;
+	background: transparent;
+	color: var(--ant-color-text);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.codemodel-endpoint:hover,
+.codemodel-endpoint:focus-visible {
+	background: var(--ant-color-bg-text-hover);
+}
+
+.codemodel-endpoint.is-selected,
+.codemodel-endpoint.is-selected:hover {
+	background: var(--ant-color-primary-bg);
+	box-shadow: inset 2px 0 var(--ant-color-primary);
+}
+
+.codemodel-endpoint:focus-visible {
+	outline-offset: -2px;
+}
+
+.codemodel-endpoint .codemodel-method {
+	grid-column: 1;
+	grid-row: 1 / span 2;
+}
+
+.codemodel-endpoint__path {
+	grid-column: 2;
+	grid-row: 1;
+	min-width: 0;
+	overflow: hidden;
+	font-family: var(--mono);
+	font-size: 13px;
+	line-height: 20px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.codemodel-endpoint__sub {
+	grid-column: 2;
+	grid-row: 2;
 	display: flex;
-	flex-direction: column;
+	align-items: baseline;
 	gap: 6px;
-}
-
-.codemodel-tags {
-	display: inline-flex;
-	flex-wrap: wrap;
-	gap: 4px;
-}
-
-.codemodel-tag-mono {
-	font-family: var(--ant-font-family-code);
+	min-width: 0;
+	overflow: hidden;
+	color: var(--ant-color-text-secondary);
 	font-size: 12px;
+	line-height: 18px;
+	white-space: nowrap;
+}
+
+/* The handler is shown as its class and function; the row gives it and the
+   module each a share and truncates rather than wraps. */
+.codemodel-handler,
+.codemodel-endpoint__module {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.codemodel-handler {
+	font-family: var(--mono);
+}
+
+.codemodel-endpoint__check {
+	grid-column: 3;
+	grid-row: 1 / span 2;
+	justify-self: end;
+	padding-inline-start: 8px;
+	white-space: nowrap;
+}
+
+/* With a check the line only counts; without one it is the warning. */
+.codemodel-endpoint__checks {
+	color: var(--ant-color-text-tertiary);
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Location ---------- */
+
+/* A location is three parts on one line: the directory in faint print, the
+   file's name and the line in normal print. The name gives way only when it
+   alone is wider than the line; the line never does.
+   The directory is shown whole or not at all. It takes no part in the
+   shrinking: when it does not fit beside the name it is sent to a second line,
+   which the first line's height cuts off. A directory cut to `…e/` reads as a
+   directory called e, and one cut anywhere loses the part that tells a file
+   from another of the same name.
+   The copy button keeps its place beside the text, so nothing moves when it
+   appears. */
+.codemodel-loc {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	max-width: 100%;
+	min-width: 0;
+	font-family: var(--mono);
+	font-size: 12px;
+	line-height: 20px;
+	white-space: nowrap;
+	vertical-align: bottom;
+}
+
+/* Reversed, so that the line is filled from the name's end: the line number,
+   the name, and only then the directory. Filled the other way, a directory
+   too wide would take the first line and send the name to the one cut off. */
+.codemodel-loc__path {
+	display: flex;
+	flex: 0 1 auto;
+	flex-direction: row-reverse;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	height: 20px;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.codemodel-loc__dir,
+.codemodel-loc__line {
+	flex: none;
+}
+
+.codemodel-loc__dir {
+	order: 3;
+	color: var(--ant-color-text-tertiary);
+}
+
+.codemodel-loc__file {
+	order: 2;
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	color: var(--ant-color-text);
+	text-overflow: ellipsis;
+}
+
+.codemodel-loc__line {
+	order: 1;
+	color: var(--ant-color-text);
+	font-variant-numeric: tabular-nums;
+}
+
+.codemodel-loc .codemodel-loc__copy.ant-btn {
+	flex: none;
+	width: 18px;
+	min-width: 18px;
+	height: 18px;
+	padding: 0;
+	color: var(--ant-color-text-tertiary);
+	font-size: 11px;
+	opacity: 0;
+	transition: opacity 0.15s;
+}
+
+.codemodel-loc:hover .codemodel-loc__copy.ant-btn,
+.codemodel-loc:focus-within .codemodel-loc__copy.ant-btn,
+.codemodel-loc .codemodel-loc__copy.ant-btn.is-copied {
+	opacity: 1;
+}
+
+/* A finger cannot hover: there the button is always in sight. */
+@media (hover: none) {
+	.codemodel-loc .codemodel-loc__copy.ant-btn {
+		opacity: 1;
+	}
 }
 
 .codemodel-locs {
 	display: inline-flex;
 	align-items: center;
-	flex-wrap: wrap;
-	gap: 4px 8px;
+	gap: 8px;
+	max-width: 100%;
+	white-space: nowrap;
 }
 
-/* In a table cell only the file's name and the line fit; the full path is the tooltip. */
-.codemodel-loc--brief {
-	display: inline-block;
-	max-width: 100%;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	vertical-align: bottom;
+.codemodel-loc__more {
+	color: var(--ant-color-text-secondary);
+	font-size: 12px;
 }
+
+/* ---------- Endpoint detail ---------- */
+
+.codemodel-panel--detail {
+	overflow: auto;
+	overscroll-behavior: contain;
+}
+
+/* How wide the slot for a tag or a layer is. The English names of the kinds
+   are half again as long as the Chinese ones. */
+.codemodel-mapping {
+	--codemodel-badge: 92px;
+	display: flex;
+	flex-direction: column;
+	padding: 16px 18px 20px;
+}
+
+:lang(en) .codemodel-mapping {
+	--codemodel-badge: 144px;
+}
+
+.codemodel-mapping__head {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.codemodel-mapping__path {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	min-width: 0;
+}
+
+/* The path is the title of the panel: too long for the line, it wraps rather than being cut. */
+.codemodel-mapping__title {
+	flex: 1 1 auto;
+	min-width: 0;
+	font-family: var(--mono);
+	font-size: 15px;
+	font-weight: 500;
+	line-height: 22px;
+	overflow-wrap: anywhere;
+}
+
+.codemodel-mapping__summary {
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 22px;
+}
+
+.codemodel-mapping__module {
+	color: var(--ant-color-text-secondary);
+	font-size: 12px;
+	line-height: 18px;
+}
+
+.codemodel-sec {
+	margin-top: 14px;
+	padding-top: 12px;
+	border-top: 1px solid var(--ant-color-border-secondary);
+}
+
+.codemodel-sec__head {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	margin: 0 0 4px;
+	color: var(--ant-color-text);
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 22px;
+}
+
+/* The heading's line runs out to the edge: it separates the sections without boxing them. */
+.codemodel-sec__head::after {
+	content: "";
+	flex: 1;
+	align-self: center;
+	border-top: 1px solid var(--ant-color-border-secondary);
+}
+
+.codemodel-sec__count {
+	color: var(--ant-color-text-tertiary);
+	font-size: 12px;
+	font-weight: 400;
+	font-variant-numeric: tabular-nums;
+}
+
+/* What a section has to say when it has nothing to list sits where the names would. */
+.codemodel-sec__empty {
+	display: block;
+	padding: 5px 0 5px calc(var(--codemodel-badge) + 12px);
+}
+
+/* Every line of a section is laid out the same way: a tag or a layer in a slot
+   at the start, what it names, and where it is.
+   The slot is the row's left padding, not a flex item: where the next thing
+   starts does not depend on what comes after it.
+   The location shares the line when the name leaves it room, and takes a line
+   of its own under the name when it does not — a Java handler is forty
+   characters before its file is named. A line is broken on the name's whole
+   width, never on what is left of it after the location has had its share. */
+.codemodel-row {
+	position: relative;
+	display: flex;
+	flex-wrap: wrap;
+	/* By the top, not by the baseline: the location's box is cut to one line, and
+	   what it would call its baseline is not where its text sits. */
+	align-items: flex-start;
+	gap: 2px 16px;
+	padding: 5px 0 5px calc(var(--codemodel-badge) + 12px);
+}
+
+.codemodel-row__badge {
+	position: absolute;
+	top: 5px;
+	left: 0;
+	width: var(--codemodel-badge);
+}
+
+.codemodel-row__layer {
+	color: var(--ant-color-text-tertiary);
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.codemodel-row__body {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	gap: 1px;
+	min-width: 0;
+}
+
+.codemodel-row__name,
+.codemodel-row__text {
+	min-width: 0;
+	font-size: 13px;
+	line-height: 20px;
+	overflow-wrap: anywhere;
+}
+
+.codemodel-row__name {
+	font-family: var(--mono);
+	font-weight: 500;
+}
+
+/* What else there is to say about a name — the columns of a table, what a step
+   does — is said after its place, each on a line of its own. */
+.codemodel-row__detail,
+.codemodel-row__note {
+	flex: 0 0 100%;
+	color: var(--ant-color-text-secondary);
+	font-size: 12px;
+	line-height: 18px;
+	overflow-wrap: anywhere;
+}
+
+.codemodel-row__detail {
+	font-family: var(--mono);
+}
+
+.codemodel-lines {
+	display: flex;
+	flex-direction: column;
+}
+
+.codemodel-row > .codemodel-loc {
+	flex: 0 1 auto;
+	max-width: 100%;
+}
+
+/* The chain is read top to bottom, so it is drawn as one: a dot per step on a
+   line that joins them. The first dot has no line above it, the last none
+   below. */
+.codemodel-chain {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.codemodel-step {
+	position: relative;
+	padding-left: 20px;
+}
+
+.codemodel-step::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 10px;
+	width: 1px;
+	margin-left: -0.5px;
+	background: var(--ant-color-border);
+}
+
+/* The dot sits on the centre of the line's first row of text: 5px of padding under 10px of half a line. */
+.codemodel-step:first-child::before {
+	top: 15px;
+}
+
+.codemodel-step:last-child::before {
+	bottom: auto;
+	height: 15px;
+}
+
+.codemodel-step:only-child::before {
+	display: none;
+}
+
+.codemodel-step::after {
+	content: "";
+	position: absolute;
+	top: 11px;
+	left: 6px;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--ant-color-text-secondary);
+}
+
+/* ---------- Business logic ---------- */
 
 .codemodel-logic {
 	display: flex;
@@ -184,22 +547,74 @@
 	padding: 0;
 }
 
+.codemodel-logic .codemodel-toolbar {
+	margin-bottom: 8px;
+}
+
+/* The endpoints a rule touches are identifiers, one to a line, not chips to count. */
+.codemodel-apis {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	color: var(--ant-color-text-secondary);
+	font-family: var(--mono);
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.codemodel-apis > span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.codemodel-transition {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--ant-color-text-secondary);
+	font-family: var(--mono);
+	font-size: 12px;
+}
+
+.codemodel-transition .anticon {
+	color: var(--ant-color-text-tertiary);
+	font-size: 11px;
+}
+
 .codemodel-machine {
 	display: flex;
 	flex-direction: column;
 	gap: 10px;
 }
 
+.codemodel-line {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px 10px;
+}
+
+.codemodel-tags {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
 /* Narrow screens read top to bottom: the list first, the endpoint it explains below it. */
 @media (max-width: 1100px) {
 	.codemodel-split {
-		flex-direction: column;
+		grid-template-columns: minmax(0, 1fr);
 		overflow: auto;
 	}
 
-	.codemodel-split__list,
-	.codemodel-split__detail {
+	/* The list keeps a share of the window, so the endpoint it explains stays within reach. */
+	.codemodel-panel--list {
 		flex: none;
+		max-height: 52dvh;
+	}
+
+	.codemodel-panel--detail {
 		overflow: visible;
 	}
 }

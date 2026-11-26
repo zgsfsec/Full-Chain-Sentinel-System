@@ -1711,15 +1711,6 @@ body {
 	width: 260px;
 }
 
-.apimodel-meta {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 10px;
-	margin: 12px 0;
-	font-size: 12px;
-}
-
 .apimodel-detail .ui-page__body {
 	display: flex;
 	flex-direction: column;

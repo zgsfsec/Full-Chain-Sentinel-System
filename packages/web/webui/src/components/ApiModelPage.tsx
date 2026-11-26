@@ -18,6 +18,10 @@
  * The list is project-scoped like the vulnerability hub: a record belongs to the
  * scope it was produced in. One row opens a drill-down with a tab per part —
  * only the parts the record has — plus the audit trail.
+ *
+ * The places in the source a record points at are shown relative to the
+ * directory they all share; the whole path stays on hover and is what gets
+ * copied, since that is what an agent can open.
  */
 
 import { ArrowLeftOutlined, DownOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
@@ -37,9 +41,11 @@ import type {
 	SentinelApiModelEvent,
 	SentinelApiModelStatus,
 	SentinelApiModelSummary,
+	SentinelCodeLocation,
 } from "../types.ts";
 import { CodeModelApiPane } from "./codemodel/CodeModelApiPane.tsx";
 import { CodeModelLogicPane } from "./codemodel/CodeModelLogicPane.tsx";
+import { commonRoot, CopyIcon, LocationRootContext } from "./codemodel/labels.tsx";
 import { formatModelTime, MODEL_STATUS_FILTERS, ModelStatusChip } from "./modelStatus.tsx";
 import "./apimodel-page.css";
 import "./codemodel/codemodel.css";
@@ -75,6 +81,30 @@ function logicCount(model: SentinelApiModel): number {
 /** Whether the record's source half was done at all. */
 function hasSource(model: SentinelApiModel): boolean {
 	return Boolean(model.source) || model.apis.length > 0 || logicCount(model) > 0;
+}
+
+/** Every file the record's source half points at: what its locations are shown relative to is worked out from all of them. */
+function locationFiles(model: SentinelApiModel): string[] {
+	const files: string[] = [];
+	const take = (...locations: readonly SentinelCodeLocation[]) => {
+		for (const { file } of locations) files.push(file);
+	};
+	for (const api of model.apis) {
+		take(
+			api.handler.location,
+			...api.callChain.map((step) => step.location),
+			...api.dataAccess.map((access) => access.location),
+			...api.authChecks.map((check) => check.location),
+			...api.externalCalls.map((call) => call.location),
+		);
+	}
+	const { logic } = model;
+	for (const entity of logic.entities) take(...entity.locations);
+	for (const relation of logic.relations) take(...relation.locations);
+	for (const machine of logic.stateMachines) take(...machine.locations, ...machine.transitions.flatMap((transition) => transition.locations));
+	for (const rule of logic.rules) take(...rule.locations);
+	for (const dependency of logic.apiDependencies) take(...dependency.locations);
+	return files;
 }
 
 /**
@@ -260,6 +290,8 @@ export function ApiModelPage({
 		const panes = panesOf(detail, events);
 		const pane = panes.some((entry) => entry.value === picked) ? (picked as DetailPane) : panes[0].value;
 		const source = hasSource(detail);
+		// The locations of a record that has none of the source are shown in full.
+		const root = source ? commonRoot(locationFiles(detail)) : "";
 		// One menu, four forms: the interface document as OpenAPI when there is one, and the whole record.
 		const exports = [
 			...(detail.pathCount > 0
@@ -308,47 +340,83 @@ export function ApiModelPage({
 					</Space>
 				}
 			>
-				<div className="apimodel-meta">
-					<ModelStatusChip status={detail.status} />
-					<Text type="secondary">
-						{t("目标")} <Text strong>{detail.target || t("未记录目标")}</Text>
-					</Text>
-					<Text type="secondary">
-						{t("路径")} <Text strong>{detail.pathCount}</Text>
-					</Text>
-					<Text type="secondary">
-						{t("操作")} <Text strong>{detail.operationCount}</Text>
-					</Text>
-					<Text type="secondary">
-						{t("实体")} <Text strong>{detail.entities.length}</Text>
-					</Text>
-					{source ? (
-						<>
-							<Text type="secondary">
-								{t("源码范围")} <Text strong>{detail.source || t("未记录")}</Text>
-							</Text>
-							<Text type="secondary">
-								{t("源码映射")} <Text strong>{detail.apis.length}</Text>
-							</Text>
-							<Text type="secondary">
-								{t("状态机")} <Text strong>{detail.logic.stateMachines.length}</Text>
-							</Text>
-							<Text type="secondary">
-								{t("规则")} <Text strong>{detail.logic.rules.length}</Text>
-							</Text>
-						</>
-					) : null}
-					<Text type="secondary">
-						{t("提交")} <Text strong>{detail.submissions}</Text> {t("次")}
-					</Text>
-					<Text type="secondary">{t("开始 {time}", { time: formatModelTime(detail.createdAt) })}</Text>
-					<Text type="secondary">{t("更新 {time}", { time: formatModelTime(detail.updatedAt) })}</Text>
-					{detail.sessionPath ? (
-						<Button type="link" size="small" onClick={() => onOpenSession(detail.sessionPath as string)}>
-							{t("打开发起它的会话")}
-						</Button>
-					) : null}
-				</div>
+				{/* What the record is, what it covers, and what it holds: three lines, so
+				    a label is always beside its value and not somewhere in a wrapped row. */}
+				<dl className="apimodel-meta">
+					<div className="apimodel-meta__row">
+						<dt>{t("状态")}</dt>
+						<dd>
+							<ModelStatusChip status={detail.status} />
+							<span>
+								{t("提交")} <Text strong>{detail.submissions}</Text> {t("次")}
+							</span>
+							<span>{t("开始 {time}", { time: formatModelTime(detail.createdAt) })}</span>
+							<span>{t("更新 {time}", { time: formatModelTime(detail.updatedAt) })}</span>
+							{detail.sessionPath ? (
+								<Button type="link" size="small" onClick={() => onOpenSession(detail.sessionPath as string)}>
+									{t("打开发起它的会话")}
+								</Button>
+							) : null}
+						</dd>
+					</div>
+					<div className="apimodel-meta__row">
+						<dt>{t("范围")}</dt>
+						<dd>
+							<span>
+								{t("目标")}{" "}
+								<Text className="table-mono" title={detail.target}>
+									{detail.target || t("未记录目标")}
+								</Text>
+							</span>
+							{source ? (
+								<span>
+									{t("源码范围")}{" "}
+									<Text className="table-mono" title={detail.source}>
+										{detail.source || t("未记录")}
+									</Text>
+								</span>
+							) : null}
+							{root ? (
+								<span className="apimodel-meta__root">
+									{t("位置相对")}
+									<span className="codemodel-loc" title={root}>
+										<span className="codemodel-loc__path">
+											<span className="codemodel-loc__file">{root}</span>
+										</span>
+										<CopyIcon text={root} />
+									</span>
+								</span>
+							) : null}
+						</dd>
+					</div>
+					<div className="apimodel-meta__row">
+						<dt>{t("内容")}</dt>
+						<dd>
+							<span>
+								{t("路径")} <Text strong>{detail.pathCount}</Text>
+							</span>
+							<span>
+								{t("操作")} <Text strong>{detail.operationCount}</Text>
+							</span>
+							<span>
+								{t("实体")} <Text strong>{detail.entities.length}</Text>
+							</span>
+							{source ? (
+								<>
+									<span>
+										{t("源码映射")} <Text strong>{detail.apis.length}</Text>
+									</span>
+									<span>
+										{t("状态机")} <Text strong>{detail.logic.stateMachines.length}</Text>
+									</span>
+									<span>
+										{t("规则")} <Text strong>{detail.logic.rules.length}</Text>
+									</span>
+								</>
+							) : null}
+						</dd>
+					</div>
+				</dl>
 				{detail.error ? (
 					<Alert type="error" showIcon className="ui-page__alert" title={detail.error} />
 				) : null}
@@ -361,66 +429,68 @@ export function ApiModelPage({
 						label: (
 							<Space size={6}>
 								{PANE_LABELS[entry.value]}
-								<Tag variant="filled">{entry.count}</Tag>
+								<span className="apimodel-tab-count">{entry.count}</span>
 							</Space>
 						),
 					}))}
 				/>
 
-				<div className="apimodel-stage">
-					{/* Only the panes the record has are rendered at all, like their tabs. */}
-					{has("document") ? (
-						<div className={paneClass("document")}>
-							<iframe
-								className="apimodel-doc"
-								title={`Swagger UI · ${detail.title}`}
-								sandbox="allow-scripts"
-								srcDoc={swaggerDocumentHtml(detail.openapi)}
-							/>
-						</div>
-					) : null}
-					{has("entities") ? (
-						<div className={paneClass("entities")}>
-							<div className="apimodel-pane__pad">
-								<div className="apimodel-entities">
-									{detail.entities.map((entity) => (
-										<EntityCard key={entity.name} entity={entity} />
-									))}
+				<LocationRootContext.Provider value={root}>
+					<div className="apimodel-stage">
+						{/* Only the panes the record has are rendered at all, like their tabs. */}
+						{has("document") ? (
+							<div className={paneClass("document")}>
+								<iframe
+									className="apimodel-doc"
+									title={`Swagger UI · ${detail.title}`}
+									sandbox="allow-scripts"
+									srcDoc={swaggerDocumentHtml(detail.openapi)}
+								/>
+							</div>
+						) : null}
+						{has("entities") ? (
+							<div className={paneClass("entities")}>
+								<div className="apimodel-pane__pad">
+									<div className="apimodel-entities">
+										{detail.entities.map((entity) => (
+											<EntityCard key={entity.name} entity={entity} />
+										))}
+									</div>
 								</div>
 							</div>
-						</div>
-					) : null}
-					{has("apis") ? (
-						<div className={paneClass("apis")}>
-							<CodeModelApiPane apis={detail.apis} />
-						</div>
-					) : null}
-					{has("logic") ? (
-						<div className={paneClass("logic")}>
+						) : null}
+						{has("apis") ? (
+							<div className={paneClass("apis")}>
+								<CodeModelApiPane apis={detail.apis} />
+							</div>
+						) : null}
+						{has("logic") ? (
+							<div className={paneClass("logic")}>
+								<div className="apimodel-pane__pad">
+									<CodeModelLogicPane logic={detail.logic} />
+								</div>
+							</div>
+						) : null}
+						<div className={paneClass("timeline")}>
 							<div className="apimodel-pane__pad">
-								<CodeModelLogicPane logic={detail.logic} />
+								<Timeline
+									items={events.map((event, index) => ({
+										key: `${event.at}-${index}`,
+										content: (
+											<div className="apimodel-event">
+												<Text type="secondary" className="apimodel-event__time">
+													{formatModelTime(event.at)}
+												</Text>
+												<Text strong>{eventLabel(event)}</Text>
+												{event.note ? <Text type="secondary">{event.note}</Text> : null}
+											</div>
+										),
+									}))}
+								/>
 							</div>
 						</div>
-					) : null}
-					<div className={paneClass("timeline")}>
-						<div className="apimodel-pane__pad">
-							<Timeline
-								items={events.map((event, index) => ({
-									key: `${event.at}-${index}`,
-									content: (
-										<div className="apimodel-event">
-											<Text type="secondary" className="apimodel-event__time">
-												{formatModelTime(event.at)}
-											</Text>
-											<Text strong>{eventLabel(event)}</Text>
-											{event.note ? <Text type="secondary">{event.note}</Text> : null}
-										</div>
-									),
-								}))}
-							/>
-						</div>
 					</div>
-				</div>
+				</LocationRootContext.Provider>
 			</Page>
 		);
 	}
@@ -450,12 +520,12 @@ export function ApiModelPage({
 				item.target || item.source ? (
 					<div className="apimodel-scope">
 						{item.target ? (
-							<Text code className="apimodel-scope__line" title={item.target}>
+							<Text className="table-mono" title={item.target}>
 								{item.target}
 							</Text>
 						) : null}
 						{item.source ? (
-							<Text type="secondary" className="apimodel-scope__line" title={item.source}>
+							<Text className="table-mono" title={item.source}>
 								{item.source}
 							</Text>
 						) : null}

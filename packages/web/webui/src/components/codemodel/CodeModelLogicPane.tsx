@@ -11,7 +11,7 @@
  * do not need one.
  */
 
-import { SearchOutlined } from "@ant-design/icons";
+import { ArrowRightOutlined, SearchOutlined } from "@ant-design/icons";
 import { Card, Collapse, Empty, Input, Select, Space, Table, Tabs, Tag, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { t } from "../../i18n.ts";
@@ -22,6 +22,7 @@ import type {
 	SentinelCodeRelation,
 	SentinelCodeRule,
 	SentinelCodeStateMachine,
+	SentinelCodeTransition,
 } from "../../types.ts";
 import { CodeLocationList, dependencyKindLabel, RULE_KINDS, ruleKindColor, ruleKindLabel } from "./labels.tsx";
 
@@ -59,7 +60,7 @@ function EntitiesTable({ entities }: { entities: SentinelCodeEntity[] }) {
 				locale={{ emptyText: entities.length === 0 ? EMPTY : undefined }}
 				columns={[
 					{ title: t("实体"), dataIndex: "name", key: "name", width: 180, render: (name: string) => <Text strong>{name}</Text> },
-					{ title: t("对应的表"), dataIndex: "table", key: "table", width: 180, ellipsis: true, render: (value?: string) => (value ? <Text code>{value}</Text> : "—") },
+					{ title: t("对应的表"), dataIndex: "table", key: "table", width: 180, ellipsis: true, render: (value?: string) => (value ? <Text className="table-mono" title={value}>{value}</Text> : "—") },
 					{
 						title: t("资源归属"),
 						dataIndex: "owner",
@@ -87,7 +88,7 @@ function EntitiesTable({ entities }: { entities: SentinelCodeEntity[] }) {
 							),
 					},
 					{ title: t("说明"), dataIndex: "description", key: "description", ellipsis: true, render: (value?: string) => value ?? "—" },
-					{ title: t("位置"), dataIndex: "locations", key: "locations", width: 220, render: (locations) => <CodeLocationList locations={locations} /> },
+					{ title: t("位置"), dataIndex: "locations", key: "locations", width: 244, render: (locations) => <CodeLocationList locations={locations} /> },
 				]}
 			/>
 		</>
@@ -107,7 +108,7 @@ function RelationsTable({ relations }: { relations: SentinelCodeRelation[] }) {
 				{ title: t("关系"), dataIndex: "kind", key: "kind", width: 110, render: (kind: string) => <Tag variant="filled">{kind}</Tag> },
 				{ title: t("终点"), dataIndex: "to", key: "to", width: 180, render: (to: string) => <Text strong>{to}</Text> },
 				{ title: t("说明"), dataIndex: "description", key: "description", ellipsis: true, render: (value?: string) => value ?? "—" },
-				{ title: t("位置"), dataIndex: "locations", key: "locations", width: 220, render: (locations) => <CodeLocationList locations={locations} /> },
+				{ title: t("位置"), dataIndex: "locations", key: "locations", width: 244, render: (locations) => <CodeLocationList locations={locations} /> },
 			]}
 		/>
 	);
@@ -127,7 +128,7 @@ export function StateMachines({ machines }: { machines: SentinelCodeStateMachine
 				label: (
 					<Space size={8} wrap>
 						<Text strong>{machine.subject}</Text>
-						{machine.field ? <Text code>{machine.field}</Text> : null}
+						{machine.field ? <Text className="table-mono">{machine.field}</Text> : null}
 						<Text type="secondary">
 							{t("{states} 个状态 · {transitions} 条迁移", {
 								states: machine.states.length,
@@ -156,23 +157,27 @@ export function StateMachines({ machines }: { machines: SentinelCodeStateMachine
 							dataSource={machine.transitions}
 							pagination={PAGE}
 							locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("没有记录到状态迁移。")} /> }}
+							// One transition is one move from a state to the next: it reads as one, not as two tags to pair up.
 							columns={[
-								{ title: t("从"), dataIndex: "from", key: "from", width: 120, render: (from: string) => <Tag>{from}</Tag> },
-								{ title: t("到"), dataIndex: "to", key: "to", width: 120, render: (to: string) => <Tag color="blue">{to}</Tag> },
+								{
+									title: t("迁移"),
+									key: "transition",
+									width: 220,
+									render: (_: unknown, transition: SentinelCodeTransition) => (
+										<span className="codemodel-transition">
+											<span>{transition.from}</span>
+											<ArrowRightOutlined />
+											<span>{transition.to}</span>
+										</span>
+									),
+								},
 								{
 									title: t("触发"),
 									dataIndex: "trigger",
 									key: "trigger",
-									width: 220,
+									width: 320,
 									ellipsis: true,
-									render: (value?: string) =>
-										value ? (
-											<Text code title={value}>
-												{value}
-											</Text>
-										) : (
-											"—"
-										),
+									render: (value?: string) => (value ? <Text className="table-mono" title={value}>{value}</Text> : "—"),
 								},
 								{
 									title: t("前置条件"),
@@ -197,7 +202,7 @@ export function StateMachines({ machines }: { machines: SentinelCodeStateMachine
 									title: t("位置"),
 									dataIndex: "locations",
 									key: "locations",
-									width: 200,
+									width: 244,
 									render: (locations) => <CodeLocationList locations={locations} />,
 								},
 							]}
@@ -262,7 +267,7 @@ function RulesTable({ rules }: { rules: SentinelCodeRule[] }) {
 						title: t("对象"),
 						dataIndex: "subject",
 						key: "subject",
-						width: 190,
+						width: 240,
 						ellipsis: true,
 						render: (subject: string) => (
 							<Text strong title={subject}>
@@ -285,21 +290,21 @@ function RulesTable({ rules }: { rules: SentinelCodeRule[] }) {
 						title: t("涉及接口"),
 						dataIndex: "apis",
 						key: "apis",
-						width: 230,
+						width: 290,
 						render: (apis?: string[]) =>
 							apis && apis.length > 0 ? (
-								<span className="codemodel-tags">
-									{apis.map((api) => (
-										<Tag key={api} className="codemodel-tag-mono">
-											{api}
-										</Tag>
-									))}
-								</span>
+									<span className="codemodel-apis">
+										{apis.map((api) => (
+											<span key={api} title={api}>
+												{api}
+											</span>
+										))}
+									</span>
 							) : (
 								"—"
 							),
 					},
-					{ title: t("位置"), dataIndex: "locations", key: "locations", width: 150, render: (locations) => <CodeLocationList locations={locations} /> },
+					{ title: t("位置"), dataIndex: "locations", key: "locations", width: 220, render: (locations) => <CodeLocationList locations={locations} /> },
 				]}
 			/>
 		</>
@@ -322,7 +327,7 @@ function DependenciesTable({ dependencies }: { dependencies: SentinelCodeApiDepe
 					width: 240,
 					ellipsis: true,
 					render: (from: string) => (
-						<Text code title={from}>
+						<Text className="table-mono" title={from}>
 							{from}
 						</Text>
 					),
@@ -335,13 +340,13 @@ function DependenciesTable({ dependencies }: { dependencies: SentinelCodeApiDepe
 					width: 240,
 					ellipsis: true,
 					render: (to: string) => (
-						<Text code title={to}>
+						<Text className="table-mono" title={to}>
 							{to}
 						</Text>
 					),
 				},
 				{ title: t("说明"), dataIndex: "description", key: "description", ellipsis: true, render: (value?: string) => value ?? "—" },
-				{ title: t("位置"), dataIndex: "locations", key: "locations", width: 220, render: (locations) => <CodeLocationList locations={locations} /> },
+				{ title: t("位置"), dataIndex: "locations", key: "locations", width: 248, render: (locations) => <CodeLocationList locations={locations} /> },
 			]}
 		/>
 	);
@@ -351,7 +356,8 @@ type LogicTab = "entities" | "relations" | "stateMachines" | "rules" | "apiDepen
 
 export function CodeModelLogicPane({ logic }: { logic: SentinelBusinessLogicModel }) {
 	const [tab, setTab] = useState<LogicTab>("entities");
-	const count = (value: number) => (value > 0 ? <Tag variant="filled">{value}</Tag> : null);
+	// The count is a numeral beside the label, not a chip: a row of chips is not what the tabs are about.
+	const count = (value: number) => (value > 0 ? <span className="apimodel-tab-count">{value}</span> : null);
 	return (
 		<div className="codemodel-logic">
 			<Tabs
