@@ -464,8 +464,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	已删除的会话: "Deleted session",
 	未命名会话: "Unnamed session",
 	"选择 {label}": "Select {label}",
-	"删除只能通过勾选记录进行：删除后证据与备注一并消失，不可恢复。":
-		"Findings can only be deleted by ticking records: evidence and notes go with them, and it cannot be undone.",
 	"记录里的证据引用与备注会一并删除；容器里的原文件不受影响。":
 		"The evidence references and notes stored with the records are deleted; the original files in the container are not.",
 	"正在统计影响…": "Counting what this takes with it…",
@@ -1098,8 +1096,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	从未同步: "Never synced",
 	从此分叉: "Fork from here",
 	代理: "Agent",
-	"代理提交的漏洞一律先记为「待确认」；确认、改级、标误报都在详情里完成，改动会记入时间线。":
-		"Every vulnerability the agent submits starts as Pending; confirm, re-rate and mark false positives from the detail view, and each change is recorded in the timeline.",
 	"代理用 vuln_submit 提交漏洞后会出现在这里（需要「设置 → 权限」中开启 vuln_submit）":
 		"Records appear here after the agent submits a vulnerability with vuln_submit (enable vuln_submit under Settings → Permissions)",
 	"代理自评（未评审）": "Agent self-rating (not reviewed)",
@@ -1824,8 +1820,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	"导出 Markdown": "Export Markdown",
 	"导出 YAML": "Export YAML",
 	导出全部: "Export all",
-	"导出只包含当前项目的记录与当前筛选条件。":
-		"An export contains only this project's records and the current filters.",
 	"将创建独立 Docker 容器与工作目录（~/.sentinel/projects/），工具全部在容器内执行。":
 		"Creates a dedicated Docker container and working directory (~/.sentinel/projects/); all tools run inside the container.",
 	"将删除项目「{name}」的容器并移除注册（工作目录与会话保留），输入完整项目名确认：":

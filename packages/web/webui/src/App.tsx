@@ -430,7 +430,7 @@ export function App() {
 		offset: number;
 		total: number;
 	} | null>(null);
-	/** Vulnerability hub: the active project's findings, its counts, and the current filter. */
+	/** Vulnerability hub: one page of the active project's findings, its counts, and the current filter. */
 	const [vulnItems, setVulnItems] = useState<SentinelVulnSummary[]>([]);
 	/** The filters the page is showing, readable from message handlers. */
 	const vulnFiltersRef = useRef<SentinelVulnFilters>({});
@@ -440,6 +440,14 @@ export function App() {
 		byStatus: { pending: 0, confirmed: 0, false_positive: 0, fixed: 0 },
 	});
 	const [vulnFilters, setVulnFilters] = useState<SentinelVulnFilters>({});
+	/** The list is paged on the server: the page it answered, and what the hub will ask for next. */
+	const [vulnTotal, setVulnTotal] = useState(0);
+	const [vulnPage, setVulnPage] = useState(1);
+	const [vulnPageSize, setVulnPageSize] = useState(50);
+	const vulnPageRef = useRef(1);
+	const vulnPageSizeRef = useRef(50);
+	/** The id of every finding under the filter, asked for when the operator selects the whole result. */
+	const [vulnFilterIds, setVulnFilterIds] = useState<string[] | null>(null);
 	/** The record the detail overlay shows, and the evidence file it is previewing. */
 	const [vulnView, setVulnView] = useState<VulnDetailView | null>(null);
 	const vulnDetailRequest = useMemo(() => new VulnDetailRequest(setVulnView), []);
@@ -1349,17 +1357,42 @@ export function App() {
 				case "subagent_result":
 					if (!message.ok && message.error) pushError(message.error);
 					break;
-				case "vulns":
+				case "vulns": {
 					setVulnStats(message.stats);
-					if (message.unfiltered && pageRef.current === "vulns") {
-						// Live broadcasts contain every finding. Re-query the active filter
-						// instead of replacing the filtered table with that full list.
-						send({ type: "list_vulns", filters: vulnFiltersRef.current });
-					} else {
-						setVulnItems(message.items);
+					setVulnItems(message.items);
+					setVulnTotal(message.total);
+					setVulnPage(message.page);
+					vulnPageRef.current = message.page;
+					setVulnPageSize(message.pageSize);
+					vulnPageSizeRef.current = message.pageSize;
+					if (message.ids) setVulnFilterIds(message.ids);
+					// A deletion or a new filter can empty the page the operator was on:
+					// step back once instead of leaving a blank page with records behind it.
+					if (message.items.length === 0 && message.total > 0 && message.page > 1) {
+						send({
+							type: "list_vulns",
+							filters: vulnFiltersRef.current,
+							page: message.page - 1,
+							pageSize: message.pageSize,
+						});
 					}
 					// A filtered or late list is not evidence that the selected record was deleted.
 					break;
+				}
+				case "vulns_changed": {
+					// The list is paged, so it is not broadcast: the hub asks again for the page
+					// it is showing. The counts come with the notice, for the badge and the dashboard.
+					setVulnStats(message.stats);
+					if (pageRef.current === "vulns") {
+						send({
+							type: "list_vulns",
+							filters: vulnFiltersRef.current,
+							page: vulnPageRef.current,
+							pageSize: vulnPageSizeRef.current,
+						});
+					}
+					break;
+				}
 				case "vuln":
 					if (message.vuln.projectId === snapshotRef.current?.project?.id && vulnDetailRequest.accept(message.vuln)) {
 						setVulnPreview(null);
@@ -1372,12 +1405,15 @@ export function App() {
 					setVulnDeletePreview({ count: message.count, evidence: message.evidence, notes: message.notes });
 					break;
 				case "vulns_deleted": {
-					// The broadcast that follows carries the unfiltered list, so the page
-					// asks again with the filters it is actually showing.
 					setVulnDeletePending(null);
 					setVulnDeletePreview(null);
 					vulnDetailRequest.close();
-					send({ type: "list_vulns", filters: vulnFiltersRef.current });
+					send({
+						type: "list_vulns",
+						filters: vulnFiltersRef.current,
+						page: vulnPageRef.current,
+						pageSize: vulnPageSizeRef.current,
+					});
 					break;
 				}
 				case "vuln_review_result":
@@ -2239,7 +2275,12 @@ export function App() {
 				send({ type: "get_proxy_config" });
 				break;
 			case "vulns":
-				send({ type: "list_vulns", filters: vulnFilters });
+				send({
+					type: "list_vulns",
+					filters: vulnFiltersRef.current,
+					page: vulnPageRef.current,
+					pageSize: vulnPageSizeRef.current,
+				});
 				break;
 			case "assets":
 				send({
@@ -2330,7 +2371,6 @@ export function App() {
 		send,
 		refreshStats,
 		loadFiles,
-		vulnFilters,
 		assetFilters,
 		assetPage,
 		assetPageSize,
@@ -2417,6 +2457,12 @@ export function App() {
 		setVulnFilters({});
 		vulnFiltersRef.current = {};
 		setVulnItems([]);
+		setVulnTotal(0);
+		setVulnPage(1);
+		vulnPageRef.current = 1;
+		setVulnPageSize(50);
+		vulnPageSizeRef.current = 50;
+		setVulnFilterIds(null);
 		vulnDetailRequest.close();
 		setVulnPreview(null);
 		vulnPreviewPathRef.current = null;
@@ -2494,15 +2540,42 @@ export function App() {
 		});
 	}, [page, connected, snapshot?.project?.id, send]);
 
-	/** Re-read the hub under the current filter. */
+	/** Re-read the hub under a new filter, which starts again from the first page. */
 	const loadVulns = useCallback(
 		(filters: SentinelVulnFilters) => {
 			setVulnFilters(filters);
 			vulnFiltersRef.current = filters;
-			send({ type: "list_vulns", filters });
+			setVulnPage(1);
+			vulnPageRef.current = 1;
+			setVulnFilterIds(null);
+			send({ type: "list_vulns", filters, page: 1, pageSize: vulnPageSizeRef.current });
 		},
 		[send],
 	);
+
+	/** Another page or page size of the hub; a new page size starts again from the first page. */
+	const changeVulnPage = useCallback(
+		(page: number, pageSize: number) => {
+			const next = pageSize === vulnPageSizeRef.current ? page : 1;
+			setVulnPage(next);
+			vulnPageRef.current = next;
+			setVulnPageSize(pageSize);
+			vulnPageSizeRef.current = pageSize;
+			send({ type: "list_vulns", filters: vulnFiltersRef.current, page: next, pageSize });
+		},
+		[send],
+	);
+
+	/** Ask for the id of every finding under the filter, to select the whole result at once. */
+	const requestVulnFilterIds = useCallback(() => {
+		send({
+			type: "list_vulns",
+			filters: vulnFiltersRef.current,
+			page: vulnPageRef.current,
+			pageSize: vulnPageSizeRef.current,
+			withIds: true,
+		});
+	}, [send]);
 
 	/** Ask the server what deleting these records would take with them. */
 	const requestVulnDelete = useCallback(
@@ -3401,6 +3474,12 @@ export function App() {
 							projectName={snapshot?.project?.name ?? null}
 							hasProject={snapshot?.project !== null && snapshot?.project !== undefined}
 							onFiltersChange={loadVulns}
+							page={vulnPage}
+							pageSize={vulnPageSize}
+							total={vulnTotal}
+							onPageChange={changeVulnPage}
+							filterIds={vulnFilterIds}
+							onRequestFilterIds={requestVulnFilterIds}
 							onOpen={openVuln}
 							onOpenSession={openVulnSession}
 							onExport={(filters) => send({ type: "export_vulns", filters })}

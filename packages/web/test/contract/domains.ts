@@ -204,7 +204,16 @@ export const DOMAINS = {
 			"delete_vulns",
 			"export_vulns",
 		],
-		["vulns", "vuln", "vuln_result", "vuln_review_result", "vuln_delete_preview", "vulns_deleted", "vulns_export"],
+		[
+			"vulns",
+			"vulns_changed",
+			"vuln",
+			"vuln_result",
+			"vuln_review_result",
+			"vuln_delete_preview",
+			"vulns_deleted",
+			"vulns_export",
+		],
 	),
 	assets: domain(
 		"资产库",

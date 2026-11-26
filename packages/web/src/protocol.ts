@@ -807,6 +807,16 @@ export interface SentinelVulnStats {
 	byStatus: Record<SentinelVulnStatus, number>;
 }
 
+/** One page of the hub's list. */
+export interface SentinelVulnPage {
+	items: SentinelVulnSummary[];
+	/** Matches for the filter, not the page size. */
+	total: number;
+	page: number;
+	pageSize: number;
+	hasMore: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // 资产库（Agent 上报的资产台账）
 // ---------------------------------------------------------------------------
@@ -2213,7 +2223,8 @@ export type SentinelClientMessage =
 	| { type: "get_subagent"; id: string }
 	| { type: "abort_subagent"; id: string }
 	| { type: "steer_subagent"; id: string; text: string }
-	| { type: "list_vulns"; filters?: SentinelVulnFilters }
+	/** `withIds` also returns the id of every match, for selecting a whole filtered result. */
+	| { type: "list_vulns"; filters?: SentinelVulnFilters; page?: number; pageSize?: number; withIds?: boolean }
 	| { type: "get_vuln"; id: string }
 	| { type: "update_vuln"; id: string; patch: SentinelVulnUpdate }
 	/** How much deleting these records would take with them, for the dialog. */
@@ -2630,7 +2641,23 @@ export type SentinelServerMessage =
 	| { type: "subagent_run"; run: SentinelSubagentRun }
 	| { type: "subagent_event"; runId: string; event: SentinelSubagentEvent }
 	| { type: "subagent_result"; action: string; id: string; ok: boolean; error?: string }
-	| { type: "vulns"; items: SentinelVulnSummary[]; stats: SentinelVulnStats; unfiltered?: true }
+	| {
+			type: "vulns";
+			items: SentinelVulnSummary[];
+			stats: SentinelVulnStats;
+			total: number;
+			page: number;
+			pageSize: number;
+			hasMore: boolean;
+			/** The id of every match, only when the request asked for it. */
+			ids?: string[];
+	  }
+	/**
+	 * A write changed the findings; clients ask again for the page they are
+	 * showing. The counts ride along: the sidebar badge and the dashboard show
+	 * them without the hub being open.
+	 */
+	| { type: "vulns_changed"; stats: SentinelVulnStats }
 	| { type: "vuln"; vuln: SentinelVulnerability }
 	| { type: "vuln_result"; action: string; id?: string; ok: boolean; error?: string }
 	| { type: "vuln_delete_preview"; count: number; evidence: number; notes: number }

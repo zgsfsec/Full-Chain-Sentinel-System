@@ -2,7 +2,7 @@
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$comment": "由 scripts/generate-contract-api.mjs 生成，不要手改。WebSocket `/ws` 上每一种消息的结构、样例和服务端的回应。",
 	"title": "全链哨兵 WebSocket 消息",
-	"description": "一帧一条 JSON 对象，`type` 是消息名，其余字段平铺在同一层。`messages.client` 是浏览器发给服务端的 227 种，`messages.server` 是服务端发给浏览端的 119 种。\n每条的 `schema` 指向 `$defs` 里的 JSON Schema（draft 2020-12），`example` 是一个符合它的样例。\n上行消息另有 `replies`（只回给发出消息的连接的消息）、`broadcasts`（发给所有连接的消息）、`failures`（处理失败时回的 `error` 文案）；\n下行消息另有 `sentWhen`（什么情况下发出）。`domain` 是功能域，完整说明在 docs/contract/websocket/<domain>.md。\n每种消息的完整说明在 docs/contract/websocket/ 下，先读 connection.md。",
+	"description": "一帧一条 JSON 对象，`type` 是消息名，其余字段平铺在同一层。`messages.client` 是浏览器发给服务端的 227 种，`messages.server` 是服务端发给浏览端的 120 种。\n每条的 `schema` 指向 `$defs` 里的 JSON Schema（draft 2020-12），`example` 是一个符合它的样例。\n上行消息另有 `replies`（只回给发出消息的连接的消息）、`broadcasts`（发给所有连接的消息）、`failures`（处理失败时回的 `error` 文案）；\n下行消息另有 `sentWhen`（什么情况下发出）。`domain` 是功能域，完整说明在 docs/contract/websocket/<domain>.md。\n每种消息的完整说明在 docs/contract/websocket/ 下，先读 connection.md。",
 	"connection": {
 		"path": "/ws",
 		"url": "{{wsHost}}/ws",
@@ -77,7 +77,7 @@
 			"title": "漏洞",
 			"document": "../websocket/vulns.md",
 			"client": 8,
-			"server": 7
+			"server": 8
 		},
 		"assets": {
 			"title": "资产库",
@@ -2149,8 +2149,8 @@
 			},
 			"list_vulns": {
 				"domain": "vulns",
-				"description": "按条件列出当前项目的漏洞。",
-				"fields": "`filters`（可选）：SentinelVulnFilters",
+				"description": "按条件列出当前项目的漏洞，一次一页。页码从 1 开始，默认第 1 页；每页默认 50 条，最多 200 条。筛选、排序和分页都在数据库里做，一页只读出一页的记录。",
+				"fields": "`filters`（可选）：SentinelVulnFilters；`page`（可选）：number；`pageSize`（可选）：number；`withIds`（可选）：boolean",
 				"replies": [
 					"vulns"
 				],
@@ -2172,7 +2172,10 @@
 						"target": "text",
 						"search": "text",
 						"dubious": false
-					}
+					},
+					"page": 1,
+					"pageSize": 50,
+					"withIds": false
 				}
 			},
 			"get_vuln": {
@@ -2202,7 +2205,7 @@
 					"vuln"
 				],
 				"broadcasts": [
-					"vulns"
+					"vulns_changed"
 				],
 				"failures": "无",
 				"schema": {
@@ -2246,7 +2249,7 @@
 					"error"
 				],
 				"broadcasts": [
-					"vulns"
+					"vulns_changed"
 				],
 				"failures": "`未配置配置目录，无法评审`",
 				"schema": {
@@ -2283,7 +2286,7 @@
 					"vulns_deleted"
 				],
 				"broadcasts": [
-					"vulns"
+					"vulns_changed"
 				],
 				"failures": "无",
 				"schema": {
@@ -7148,9 +7151,9 @@
 			},
 			"vulns": {
 				"domain": "vulns",
-				"description": "漏洞列表。`unfiltered` 为 `true` 表示这是广播的完整列表，不是按筛选条件查出来的。",
-				"fields": "`items`：SentinelVulnSummary[]；`stats`：SentinelVulnStats；`unfiltered`（可选）：true",
-				"sentWhen": "回复 `list_vulns` 时，只发给发出消息的连接；由 `broadcastVulns` 发送",
+				"description": "漏洞的一页，按编号从新到旧。`total` 是符合筛选条件的总数，不是本页的条数；`hasMore` 表示后面还有页。`ids` 只在请求带了 `withIds` 时出现，是符合条件的全部编号。`stats` 始终是整个项目的计数，不受筛选影响。",
+				"fields": "`items`：SentinelVulnSummary[]；`stats`：SentinelVulnStats；`total`：number；`page`：number；`pageSize`：number；`hasMore`：boolean；`ids`（可选）：string[]",
+				"sentWhen": "回复 `list_vulns` 时，只发给发出消息的连接。列表本身不广播",
 				"schema": {
 					"$ref": "#/$defs/Ws.server.vulns"
 				},
@@ -7207,7 +7210,41 @@
 							"false_positive": 2
 						}
 					},
-					"unfiltered": true
+					"total": 2,
+					"page": 1,
+					"pageSize": 50,
+					"hasMore": false,
+					"ids": [
+						"id-1"
+					]
+				}
+			},
+			"vulns_changed": {
+				"domain": "vulns",
+				"description": "漏洞发生了变化。列表是分页的，所以变化时只发通知和最新的计数，不发列表：漏洞页收到后按自己的筛选条件和页码重新请求 `list_vulns`。计数随通知一起发，是因为侧栏角标和项目概览要显示它们，而漏洞页不一定开着。",
+				"fields": "`stats`：SentinelVulnStats",
+				"sentWhen": "有漏洞被提交、修改、评审或删除后，由 `broadcastVulns` 发给所有连接",
+				"schema": {
+					"$ref": "#/$defs/Ws.server.vulns_changed"
+				},
+				"example": {
+					"type": "vulns_changed",
+					"stats": {
+						"total": 2,
+						"bySeverity": {
+							"low": 2,
+							"high": 2,
+							"info": 2,
+							"medium": 2,
+							"critical": 2
+						},
+						"byStatus": {
+							"fixed": 2,
+							"pending": 2,
+							"confirmed": 2,
+							"false_positive": 2
+						}
+					}
 				}
 			},
 			"vuln": {
@@ -20778,6 +20815,15 @@
 				},
 				"filters": {
 					"$ref": "#/$defs/SentinelVulnFilters"
+				},
+				"page": {
+					"type": "number"
+				},
+				"pageSize": {
+					"type": "number"
+				},
+				"withIds": {
+					"type": "boolean"
 				}
 			},
 			"required": [
@@ -21005,17 +21051,37 @@
 						"$ref": "#/$defs/SentinelVulnSummary"
 					}
 				},
+				"hasMore": {
+					"type": "boolean"
+				},
+				"ids": {
+					"type": "array",
+					"description": "The id of every match, only when the request asked for it.",
+					"items": {
+						"type": "string"
+					}
+				},
+				"page": {
+					"type": "number"
+				},
+				"pageSize": {
+					"type": "number"
+				},
 				"stats": {
 					"$ref": "#/$defs/SentinelVulnStats"
 				},
-				"unfiltered": {
-					"const": true
+				"total": {
+					"type": "number"
 				}
 			},
 			"required": [
 				"type",
 				"items",
-				"stats"
+				"stats",
+				"total",
+				"page",
+				"pageSize",
+				"hasMore"
 			]
 		},
 		"SentinelVulnSummary": {
@@ -21302,6 +21368,21 @@
 				"pending",
 				"confirmed",
 				"false_positive"
+			]
+		},
+		"Ws.server.vulns_changed": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "vulns_changed"
+				},
+				"stats": {
+					"$ref": "#/$defs/SentinelVulnStats"
+				}
+			},
+			"required": [
+				"type",
+				"stats"
 			]
 		},
 		"Ws.server.vuln": {

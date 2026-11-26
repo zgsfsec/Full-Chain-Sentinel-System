@@ -855,10 +855,10 @@ export async function startSentinelServer(
 		snapshots.schedule();
 	}
 
-	/** Findings of the active project, pushed when one is submitted or reviewed. */
+	/** The findings changed: each client asks for its own page; the counts ride along for the badge and the dashboard. */
 	function broadcastVulns(): void {
-		const view = runtime.listVulns();
-		broadcast({ type: "vulns", items: view.items, stats: view.stats, unfiltered: true });
+		const stats = runtime.vulnStats();
+		broadcast({ type: "vulns_changed", stats });
 	}
 
 	/** The POC library, pushed when the operator imports or deletes templates. */
@@ -3431,8 +3431,8 @@ export async function startSentinelServer(
 					return;
 				}
 				case "list_vulns": {
-					const view = runtime.listVulns(message.filters);
-					sendTo(socket, { type: "vulns", items: view.items, stats: view.stats });
+					const view = runtime.listVulns(message.filters, message.page, message.pageSize, message.withIds);
+					sendTo(socket, { type: "vulns", ...view });
 					return;
 				}
 				case "get_vuln": {

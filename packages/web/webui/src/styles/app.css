@@ -1304,14 +1304,6 @@ body {
 	padding-top: 4px;
 }
 
-.vulnhub-hints {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-	margin-top: 12px;
-	font-size: 12px;
-}
-
 .vulnhub-empty-hint {
 	margin-top: 4px;
 	font-size: 12px;

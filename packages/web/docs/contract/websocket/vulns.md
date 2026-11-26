@@ -5,7 +5,7 @@ Agent 用工具提交漏洞，操作员在控制台复核。代理只能提交�
 | 项目 | 说明 |
 | --- | --- |
 | 上行消息 | 8 种 |
-| 下行消息 | 7 种 |
+| 下行消息 | 8 种 |
 | 处理代码 | `packages/web/src/server.ts` 第 3433–3437、3438–3446、3447–3462、3463–3476、3477–3487、3488–3493、3494–3502、3503–3507 行 |
 
 字段形状以 `packages/web/src/protocol.ts` 为准（浏览器视角在 `packages/web/webui/src/types.ts`）。通用约定见 [README](README.md)。「字段」一行给出字段名、类型和类型定义里的注释。
@@ -14,11 +14,13 @@ Agent 用工具提交漏洞，操作员在控制台复核。代理只能提交�
 
 ### `list_vulns`
 
-按条件列出当前项目的漏洞。
+按条件列出当前项目的漏洞，一次一页。页码从 1 开始，默认第 1 页；每页默认 50 条，最多 200 条。筛选、排序和分页都在数据库里做，一页只读出一页的记录。
+
+`withIds` 为 `true` 时回复里多一个 `ids`：符合条件的全部编号，漏洞页用它做「全选筛选结果」。这一项只查编号，不带记录。
 
 | 项目 | 内容 |
 | --- | --- |
-| 字段 | `filters`（可选）：SentinelVulnFilters |
+| 字段 | `filters`（可选）：SentinelVulnFilters；`page`（可选）：number；`pageSize`（可选）：number；`withIds`（可选）：boolean |
 | 回复请求方 | `vulns` |
 | 广播 | 无 |
 | 失败文案 | 无 |
@@ -39,7 +41,10 @@ Agent 用工具提交漏洞，操作员在控制台复核。代理只能提交�
 		"target": "text",
 		"search": "text",
 		"dubious": false
-	}
+	},
+	"page": 1,
+	"pageSize": 50,
+	"withIds": false
 }
 ```
 
@@ -71,10 +76,10 @@ Agent 用工具提交漏洞，操作员在控制台复核。代理只能提交�
 | --- | --- |
 | 字段 | `id`：string；`patch`：SentinelVulnUpdate |
 | 回复请求方 | `vuln_result`、`vuln` |
-| 广播 | `vulns` |
+| 广播 | `vulns_changed` |
 | 失败文案 | 无 |
 
-处理的结果通过 `vuln_result`、`vuln` 回给发出消息的连接。状态实际发生变化时，还会向所有控制台广播 `vulns`；什么都没变时不发。失败不回 `error`，而是回 `vuln_result`，其中 `ok` 为 `false`，`error` 是：`该漏洞记录不存在（可能属于其他项目，或已被删除）`。
+处理的结果通过 `vuln_result`、`vuln` 回给发出消息的连接。状态实际发生变化时，还会向所有控制台广播 `vulns_changed`；什么都没变时不发。失败不回 `error`，而是回 `vuln_result`，其中 `ok` 为 `false`，`error` 是：`该漏洞记录不存在（可能属于其他项目，或已被删除）`。
 
 ```json
 {
@@ -118,10 +123,10 @@ Agent 用工具提交漏洞，操作员在控制台复核。代理只能提交�
 | --- | --- |
 | 字段 | 无 |
 | 回复请求方 | `error` |
-| 广播 | `vulns` |
+| 广播 | `vulns_changed` |
 | 失败文案 | `未配置配置目录，无法评审` |
 
-这条消息没有成功时的直接回复。同时向所有控制台广播 `vulns`。
+这条消息没有成功时的直接回复。同时向所有控制台广播 `vulns_changed`。
 
 ```json
 {
@@ -159,10 +164,10 @@ Agent 用工具提交漏洞，操作员在控制台复核。代理只能提交�
 | --- | --- |
 | 字段 | `ids`：string[] |
 | 回复请求方 | `vulns_deleted` |
-| 广播 | `vulns` |
+| 广播 | `vulns_changed` |
 | 失败文案 | 无 |
 
-处理的结果通过 `vulns_deleted` 回给发出消息的连接。状态实际发生变化时，还会向所有控制台广播 `vulns`；什么都没变时不发。
+处理的结果通过 `vulns_deleted` 回给发出消息的连接。状态实际发生变化时，还会向所有控制台广播 `vulns_changed`；什么都没变时不发。
 
 ```json
 {
@@ -208,12 +213,12 @@ Agent 用工具提交漏洞，操作员在控制台复核。代理只能提交�
 
 ### `vulns`
 
-漏洞列表。`unfiltered` 为 `true` 表示这是广播的完整列表，不是按筛选条件查出来的。
+漏洞的一页，按编号从新到旧。`total` 是符合筛选条件的总数，不是本页的条数；`hasMore` 表示后面还有页。`ids` 只在请求带了 `withIds` 时出现，是符合条件的全部编号。`stats` 始终是整个项目的计数，不受筛选影响。
 
 | 项目 | 内容 |
 | --- | --- |
-| 字段 | `items`：SentinelVulnSummary[]；`stats`：SentinelVulnStats；`unfiltered`（可选）：true |
-| 发送时机 | 回复 `list_vulns` 时，只发给发出消息的连接；由 `broadcastVulns` 发送 |
+| 字段 | `items`：SentinelVulnSummary[]；`stats`：SentinelVulnStats；`total`：number；`page`：number；`pageSize`：number；`hasMore`：boolean；`ids`（可选）：string[] |
+| 发送时机 | 回复 `list_vulns` 时，只发给发出消息的连接。列表本身不广播 |
 
 ```json
 {
@@ -262,14 +267,50 @@ Agent 用工具提交漏洞，操作员在控制台复核。代理只能提交�
 			"medium": 2,
 			"critical": 2
 		},
+			"byStatus": {
+				"fixed": 2,
+				"pending": 2,
+				"confirmed": 2,
+				"false_positive": 2
+			}
+		},
+		"total": 2,
+		"page": 1,
+		"pageSize": 50,
+		"hasMore": false,
+		"ids": [
+			"id-1"
+		]
+	}
+```
+### `vulns_changed`
+
+漏洞发生了变化。列表是分页的，所以变化时只发通知和最新的计数，不发列表：漏洞页收到后按自己的筛选条件和页码重新请求 `list_vulns`。计数随通知一起发，是因为侧栏角标和项目概览要显示它们，而漏洞页不一定开着。
+
+| 项目 | 内容 |
+| --- | --- |
+| 字段 | `stats`：SentinelVulnStats |
+| 发送时机 | 有漏洞被提交、修改、评审或删除后，由 `broadcastVulns` 发给所有连接 |
+
+```json
+{
+	"type": "vulns_changed",
+	"stats": {
+		"total": 2,
+		"bySeverity": {
+			"low": 2,
+			"high": 2,
+			"info": 2,
+			"medium": 2,
+			"critical": 2
+		},
 		"byStatus": {
 			"fixed": 2,
 			"pending": 2,
 			"confirmed": 2,
 			"false_positive": 2
 		}
-	},
-	"unfiltered": true
+	}
 }
 ```
 

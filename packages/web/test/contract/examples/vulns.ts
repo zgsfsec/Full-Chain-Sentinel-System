@@ -13,6 +13,9 @@ export const client = {
 			search: "text",
 			dubious: false,
 		},
+		page: 1,
+		pageSize: 50,
+		withIds: false,
 	},
 	get_vuln: {
 		type: "get_vuln",
@@ -110,7 +113,30 @@ export const server = {
 				false_positive: 2,
 			},
 		},
-		unfiltered: true,
+		total: 2,
+		page: 1,
+		pageSize: 50,
+		hasMore: false,
+		ids: ["id-1"],
+	},
+	vulns_changed: {
+		type: "vulns_changed",
+		stats: {
+			total: 2,
+			bySeverity: {
+				low: 2,
+				high: 2,
+				info: 2,
+				medium: 2,
+				critical: 2,
+			},
+			byStatus: {
+				fixed: 2,
+				pending: 2,
+				confirmed: 2,
+				false_positive: 2,
+			},
+		},
 	},
 	vuln: {
 		type: "vuln",

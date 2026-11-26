@@ -141,6 +141,9 @@ function renderPage(options: {
 	deletePending?: string[] | null;
 	preview?: { count: number; evidence: number; notes: number } | null;
 	items?: SentinelVulnSummary[];
+	/** How many findings match the filter in all; the two rows on the page by default. */
+	total?: number;
+	filterIds?: string[] | null;
 } = {}): string {
 	return renderToStaticMarkup(
 		createElement(VulnPage, {
@@ -154,6 +157,12 @@ function renderPage(options: {
 			hasProject: true,
 			deletePending: options.deletePending ?? null,
 			deletePreview: options.preview ?? null,
+			page: 1,
+			pageSize: 50,
+			total: options.total ?? 2,
+			filterIds: options.filterIds ?? null,
+			onPageChange: () => {},
+			onRequestFilterIds: () => {},
 			onFiltersChange: () => {},
 			onOpen: () => {},
 			onOpenSession: () => {},
@@ -238,6 +247,12 @@ test("without a project the page says so instead of rendering an empty ledger", 
 			hasProject: false,
 			deletePending: null,
 			deletePreview: null,
+			page: 1,
+			pageSize: 50,
+			total: 0,
+			filterIds: null,
+			onPageChange: () => {},
+			onRequestFilterIds: () => {},
 			onFiltersChange: () => {},
 			onOpen: () => {},
 			onOpenSession: () => {},
@@ -251,6 +266,14 @@ test("without a project the page says so instead of rendering an empty ledger", 
 	);
 	expect(html).toContain("尚未选择项目");
 	expect(html).not.toContain("E2E-0001");
+});
+
+test("the ledger is one page of a longer list: it says how many match and which pages there are", () => {
+	// The server pages the list: what it sends is the page, and the count of matches is not the page size.
+	const html = renderPage({ total: 61 });
+	expect(html).toContain("共 61 条");
+	const pages = [...html.matchAll(/class="ant-pagination-item ant-pagination-item-(\d+)/g)].map((match) => match[1]);
+	expect(pages).toEqual(["1", "2"]);
 });
 
 test("the delete confirmation states what disappears with the records", () => {

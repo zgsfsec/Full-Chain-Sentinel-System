@@ -91,7 +91,7 @@ ApiFox：
 | 位置 | 内容 |
 | --- | --- |
 | `messages.client.<消息名>` | 浏览器发给服务端的 227 种。`example` 是样例，直接改了值就能发；`schema` 是它的结构；`replies` 是服务端只回给这条连接的消息，`broadcasts` 是发给所有连接的消息，`failures` 是处理失败时回的 `error` 文案 |
-| `messages.server.<消息名>` | 服务端发给浏览器的 119 种。`sentWhen` 是什么情况下发出，`schema` 和 `example` 同上 |
+| `messages.server.<消息名>` | 服务端发给浏览器的 120 种。`sentWhen` 是什么情况下发出，`schema` 和 `example` 同上 |
 | `$defs` | `schema` 引用的结构定义 |
 | `domains` | 21 个功能域，每种消息属于哪一个，完整说明在哪个文档 |
 

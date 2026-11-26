@@ -18531,6 +18531,15 @@
 				},
 				"filters": {
 					"$ref": "#/$defs/SentinelVulnFilters"
+				},
+				"page": {
+					"type": "number"
+				},
+				"pageSize": {
+					"type": "number"
+				},
+				"withIds": {
+					"type": "boolean"
 				}
 			},
 			"required": [
@@ -23023,16 +23032,51 @@
 						"$ref": "#/$defs/SentinelVulnSummary"
 					}
 				},
+				"hasMore": {
+					"type": "boolean"
+				},
+				"ids": {
+					"type": "array",
+					"description": "The id of every match, only when the request asked for it.",
+					"items": {
+						"type": "string"
+					}
+				},
+				"page": {
+					"type": "number"
+				},
+				"pageSize": {
+					"type": "number"
+				},
 				"stats": {
 					"$ref": "#/$defs/SentinelVulnStats"
 				},
-				"unfiltered": {
-					"const": true
+				"total": {
+					"type": "number"
 				}
 			},
 			"required": [
 				"type",
 				"items",
+				"stats",
+				"total",
+				"page",
+				"pageSize",
+				"hasMore"
+			]
+		},
+		"Ws.server.vulns_changed": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "vulns_changed"
+				},
+				"stats": {
+					"$ref": "#/$defs/SentinelVulnStats"
+				}
+			},
+			"required": [
+				"type",
 				"stats"
 			]
 		},
@@ -24299,6 +24343,9 @@
 		"Ws.server.vulns": {
 			"$ref": "#/$defs/Ws.server.vulns"
 		},
+		"Ws.server.vulns_changed": {
+			"$ref": "#/$defs/Ws.server.vulns_changed"
+		},
 		"Ws.server.vulns_deleted": {
 			"$ref": "#/$defs/Ws.server.vulns_deleted"
 		},
@@ -24313,7 +24360,7 @@
 		}
 	},
 	"typesSource": {
-		"hash": "441160eb5729173b34af5e0f27cddca2821b554547366c2fcf50cbbe27af717a",
+		"hash": "010d3eb2538e51c1bddc143c4b45b8a30df1a59152cf6f73634720f5280973e2",
 		"files": [
 			"packages/agent/src/agent-loop.ts",
 			"packages/agent/src/agent.ts",

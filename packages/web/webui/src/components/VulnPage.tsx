@@ -229,6 +229,12 @@ export function VulnPage({
 	hasProject,
 	deletePending,
 	deletePreview,
+	page,
+	pageSize,
+	total,
+	filterIds,
+	onPageChange,
+	onRequestFilterIds,
 	onFiltersChange,
 	onOpen,
 	onOpenSession,
@@ -239,6 +245,7 @@ export function VulnPage({
 	onConfirmDelete,
 	onCancelDelete,
 }: {
+	/** The page of findings the server answered for the filters and the page; the list is never read whole. */
 	items: SentinelVulnSummary[];
 	stats: SentinelVulnStats;
 	filters: SentinelVulnFilters;
@@ -254,6 +261,14 @@ export function VulnPage({
 	deletePending: string[] | null;
 	/** What that deletion would take with it, once the server answered. */
 	deletePreview: { count: number; evidence: number; notes: number } | null;
+	/** The page on screen, how many rows a page holds, and how many findings match the filter. */
+	page: number;
+	pageSize: number;
+	total: number;
+	/** The id of every finding under the filter, once the operator asked to select the whole result. */
+	filterIds: string[] | null;
+	onPageChange: (page: number, pageSize: number) => void;
+	onRequestFilterIds: () => void;
 	onFiltersChange: (filters: SentinelVulnFilters) => void;
 	onOpen: (id: string) => void;
 	/** Switch to the chat page and load the session that reported a finding. */
@@ -279,22 +294,18 @@ export function VulnPage({
 	useEffect(() => {
 		setTarget(filters.target ?? "");
 	}, [filters.target]);
-	// A refresh (another console, or the agent submitting a finding) must not drop
-	// the operator's ticks, but ids that disappeared cannot stay selected: deleting
-	// them would mean deleting records that are no longer visible.
+	// The ticks outlive the page: a row ticked on another page is still ticked. A record
+	// deleted elsewhere may stay in the set; the server counts and deletes only what exists.
 	useEffect(() => {
-		setSelected((prev) => {
-			if (prev.size === 0) return prev;
-			const visible = new Set(items.map((item) => item.id));
-			const next = new Set([...prev].filter((id) => visible.has(id)));
-			return next.size === prev.size ? prev : next;
-		});
-	}, [items]);
+		if (filterIds) setSelected(new Set(filterIds));
+	}, [filterIds]);
 
 	const projectEngines = engines.filter((engine) => engine.projectId === projectId);
 	const activeEngine = projectEngines.find((engine) => engine.id === filters.engineId);
-	const allSelected = items.length > 0 && items.every((item) => selected.has(item.id));
-	const selectedIds = items.filter((item) => selected.has(item.id)).map((item) => item.id);
+	/** Ticked rows, on this page or any other. */
+	const selectedIds = [...selected];
+	/** Every finding under the filter is ticked, as far as the ids the server last listed go. */
+	const allSelected = filterIds !== null && filterIds.length > 0 && filterIds.every((id) => selected.has(id));
 	// Every session of the project is offered, named when it has a name and
 	// identified by its first message otherwise.
 	const sessionOptions = sessions.map((session) => ({
@@ -703,7 +714,17 @@ export function VulnPage({
 				dataSource={items}
 				search={false}
 				options={false}
-				pagination={false}
+				// Paged on the server: the page asks for what it shows, so a project with
+				// thousands of findings is never read whole.
+				pagination={{
+					current: page,
+					pageSize,
+					total,
+					showSizeChanger: true,
+					pageSizeOptions: [20, 50, 100, 200],
+					showTotal: (count) => t("共 {total} 条", { total: count }),
+					onChange: onPageChange,
+				}}
 				// Fixed, so each column gets exactly the width it was given.
 				tableLayout="fixed"
 				// As wide as its columns add up to: it scrolls sideways only past the page's width.
@@ -750,11 +771,9 @@ export function VulnPage({
 							</Button>
 							<Button
 								type="link"
-								disabled={items.length === 0}
+								disabled={total === 0}
 								title={t("选中当前筛选结果里的全部记录")}
-								onClick={() =>
-									setSelected(allSelected ? new Set() : new Set(items.map((item) => item.id)))
-								}
+								onClick={() => (allSelected ? setSelected(new Set()) : onRequestFilterIds())}
 							>
 								{allSelected ? t("取消全选") : t("全选筛选结果")}
 							</Button>
@@ -799,16 +818,6 @@ export function VulnPage({
 					),
 				}}
 			/>
-
-			<div className="vulnhub-hints">
-				<Text type="secondary">
-					{t("代理提交的漏洞一律先记为「待确认」；确认、改级、标误报都在详情里完成，改动会记入时间线。")}
-				</Text>
-				<Text type="secondary">
-					{t("勾选记录后仅导出选中项；未勾选时导出当前筛选结果。")}
-					{t("导出只包含当前项目的记录与当前筛选条件。删除只能通过勾选记录进行：删除后证据与备注一并消失，不可恢复。")}
-				</Text>
-			</div>
 
 			<Modal
 				open={deletePending !== null}

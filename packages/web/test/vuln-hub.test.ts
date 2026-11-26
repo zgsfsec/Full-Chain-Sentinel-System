@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { openSqliteDatabase } from "../src/sqlite.ts";
-import { type SentinelVulnCreateInput, VulnerabilityStore } from "../src/vulnerabilities.ts";
+import { MAX_VULN_PAGE_SIZE, type SentinelVulnCreateInput, VulnerabilityStore } from "../src/vulnerabilities.ts";
 
 const roots: string[] = [];
 const stores: VulnerabilityStore[] = [];
@@ -146,6 +146,45 @@ test("selected ids restrict findings within the project and combine with other f
 	expect(store.list("p1", { ids: [] })).toEqual([]);
 	expect(store.list("p1", { ids: [foreign, "missing", "' OR 1=1 --"] })).toEqual([]);
 	expect(store.list("p1")).toHaveLength(3);
+});
+
+test("the list is paged in the database: a page, the count of matches, and the ids of a whole result", () => {
+	const { store } = openStore();
+	const low = submit(store, { severity: "low", cvss: 2 });
+	const first = submit(store);
+	const second = submit(store);
+	const third = submit(store);
+	submit(store, { projectId: "p2" });
+
+	// Newest first, two to a page; the count is of the matches, not of the page.
+	expect(store.page("p1", {}, 1, 2)).toMatchObject({
+		items: [{ id: third }, { id: second }],
+		total: 4,
+		page: 1,
+		pageSize: 2,
+		hasMore: true,
+	});
+	expect(store.page("p1", {}, 2, 2)).toMatchObject({
+		items: [{ id: first }, { id: low }],
+		total: 4,
+		page: 2,
+		hasMore: false,
+	});
+	// Past the end there is nothing, and the count still says what there is.
+	expect(store.page("p1", {}, 3, 2)).toMatchObject({ items: [], total: 4, page: 3, hasMore: false });
+	// Filters narrow the page and the count alike, and never reach another project.
+	expect(store.page("p1", { severity: ["low"] }, 1, 2)).toMatchObject({
+		items: [{ id: low }],
+		total: 1,
+		hasMore: false,
+	});
+	expect(store.page("p1", { ids: [] }, 1, 2)).toMatchObject({ items: [], total: 0 });
+	// A page size out of range is brought back to one, or down to the most the hub sends.
+	expect(store.page("p1", {}, 1, 0).pageSize).toBe(1);
+	expect(store.page("p1", {}, 1, 9999).pageSize).toBe(MAX_VULN_PAGE_SIZE);
+	// Selecting a whole filtered result is made of ids, not of records.
+	expect(store.ids("p1", { severity: ["high"] })).toEqual([third, second, first]);
+	expect(store.ids("p1", { ids: [] })).toEqual([]);
 });
 
 test("a deletion cannot reach another project's findings", () => {

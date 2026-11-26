@@ -21,6 +21,7 @@ import type {
 	SentinelVulnerability,
 	SentinelVulnFilters,
 	SentinelVulnNote,
+	SentinelVulnPage,
 	SentinelVulnReview,
 	SentinelVulnSeverity,
 	SentinelVulnStats,
@@ -37,6 +38,9 @@ export const SENTINEL_VULN_STATUSES: readonly SentinelVulnStatus[] = [
 	"false_positive",
 	"fixed",
 ];
+/** A page of the hub's list: fifty rows unless the operator asks for fewer or more, never more than two hundred. */
+export const DEFAULT_VULN_PAGE_SIZE = 50;
+export const MAX_VULN_PAGE_SIZE = 200;
 
 /** Chinese labels, used by the Markdown export and the notification. */
 export const SENTINEL_VULN_SEVERITY_LABELS: Record<SentinelVulnSeverity, string> = {
@@ -595,12 +599,16 @@ export class VulnerabilityStore {
 		return rows.map((row) => row.id);
 	}
 
-	list(projectId: string, filters: SentinelVulnFilters = {}): SentinelVulnSummary[] {
+	/** The project and the filters as one WHERE clause; undefined when the filters match nothing. */
+	private listQuery(
+		projectId: string,
+		filters: SentinelVulnFilters,
+	): { where: string; params: SqliteValue[] } | undefined {
 		const conditions = ["project_id = ?"];
 		const params: SqliteValue[] = [projectId];
 		if (filters.ids !== undefined) {
 			const ids = scopedIds(filters.ids);
-			if (ids.length === 0) return [];
+			if (ids.length === 0) return undefined;
 			conditions.push(`id IN (${ids.map(() => "?").join(", ")})`);
 			params.push(...ids);
 		}
@@ -644,10 +652,63 @@ export class VulnerabilityStore {
 			);
 			params.push(pattern, pattern, pattern, pattern, pattern);
 		}
+		return { where: ` WHERE ${conditions.join(" AND ")}`, params };
+	}
+
+	/** The ids of every finding that matches the filters, newest first: what selecting a whole filtered result is made of. */
+	ids(projectId: string, filters: SentinelVulnFilters = {}): string[] {
+		const query = this.listQuery(projectId, filters);
+		if (!query) return [];
 		const rows = this.db
-			.prepare(`SELECT * FROM vulnerabilities WHERE ${conditions.join(" AND ")} ORDER BY number DESC`)
-			.all(...params) as unknown as VulnRow[];
+			.prepare(`SELECT id FROM vulnerabilities${query.where} ORDER BY number DESC`)
+			.all(...query.params) as unknown as Array<{ id: string }>;
+		return rows.map((row) => row.id);
+	}
+
+	/** Every finding of the project that matches the filters, newest first. */
+	list(projectId: string, filters: SentinelVulnFilters = {}): SentinelVulnSummary[] {
+		const query = this.listQuery(projectId, filters);
+		if (!query) return [];
+		const rows = this.db
+			.prepare(`SELECT * FROM vulnerabilities${query.where} ORDER BY number DESC`)
+			.all(...query.params) as unknown as VulnRow[];
 		return rows.map(summaryOf);
+	}
+
+	/**
+	 * One page of the findings that match the filters, newest first. The page
+	 * and the count of matches both come out of the database, so a project with
+	 * thousands of findings is never read whole to show fifty of them.
+	 */
+	page(
+		projectId: string,
+		filters: SentinelVulnFilters = {},
+		page = 1,
+		pageSize = DEFAULT_VULN_PAGE_SIZE,
+	): SentinelVulnPage {
+		const requestedPage = Number.isFinite(page) ? Math.floor(page) : 1;
+		const requestedSize = Number.isFinite(pageSize) ? Math.floor(pageSize) : DEFAULT_VULN_PAGE_SIZE;
+		const size = Math.min(Math.max(1, requestedSize), MAX_VULN_PAGE_SIZE);
+		const safePage = Math.max(1, requestedPage);
+		const query = this.listQuery(projectId, filters);
+		if (!query) return { items: [], total: 0, page: safePage, pageSize: size, hasMore: false };
+		const totalRow = this.db
+			.prepare(`SELECT COUNT(*) AS n FROM vulnerabilities${query.where}`)
+			.get(...query.params) as unknown as {
+			n: number;
+		};
+		const total = Number(totalRow.n);
+		const offset = (safePage - 1) * size;
+		const rows = this.db
+			.prepare(`SELECT * FROM vulnerabilities${query.where} ORDER BY number DESC LIMIT ? OFFSET ?`)
+			.all(...query.params, size, offset) as unknown as VulnRow[];
+		return {
+			items: rows.map(summaryOf),
+			total,
+			page: safePage,
+			pageSize: size,
+			hasMore: offset + rows.length < total,
+		};
 	}
 
 	/** Findings linked to one inventory asset, newest first. */

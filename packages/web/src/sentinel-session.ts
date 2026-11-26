@@ -294,8 +294,8 @@ import type {
 	SentinelToolInfo,
 	SentinelVulnerability,
 	SentinelVulnFilters,
+	SentinelVulnPage,
 	SentinelVulnStats,
-	SentinelVulnSummary,
 	SentinelVulnUpdate,
 	SentinelWebSearchConfigView,
 	SentinelWebSearchKeyInput,
@@ -338,7 +338,7 @@ import { createToolGateExtension, type ToolGateContext } from "./tool-gate.ts";
 import { createToolWorkflowExtension } from "./tool-workflow.ts";
 import { branchTranscript, branchUserMessages, messageText, withSystemPrompt } from "./transcript.ts";
 import { createVulnerabilityTools, evidencePathsToContainer } from "./vuln-tool.ts";
-import { emptyVulnStats, VulnerabilityStore, vulnerabilityDbPath } from "./vulnerabilities.ts";
+import { DEFAULT_VULN_PAGE_SIZE, emptyVulnStats, VulnerabilityStore, vulnerabilityDbPath } from "./vulnerabilities.ts";
 import { buildVulnReport } from "./vulnerability-markdown.ts";
 import { probeTavilyKey, tavilyUsage, usageRemaining } from "./websearch.ts";
 import {
@@ -4858,14 +4858,30 @@ export class SentinelRuntime {
 		return await this.subagents.steer(id, text);
 	}
 
+	/** Counts of the active project's findings, for the hub's header, the sidebar badge and the dashboard. */
+	vulnStats(): SentinelVulnStats {
+		return this.activeProjectId ? this.vulnerabilities.stats(this.activeProjectId) : emptyVulnStats();
+	}
+
 	/**
-	 * Findings of the active project plus their counts. The hub is project-scoped:
-	 * with no project there is nothing to show, not another project's records.
+	 * One page of the active project's findings that match the filters, plus the
+	 * project-wide counts; with `withIds`, the id of every match as well. The hub
+	 * is project-scoped: with no project there is nothing to show, not another
+	 * project's records.
 	 */
-	listVulns(filters: SentinelVulnFilters = {}): { items: SentinelVulnSummary[]; stats: SentinelVulnStats } {
+	listVulns(
+		filters: SentinelVulnFilters = {},
+		page = 1,
+		pageSize = DEFAULT_VULN_PAGE_SIZE,
+		withIds = false,
+	): SentinelVulnPage & { stats: SentinelVulnStats; ids?: string[] } {
 		const projectId = this.activeProjectId;
-		if (!projectId) return { items: [], stats: emptyVulnStats() };
-		return { items: this.vulnerabilities.list(projectId, filters), stats: this.vulnerabilities.stats(projectId) };
+		if (!projectId) return { items: [], stats: emptyVulnStats(), total: 0, page: 1, pageSize, hasMore: false };
+		return {
+			...this.vulnerabilities.page(projectId, filters, page, pageSize),
+			stats: this.vulnerabilities.stats(projectId),
+			...(withIds ? { ids: this.vulnerabilities.ids(projectId, filters) } : {}),
+		};
 	}
 
 	/** One finding, by id or by its human-readable label, inside the active project. */

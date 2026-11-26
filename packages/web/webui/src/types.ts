@@ -1904,7 +1904,7 @@ export type SentinelClientMessage =
 	| { type: "get_subagent"; id: string }
 	| { type: "abort_subagent"; id: string }
 	| { type: "steer_subagent"; id: string; text: string }
-	| { type: "list_vulns"; filters?: SentinelVulnFilters }
+	| { type: "list_vulns"; filters?: SentinelVulnFilters; page?: number; pageSize?: number; withIds?: boolean }
 	| { type: "get_vuln"; id: string }
 	| { type: "update_vuln"; id: string; patch: SentinelVulnUpdate }
 	| { type: "list_assets"; filters?: SentinelAssetFilters; page?: number; pageSize?: number }
@@ -2247,7 +2247,17 @@ export type SentinelServerMessage =
 	| { type: "subagent_run"; run: SentinelSubagentRun }
 	| { type: "subagent_event"; runId: string; event: SentinelSubagentEvent }
 	| { type: "subagent_result"; action: string; id: string; ok: boolean; error?: string }
-	| { type: "vulns"; items: SentinelVulnSummary[]; stats: SentinelVulnStats; unfiltered?: true }
+	| {
+			type: "vulns";
+			items: SentinelVulnSummary[];
+			stats: SentinelVulnStats;
+			total: number;
+			page: number;
+			pageSize: number;
+			hasMore: boolean;
+			ids?: string[];
+	  }
+	| { type: "vulns_changed"; stats: SentinelVulnStats }
 	| { type: "vuln"; vuln: SentinelVulnerability }
 	| { type: "vuln_result"; action: string; id?: string; ok: boolean; error?: string }
 	| { type: "vuln_delete_preview"; count: number; evidence: number; notes: number }

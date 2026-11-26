@@ -1043,16 +1043,21 @@ function toolResultText(snapshot: SentinelStateSnapshot): string {
 }
 
 /**
- * Run one hub scenario: the fake model calls vuln_submit, the record is pushed
- * to every console, and the run then finishes. Returns the submitted record as
- * the hub read it back.
+ * Run one hub scenario: the fake model calls vuln_submit, every console is told
+ * about the new record, and the run then finishes. Returns the submitted record
+ * as the hub read it back.
  */
 async function submitViaAgent(prompt: string, done: string): Promise<SentinelVulnerability> {
 	drainIncoming();
 	send({ type: "prompt", text: prompt });
 
 	// The console learns about the finding the moment it is created, before the
-	// run ends: that is what makes the hub page live.
+	// run ends: that is what makes the hub page live. The list is paged, so what
+	// is pushed is the notice with the counts; the page answers it by asking for
+	// its own page, which is what this does too.
+	const notice = await waitFor((message) => message.type === "vulns_changed");
+	expect((notice as { stats: { total: number } }).stats.total).toBeGreaterThan(0);
+	send({ type: "list_vulns" });
 	const listed = await waitFor((message) => message.type === "vulns" && message.items.length > 0);
 	const first = (listed as { items: Array<{ id: string }> }).items[0];
 	expect(first).toBeDefined();
@@ -1896,6 +1901,13 @@ test("the agent's finding lands in the hub as pending, and the operator reviews 
 	expect((listed as { items: unknown[] }).items).toHaveLength(1);
 	expect((listed as { stats: { total: number; bySeverity: Record<string, number> } }).stats.total).toBe(1);
 	expect((listed as { stats: { bySeverity: Record<string, number> } }).stats.bySeverity.medium).toBe(1);
+	// The list is paged in the database: the answer says which page it is and how many match in all.
+	expect(listed).toMatchObject({ total: 1, page: 1, pageSize: 50, hasMore: false });
+	drainIncoming();
+	send({ type: "list_vulns", page: 2, pageSize: 50, withIds: true });
+	const beyond = await waitFor((message) => message.type === "vulns");
+	// Past the end there are no rows, the count still says what there is, and the ids name it.
+	expect(beyond).toMatchObject({ items: [], total: 1, page: 2, hasMore: false, ids: [vuln.id] });
 
 	// Review: a status change, a corrected score, and a note.
 	drainIncoming();
