@@ -546,7 +546,7 @@ export function MessageView({
 				</details>
 			);
 		}
-		// Business-modeling rows: the briefing the button injected and the line that
+		// Business-modeling rows: the briefing the button sent and the line that
 		// closed the run. They fold like a summary — the operator needs the boundary
 		// in the transcript, not the whole briefing in the way.
 		if (message.customType === "zg-modeling") {
@@ -558,32 +558,6 @@ export function MessageView({
 						<Space size={6}>
 							<Tag color={closing ? "default" : "blue"} variant="filled">
 								{closing ? t("业务建模已结束") : t("业务建模已启动")}
-							</Tag>
-							{message.timestamp ? <Text type="secondary">{formatTime(message.timestamp)}</Text> : null}
-						</Space>
-					}
-				>
-					<pre className="foldrow__pre">{text}</pre>
-				</FoldRow>
-			);
-		}
-		// Attached-records rows: the catalog that rode the first message of a
-		// conversation (带建模数据), and the line stating it was removed. The catalog
-		// is long, so it lives entirely inside the fold.
-		if (message.customType === "zg-modeling-attach") {
-			const text = textFromContent(message.content);
-			const removed = text.startsWith("【业务建模 · 已移除");
-			const attached = text.match(/已带入 (\d+) 份/);
-			return (
-				<FoldRow
-					label={
-						<Space size={6}>
-							<Tag color={removed ? "default" : "geekblue"} variant="filled">
-								{removed
-									? t("已移除带入的建模数据")
-									: attached
-										? t("已带入业务建模 {count} 份", { count: attached[1] })
-										: t("已带入业务建模数据")}
 							</Tag>
 							{message.timestamp ? <Text type="secondary">{formatTime(message.timestamp)}</Text> : null}
 						</Space>

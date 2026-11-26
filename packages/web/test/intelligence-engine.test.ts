@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as sdk from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, test, vi } from "vitest";
+import type { ModelingReadPort } from "../src/apimodel-tool.ts";
+import { ApiModelStore } from "../src/apimodels.ts";
 import type { CommanderPort } from "../src/commander-tools.ts";
 import { CredentialStore } from "../src/credential-store.ts";
 import { parseCredential } from "../src/credential-types.ts";
@@ -261,6 +263,65 @@ test("aborting during an asynchronous environment check prevents late startup", 
 	await pending;
 	expect(env.create).not.toHaveBeenCalled();
 	expect(env.manager.getEngine(engine.id)?.status).toBe("stopped");
+});
+
+test("the commander reads the project's business models, and is told what they hold and how to dispatch the rest", async () => {
+	// A host that hands over the records of whichever project an engine runs in.
+	let store: ApiModelStore;
+	const modelingReadPort = vi.fn(
+		(_projectId: string): ModelingReadPort => ({
+			list: () => store.list({ projectId: "p" }),
+			read: (id) => store.get(id),
+			guide: () => "【业务建模】操作指引",
+		}),
+	);
+	const env = setup({ modelingReadPort });
+	store = new ApiModelStore(join(env.dir, "apimodels.db"));
+	cleanups.push(() => store.close());
+	store.start(
+		{ projectId: "p", sessionId: "seed", sessionPath: null, title: "商城" },
+		{ paths: { "/api/users": { get: {} } } },
+	);
+	const { engine, pending } = await env.begin();
+
+	// Asked for the engine's own project, and nothing else.
+	expect(modelingReadPort).toHaveBeenCalledWith("p");
+	const created = env.create.mock.calls[0]![0]!;
+	const tools = created.customTools!;
+	// It reads, and has no way to write: modeling is work, and work is dispatched.
+	expect(tools.map((tool) => tool.name)).toContain("api_model_read");
+	for (const writer of ["api_model_submit", "source_model_submit", "api_model_done"])
+		expect(tools.map((tool) => tool.name)).not.toContain(writer);
+	const read = tools.find((tool) => tool.name === "api_model_read")!;
+	const listed = await read.execute("call", {}, undefined, undefined, {} as never);
+	expect(JSON.stringify(listed)).toContain(`- 商城 [id: ${store.list({ projectId: "p" })[0]?.id}`);
+	// The brief names what exists and how to get the rest.
+	const system = created.resourceLoader?.getAppendSystemPrompt().join("\n") ?? "";
+	for (const expected of [
+		"业务建模（本项目的接口与业务逻辑模型）",
+		"在 objective 里写明「做业务建模」",
+		"本工程启动时项目已有的业务建模记录",
+	])
+		expect(system).toContain(expected);
+	expect(system).toContain(`- 商城 [id: ${store.list({ projectId: "p" })[0]?.id}`);
+	await env.manager.abortEngine(engine.id);
+	env.releaseOpening();
+	await pending;
+});
+
+test("a host without business models still gives the commander the read tool, and the brief says there are none", async () => {
+	const env = setup();
+	const { engine, pending } = await env.begin();
+	const created = env.create.mock.calls[0]![0]!;
+	expect(created.customTools!.map((tool) => tool.name)).toContain("api_model_read");
+	const system = created.resourceLoader?.getAppendSystemPrompt().join("\n") ?? "";
+	expect(system).toContain("本工程启动时项目已有的业务建模记录（之后的变化用 api_model_read 查看）：\n- 暂无。");
+	const read = created.customTools!.find((tool) => tool.name === "api_model_read")!;
+	const listed = await read.execute("call", {}, undefined, undefined, {} as never);
+	expect(JSON.stringify(listed)).toContain("本项目还没有业务建模记录");
+	await env.manager.abortEngine(engine.id);
+	env.releaseOpening();
+	await pending;
 });
 
 test("security-check engines pass persisted credential capability to workers and use ordinary report completion", async () => {

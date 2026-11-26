@@ -7,13 +7,13 @@ import { WorkLinkControl } from "./WorkLinkControl.tsx";
 const props: ComponentProps<typeof Composer> = {
 	streaming: false, stats: null, throughput: null, hasProject: true, supportsImageInput: false,
 	projectId: "p1", sessionId: "s1", blockedReason: null, notifyRun: false, goalDisabledReason: null,
-	modeling: null, modelingAttached: [], droidEnabled: false, iosEnabled: false, credentialsEnabled: false,
-	reportsEnabled: false, reportsReadOnly: false, apiModels: [], freshConversation: true, presets: [], preset: null,
+	modeling: null, taskSession: false, droidEnabled: false, iosEnabled: false, credentialsEnabled: false,
+	reportsEnabled: false, reportsReadOnly: false, freshConversation: true, presets: [], preset: null,
 	supervisor: null, supervisorEnabled: true, supervisorWindowOpen: false,
 	supervisorDefaultStrategies: [], supervisorCustomStrategies: [],
 	onToggleDroid: () => {}, onToggleIos: () => {}, onToggleCredentials: () => {}, onToggleReports: () => {},
 	onArmSupervisor: () => {}, onShowSupervisorWindow: () => {}, onToggleNotifyRun: () => {}, onOpenGoal: () => {},
-	onStartModeling: () => {}, onEndModeling: () => {}, onDetachModeling: () => {}, onSetPreset: () => {}, onSend: () => {}, onAbort: () => {},
+	onStartModeling: () => {}, onEndModeling: () => {}, onSetPreset: () => {}, onSend: () => {}, onAbort: () => {},
 };
 
 describe("conversation work link entry", () => {

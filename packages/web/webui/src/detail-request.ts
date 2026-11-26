@@ -39,6 +39,22 @@ export class DetailRequest<T> {
 		if (this.view && this.send) this.open(this.view.scope, this.view.id, this.send);
 	}
 
+	/**
+	 * Ask for the open record again, keeping what is on screen until the answer
+	 * replaces it — for a record that was just changed from its own drill-down,
+	 * where blanking the page for a round trip would read as a flicker. Nothing
+	 * is armed against a missing answer: the record already shown stays readable
+	 * and a late answer is still accepted.
+	 */
+	refresh(): void {
+		if (!this.view || !this.send) return;
+		try {
+			this.send();
+		} catch {
+			// The record on screen stays; reopening the drill-down retries.
+		}
+	}
+
 	accept(scope: string | null, id: string, data: T): boolean {
 		if (!this.view || this.view.error || this.view.scope !== scope || this.view.id !== id) return false;
 		clearTimeout(this.timer);

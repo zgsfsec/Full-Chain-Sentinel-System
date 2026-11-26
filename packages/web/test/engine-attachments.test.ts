@@ -132,6 +132,9 @@ test("a code audit engagement retains its doctrine and injects the audit brief o
 		});
 		expect(brief).toContain("代码审计");
 		expect(brief).toContain("命令执行 RCE 和其他高危、严重漏洞");
+		// The doctrine says when to record the project as models, and that an existing record is read, not redone.
+		expect(brief).toContain("source_model_submit");
+		expect(brief).toContain("不重复做");
 		expect(brief).toContain("/work/source");
 		expect(brief).not.toContain("CTF 竞赛-夺旗");
 	} finally {

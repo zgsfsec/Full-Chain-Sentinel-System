@@ -13,7 +13,6 @@ import type { ReportTemplateSummary } from "../../../src/report-types.ts";
 import { getLanguage, t } from "../i18n.ts";
 import { formatSize, formatTokens } from "../transcript.ts";
 import type {
-	SentinelApiModelSummary,
 	SentinelImageAttachment,
 	SentinelModelingState,
 	SentinelPresetView,
@@ -112,7 +111,7 @@ export function Composer({
 	notifyRun,
 	goalDisabledReason,
 	modeling,
-	modelingAttached,
+	taskSession,
 	droidEnabled,
 	onToggleDroid,
 	iosEnabled,
@@ -123,7 +122,6 @@ export function Composer({
 	reportTemplate,
 	reportsReadOnly,
 	onToggleReports,
-	apiModels,
 	freshConversation,
 	presets,
 	preset,
@@ -138,7 +136,6 @@ export function Composer({
 	onOpenGoal,
 	onStartModeling,
 	onEndModeling,
-	onDetachModeling,
 	onSetPreset,
 	onSend,
 	onAbort,
@@ -161,11 +158,12 @@ export function Composer({
 	/** Why a persistent goal cannot start right now; null means it can. */
 	goalDisabledReason: string | null;
 	/**
-	 * The business-modeling run in force for this session; null means none. While
-	 * it is set the button ends the run instead of starting one, because a session
-	 * can only model one thing at a time.
+	 * The business-modeling run in force for this conversation: the record its
+	 * agent is writing. Null means none.
 	 */
 	modeling: SentinelModelingState | null;
+	/** An engineering task's conversation: modeling is dispatched by its commander, not started from here. */
+	taskSession: boolean;
 	/**
 	 * The Droid plugin's toolset switch. Off is maximally clean: no device tools
 	 * in the prompt, nothing in context.
@@ -182,18 +180,7 @@ export function Composer({
 	/** Engineering task conversations retain their engine-controlled report workflow. */
 	reportsReadOnly: boolean;
 	onToggleReports: (next: boolean, templateId?: string | null) => void;
-	/**
-	 * The modeling records already attached to this conversation (带建模数据).
-	 * While set, `api_model_read` is mounted and the picker shows them instead of
-	 * the checklist, with a removal action.
-	 */
-	modelingAttached: ReadonlyArray<{ id: string; title: string }>;
-	/**
-	 * The modeling records of the active project, newest first. The picker offers
-	 * these on a fresh conversation only.
-	 */
-	apiModels: readonly SentinelApiModelSummary[];
-	/** True while the conversation has no messages yet: only then can records ride the first prompt. */
+	/** True while the conversation has no messages yet: supervision is armed before the first message, not after. */
 	freshConversation: boolean;
 	/** The library, for the 预设 Agent picker; disabled entries are not offered. */
 	presets: readonly SentinelPresetView[];
@@ -219,15 +206,9 @@ export function Composer({
 	onOpenGoal: () => void;
 	onStartModeling: () => void;
 	onEndModeling: () => void;
-	onDetachModeling: () => void;
 	/** Re-brief the viewed session; null drops back to the default agent. */
 	onSetPreset: (presetId: string | null) => void;
-	onSend: (
-		text: string,
-		behavior?: "steer" | "followUp",
-		images?: SentinelImageAttachment[],
-		attachModelIds?: string[],
-	) => void;
+	onSend: (text: string, behavior?: "steer" | "followUp", images?: SentinelImageAttachment[]) => void;
 	onAbort: () => void;
 }) {
 	const [text, setText] = useState("");
@@ -235,7 +216,7 @@ export function Composer({
 	const [images, setImages] = useState<SentinelImageAttachment[]>([]);
 	/** The 预设 Agent picker, anchored under its button. */
 	const [presetMenu, setPresetMenu] = useState<PresetMenuAnchor | null>(null);
-	/** The 带建模数据 picker and what it has checked, applied to the next send. */
+	/** The 业务建模 menu, anchored under its button. */
 	const [modelingMenu, setModelingMenu] = useState<PresetMenuAnchor | null>(null);
 	const [supervisorMenu, setSupervisorMenu] = useState<PresetMenuAnchor | null>(null);
 	const [supervisorStrategies, setSupervisorStrategies] = useState<SentinelSupervisorStrategyRef[]>(() =>
@@ -249,7 +230,6 @@ export function Composer({
 		if (supervisorStrategyTouched) return;
 		setSupervisorStrategies(initialSupervisorStrategies(supervisorDefaultStrategies));
 	}, [supervisorDefaultStrategyKey, supervisorStrategyTouched]);
-	const [attachSelection, setAttachSelection] = useState<string[]>([]);
 	/** Files already uploaded to the project (or being uploaded, or refused). */
 	const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 	const [dragging, setDragging] = useState(false);
@@ -285,19 +265,14 @@ export function Composer({
 			);
 			return;
 		}
-		// One-shot: the checked records ride this message only, then the picker's
-		// checklist resets. Nothing checked means the message carries nothing extra.
-		const attachModelIds = attachSelection.length > 0 ? attachSelection : undefined;
 		const manifest = attachmentManifest(ready);
 		onSend(
 			manifest ? `${manifest}\n\n${trimmed}` : trimmed,
 			streaming ? (override ?? behavior) : undefined,
 			images.length > 0 ? images : undefined,
-			attachModelIds,
 		);
 		setText("");
 		setImages([]);
-		setAttachSelection([]);
 		setAttachments([]);
 		setSendNotice(null);
 	};
@@ -481,16 +456,16 @@ export function Composer({
 					>
 						{t("持续目标")}
 					</Button>
-					{/* Business modeling: one entry, two actions. 开始建模 runs the two-tool
-					    cycle here (or ends the run in force); 关联建模数据 rides existing
-					    records into a fresh conversation. Unchecked attach means nothing is
-					    inserted — no message, no tool. */}
+					{/* Business modeling: the menu sends the instruction (开始建模) or closes
+					    the record this conversation is writing (结束建模). The pill carries no
+					    count: the counts of the record in progress are in its tooltip. */}
 					<Button
 						size="small"
-						type={modeling || modelingAttached.length > 0 ? "primary" : "default"}
+						type={modeling ? "primary" : "default"}
 						icon={<ApiModelIcon />}
 						onClick={(event) =>
-							setModelingMenu(presetMenuPosition(event.currentTarget.getBoundingClientRect(), 300))
+							// Two items tall: the menu goes up when there is no room below.
+							setModelingMenu(presetMenuPosition(event.currentTarget.getBoundingClientRect(), 320, 360, 200))
 						}
 						disabled={!hasProject || blocked}
 						title={
@@ -499,21 +474,19 @@ export function Composer({
 								: blocked
 									? (blockedReason ?? t("环境未就绪"))
 									: modeling
-										? t("正在业务建模：{title}；已提交 {paths} 路径 / {operations} 操作 / {entities} 实体", {
+										? t("正在业务建模：{title}；已提交 {paths} 路径 / {operations} 操作 / {entities} 实体 / {apis} 条源码映射 / {machines} 个状态机 / {rules} 条规则", {
 												title: modeling.title,
 												paths: modeling.pathCount,
 												operations: modeling.operationCount,
 												entities: modeling.entityCount,
+												apis: modeling.apiCount,
+												machines: modeling.stateMachineCount,
+												rules: modeling.ruleCount,
 											})
-										: t("业务建模：开始一次建模，或把已有建模数据关联给这条对话")
+										: t("业务建模：让 Agent 还原目标的接口、或读懂项目源码；在对话里直接要求也可以")
 						}
 					>
 						{t("业务建模")}
-						{modeling ? (
-							<Text>{modeling.pathCount}</Text>
-						) : modelingAttached.length > 0 ? (
-							<Text>{modelingAttached.length}</Text>
-						) : null}
 					</Button>
 					{/* Android tools: an explicit opt-in for THIS conversation. Off is
 					    the clean state — no device tools in the prompt, nothing in context. */}
@@ -578,22 +551,10 @@ export function Composer({
 					<ModelingMenu
 						anchor={modelingMenu}
 						modeling={modeling}
-						attached={modelingAttached}
-						records={apiModels}
-						selected={attachSelection}
-						canAttach={freshConversation && apiModels.length > 0}
-						canToggleRun={!streaming}
+						streaming={streaming}
+						taskSession={taskSession}
 						onStart={onStartModeling}
 						onEnd={onEndModeling}
-						onToggle={(id) =>
-							setAttachSelection((prev) =>
-								prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
-							)
-						}
-						onDetach={() => {
-							setModelingMenu(null);
-							onDetachModeling();
-						}}
 						onClose={() => setModelingMenu(null)}
 					/>
 				) : null}

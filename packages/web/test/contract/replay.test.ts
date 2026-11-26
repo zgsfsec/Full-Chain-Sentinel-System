@@ -41,8 +41,8 @@ const UNSAFE = new Set(
 		"test_mcp_server test_supervisor test_judge test_plugin_host sync_poc_source sync_official_pocs " +
 		"refresh_proxy_subscription pull_singbox_image build_image abort_image_build install_official_plugin " +
 		"install_plugin fetch_plugin_artifact plugin_ui_call plugin_ui_open start_plugin stop_plugin uninstall_plugin " +
-		"credentials_verify prompt compact abort abort_compaction start_goal start_modeling supervisor_arm " +
-		"supervisor_run_now supervisor_advice_action engine_create scan_code_history dispatch_code_commit " +
+		"credentials_verify prompt compact abort abort_compaction start_goal start_modeling " +
+		"supervisor_arm supervisor_run_now supervisor_advice_action engine_create scan_code_history dispatch_code_commit " +
 		"rejudge_code_commit check_code_monitor review_pending_vulns retry_vuln_review create_code_monitor " +
 		"code_monitor_branches import_code_monitors set_code_monitors_dispatch set_code_monitors_schedule " +
 		"start_project recreate_project add_project remove_project stop_project switch_project terminal_open " +

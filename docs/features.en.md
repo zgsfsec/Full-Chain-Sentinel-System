@@ -70,7 +70,9 @@ the agent reports domains, IPs, IP:port services, and URLs it actually touched w
 
 ## API modeling and POC library
 
-reconstruct a target site as an OpenAPI 3.0 document; subscribe to, search, and reference Nuclei POCs.
+reconstruct a target site as an OpenAPI 3.0 document, or read a project's source; subscribe to, search, and reference Nuclei POCs.
+
+Each run is one record with two parts, and the agent decides what each part is based on from what it has: the interface document is an OpenAPI 3.0 document with the business entities, restored from actual responses where there is traffic and written from the interfaces the source declares when there is only source; with source in the project's work directory, it submits an API source mapping (handler, call chain, tables touched, where the caller is checked, external calls) and a business logic model (entities, relations, state machines, rules, cross-endpoint dependencies) for code audits. Every claim carries a code location, which the console does not verify against the files. Every agent can read the project's existing records; in engineering mode the commander dispatches modeling by writing it into the task.
 
 <a id="section-9"></a>
 

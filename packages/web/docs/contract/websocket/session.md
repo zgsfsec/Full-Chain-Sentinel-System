@@ -6,7 +6,7 @@
 | --- | --- |
 | 上行消息 | 27 种 |
 | 下行消息 | 6 种 |
-| 处理代码 | `packages/web/src/server.ts` 第 2035–2056、2057–2065、2066–2068、2069–2079、2080–2082、2083–2085、2086–2088、2089–2091、2092–2094、2095–2097、2098–2100、2101–2110、2111–2115、2116–2118、2119–2121、2122–2127、2128–2132、2133–2135、2136–2138、2139–2147、2148–2160、2161–2168、2169–2171、2172–2187、2188–2192、2193–2195、3065–3069 行 |
+| 处理代码 | `packages/web/src/server.ts` 第 2037–2052、2053–2061、2062–2064、2065–2075、2076–2078、2079–2081、2082–2084、2085–2087、2088–2090、2091–2093、2094–2096、2097–2106、2107–2111、2112–2114、2115–2117、2118–2123、2124–2128、2129–2131、2132–2134、2135–2143、2144–2156、2157–2164、2165–2167、2168–2183、2184–2188、2189–2191、3061–3065 行 |
 
 字段形状以 `packages/web/src/protocol.ts` 为准（浏览器视角在 `packages/web/webui/src/types.ts`）。通用约定见 [README](README.md)。「字段」一行给出字段名、类型和类型定义里的注释。
 
@@ -18,7 +18,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 字段 | `text`：string；`streamingBehavior`（可选）："steer" | "followUp"；`images`（可选）：ImageContent[]；`notify`（可选）：boolean；`attachModelIds`（可选）：string[] |
+| 字段 | `text`：string；`streamingBehavior`（可选）："steer" | "followUp"；`images`（可选）：ImageContent[]；`notify`（可选）：boolean |
 | 回复请求方 | `error` |
 | 广播 | `environment`、`snapshot` |
 | 失败文案 | `消息不能为空`、`环境检查未通过`、`Docker 环境不可用（{detail}）。请在「设置 → 环境」中修复后复检。`、`请先创建或选择一个项目`、`会话尚未就绪，请重新选择项目`、`正在压缩上下文，暂时不能发送；可等待压缩完成，或点「中止压缩」放弃这次压缩`、`Session not initialized`、`Agent 正在运行，请先中止再压缩上下文`、`当前会话内容太少，无需压缩`、`该会话已经压缩过，无需重复压缩` |
@@ -37,10 +37,7 @@
 			"mimeType": "image/png"
 		}
 	],
-	"notify": false,
-	"attachModelIds": [
-		"attach-model-1"
-	]
+	"notify": false
 }
 ```
 
@@ -733,17 +730,15 @@
 			"runId": "run-1",
 			"title": "示例文本",
 			"target": "text",
+			"source": "text",
 			"startedAt": "2026-11-24T08:30:00.000Z",
 			"pathCount": 2,
 			"operationCount": 2,
-			"entityCount": 2
+			"entityCount": 2,
+			"apiCount": 2,
+			"stateMachineCount": 2,
+			"ruleCount": 2
 		},
-		"modelingAttached": [
-			{
-				"id": "id-1",
-				"title": "示例文本"
-			}
-		],
 		"gatekeeper": {
 			"globalMode": "review",
 			"sessionMode": "review",

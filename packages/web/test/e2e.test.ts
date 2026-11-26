@@ -8,7 +8,7 @@
  */
 
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer as createHttpServer, type Server } from "node:http";
+import { createServer as createHttpServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -19,6 +19,7 @@ import { modelsJsonPath } from "../src/model-config.ts";
 import { readStoredModelLibrary, setLibraryRole } from "../src/model-library.ts";
 import type { SentinelPermissionsConfig } from "../src/permissions.ts";
 import type {
+	SentinelApiModelSummary,
 	SentinelClientMessage,
 	SentinelEngine,
 	SentinelFileEntry,
@@ -552,6 +553,87 @@ function judgeCommandOf(body: string): string {
 	return index === -1 ? text : text.slice(index + marker.length).trim();
 }
 
+/**
+ * Business modeling, routed by prompt. The agent writes a record; the request
+ * that follows is held open so the test can end that record from the page while
+ * the run is still in flight; released, the agent submits again. What the tool
+ * answers that late submission is what the test asserts.
+ */
+const MODELING_LATE_PROMPT = "sentinel-modeling-late 写一条记录，然后迟一步再提交";
+const MODELING_AGAIN_PROMPT = "sentinel-modeling-again 新的一轮再写一条记录";
+const MODELING_LATE_DONE = "MODELING_LATE_DONE";
+const MODELING_AGAIN_DONE = "MODELING_AGAIN_DONE";
+/** The request held open, and who is waiting for it to be held. */
+let heldModeling: { response: ServerResponse } | undefined;
+let resolveModelingHeld: (() => void) | undefined;
+/** What the submit tool answered, in each scenario. */
+let modelingLateAnswer = "";
+let modelingAgainAnswer = "";
+
+/** Which modeling scenario the conversation is in, and the tool results since its prompt. */
+function modelingState(body: string): { scenario: "late" | "again"; results: string[] } | undefined {
+	let parsed: { messages?: Array<{ role?: string; content?: unknown }> };
+	try {
+		parsed = JSON.parse(body) as typeof parsed;
+	} catch {
+		return undefined;
+	}
+	const messages = parsed.messages ?? [];
+	// The console's closing line, 【业务建模 · 结束】, reaches the model as a user
+	// message in the middle of a run. So the scenario is found by its prompt
+	// wherever that prompt sits, and its steps are counted from that prompt on.
+	const startedAt = (prompt: string): number => {
+		let at = -1;
+		messages.forEach((message, index) => {
+			if (message.role === "user" && JSON.stringify(message.content).includes(prompt)) at = index;
+		});
+		return at;
+	};
+	const lateAt = startedAt(MODELING_LATE_PROMPT);
+	const againAt = startedAt(MODELING_AGAIN_PROMPT);
+	if (lateAt < 0 && againAt < 0) return undefined;
+	const results = messages
+		.slice(Math.max(lateAt, againAt) + 1)
+		.filter((message) => message.role === "tool")
+		.map((message) => (typeof message.content === "string" ? message.content : JSON.stringify(message.content)));
+	return { scenario: againAt > lateAt ? "again" : "late", results };
+}
+
+/** "hold" keeps the request open until the test releases it. */
+function modelingStep(body: string): ScriptStep | "hold" | undefined {
+	const state = modelingState(body);
+	if (!state) return undefined;
+	const { results } = state;
+	if (state.scenario === "late") {
+		if (results.length === 0) return { toolCall: { name: "api_model_read", args: {} } };
+		if (results.length === 1)
+			return { toolCall: { name: "api_model_submit", args: { paths: { "/api/first": { get: {} } } } } };
+		if (results.length === 2) return "hold";
+		if (results.length === 3) modelingLateAnswer = results[2] ?? "";
+		return { text: MODELING_LATE_DONE };
+	}
+	if (results.length === 0)
+		return { toolCall: { name: "api_model_submit", args: { paths: { "/api/second": { get: {} } } } } };
+	if (results.length === 1) {
+		modelingAgainAnswer = results[0] ?? "";
+		return { toolCall: { name: "api_model_done", args: { summary: "第二条记录" } } };
+	}
+	return { text: MODELING_AGAIN_DONE };
+}
+
+/** Answer the held request with the late submission. */
+function releaseHeldModeling(): void {
+	const held = heldModeling;
+	heldModeling = undefined;
+	if (!held) return;
+	held.response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+	held.response.end(
+		namedToolCallResponse("chatcmpl-modeling-late", "api_model_submit", {
+			paths: { "/api/late": { get: { summary: "arrived after the record was closed" } } },
+		}),
+	);
+}
+
 function startFakeEndpoint(): Promise<void> {
 	endpoint = createHttpServer((request, response) => {
 		if (!(request.method === "POST" && request.url?.includes("/chat/completions"))) {
@@ -606,6 +688,22 @@ function startFakeEndpoint(): Promise<void> {
 			// in the session history, so later requests also mention one.
 			const isImageTurn = !imageTurnServed && body.includes("image_url");
 			if (isImageTurn) imageTurnServed = true;
+			// Business modeling runs its own script, and may keep this request open.
+			const modeling = modelingStep(body);
+			if (modeling === "hold") {
+				heldModeling = { response };
+				resolveModelingHeld?.();
+				return;
+			}
+			if (modeling) {
+				response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+				response.end(
+					modeling.toolCall
+						? namedToolCallResponse("chatcmpl-modeling", modeling.toolCall.name, modeling.toolCall.args)
+						: textResponse("chatcmpl-modeling", modeling.text ?? ""),
+				);
+				return;
+			}
 			// The second sub-agent scenario is routed by content rather than by script
 			// index, so it does not depend on how many turns the earlier tests used.
 			const fromSubagent = body.includes(SUBAGENT_MARKER);
@@ -1429,6 +1527,14 @@ test("sub-agent runs stream live, keep their process, and stay readable as histo
 	expect(subagentTools).not.toContain("spawn_agent");
 	// The parent keeps it, so the difference is the sub-agent's, not a global one.
 	expect(mainTools).toContain("spawn_agent");
+	// Business models are the other difference: every agent reads them, so the
+	// sub-agent has the read tool, but it has no way to submit one. The parent
+	// has all four modeling tools.
+	expect(subagentTools).toContain("api_model_read");
+	for (const name of ["api_model_submit", "source_model_submit", "api_model_done"])
+		expect(subagentTools).not.toContain(name);
+	for (const name of ["api_model_read", "api_model_submit", "source_model_submit", "api_model_done"])
+		expect(mainTools).toContain(name);
 
 	// The first scenario's run kept its tool calls, so a finished run is reviewable
 	// long after its in-memory session was disposed.
@@ -3257,3 +3363,65 @@ test("supervision is armed per conversation before the first message, audited, a
 	const refused = await waitFor((message) => message.type === "error" && message.message.includes("停止"));
 	expect(refused.type).toBe("error");
 }, 30000);
+
+test("a record ended from the page while the agent writes it takes no further submission in that run", async () => {
+	drainIncoming();
+	send({ type: "new_session" });
+	await snapshotWhere((snapshot) => snapshot.activeSessionId !== null && snapshot.messages.length === 0);
+
+	// The agent lists the project's records, opens one, and the endpoint then holds
+	// its next request: the run stays in flight.
+	const held = new Promise<void>((resolve) => {
+		resolveModelingHeld = resolve;
+	});
+	modelingLateAnswer = "";
+	send({ type: "prompt", text: MODELING_LATE_PROMPT });
+	await held;
+	resolveModelingHeld = undefined;
+
+	// The record exists and is being written.
+	const record = (await listApiModels()).find((item) => item.status === "modeling");
+	expect(record).toBeDefined();
+
+	// The operator ends it from the page while the agent is still mid-run.
+	drainIncoming();
+	send({ type: "end_api_model", id: record?.id ?? "" });
+	const ended = await waitFor((message) => message.type === "api_model_result" && message.id === record?.id);
+	expect(ended.type === "api_model_result" && ended.ok).toBe(true);
+
+	// The late submission goes down the real tool path.
+	releaseHeldModeling();
+	await snapshotWhere((snapshot) => !snapshot.streaming && assistantSaid(snapshot, MODELING_LATE_DONE), 30000);
+
+	// It was refused, and it opened nothing: one record, closed by the operator.
+	expect(modelingLateAnswer).toContain("这次业务建模已经结束，本轮不能再提交");
+	expect(await listApiModels()).toEqual([expect.objectContaining({ id: record?.id, status: "manual", pathCount: 1 })]);
+
+	// The next run is a fresh start: modeling works again, and ends by the agent.
+	modelingAgainAnswer = "";
+	send({ type: "prompt", text: MODELING_AGAIN_PROMPT });
+	await snapshotWhere((snapshot) => !snapshot.streaming && assistantSaid(snapshot, MODELING_AGAIN_DONE), 30000);
+	expect(modelingAgainAnswer).toContain("已入库");
+	expect((await listApiModels()).map((item) => [item.pathCount, item.status])).toEqual([
+		[1, "done"],
+		[1, "manual"],
+	]);
+}, 30000);
+
+/** Whether the conversation holds an assistant message that says `text`. */
+function assistantSaid(snapshot: SentinelStateSnapshot, text: string): boolean {
+	return snapshot.messages.some(
+		(message) =>
+			(message as { role?: string }).role === "assistant" &&
+			JSON.stringify((message as { content?: unknown }).content).includes(text),
+	);
+}
+
+/** The project's modeling records, newest first. */
+async function listApiModels(): Promise<SentinelApiModelSummary[]> {
+	drainIncoming();
+	send({ type: "list_api_models", filters: { projectId: mainProjectId } });
+	const message = await waitFor((candidate) => candidate.type === "api_models");
+	if (message.type !== "api_models") throw new Error("no api_models message");
+	return message.items;
+}

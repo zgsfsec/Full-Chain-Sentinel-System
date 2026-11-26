@@ -8,7 +8,16 @@
  */
 
 import { expect, test } from "vitest";
-import { formatTokens, groupRuns, messageKey, runDigest, runFoldState } from "../webui/src/transcript.ts";
+import {
+	formatTokens,
+	groupRuns,
+	isInSnapshot,
+	isModelingBoundary,
+	isNoticeMessage,
+	messageKey,
+	runDigest,
+	runFoldState,
+} from "../webui/src/transcript.ts";
 import type { AgentMessageView, ContentBlockView } from "../webui/src/types.ts";
 
 const text = (value: string): ContentBlockView[] => [{ type: "text", text: value }];
@@ -145,6 +154,54 @@ test("a run ending on a loop-guard notice still folds", () => {
 	expect(fold(broken, 0)).toBeUndefined();
 });
 
+test("the briefing that starts a modeling run is a boundary, and its closing line is not", () => {
+	const marker = (end: boolean, timestamp: number): AgentMessageView => ({
+		role: "custom",
+		customType: "zg-modeling",
+		content: end ? "【业务建模 · 结束】业务建模已结束（完成）。" : "【业务建模】现在开始业务建模。",
+		timestamp,
+	});
+	// Two runs started one after the other from the composer's button, with no
+	// prompt between them. Folded together they read as one hour-long process.
+	const hour = 3_600_000;
+	const groups = groupRuns([
+		marker(false, 1000),
+		toolResult(2000),
+		marker(true, 3000),
+		assistant("订单模块已经提交", 4000),
+		marker(false, hour + 1000),
+		toolResult(hour + 2000),
+		assistant("接口文档已经生成", hour + 3000),
+	]);
+	expect(groups).toHaveLength(2);
+	// Each card stays in view above the run it started, and each run is measured
+	// from its own start: the idle hour in between is not work.
+	expect(groups[0].prompt).toMatchObject({ customType: "zg-modeling" });
+	expect(fold(groups, 0)).toEqual({ collapsed: true, digest: "1 次工具调用 · 3.0s" });
+	expect(groups[1].prompt).toMatchObject({ customType: "zg-modeling" });
+	expect(fold(groups, 1)).toEqual({ collapsed: true, digest: "1 次工具调用 · 2.0s" });
+	// The line that closes a run is a notice inside it, not a boundary of its own.
+	expect(groups[0].body.map((message) => message.role)).toEqual(["toolResult", "custom", "assistant"]);
+	// A run whose last word is that line (the operator ended it) still folds, and
+	// the card under the fold is the closing line.
+	const declared = groupRuns([marker(false, 1000), toolResult(2000), marker(true, 3000)]);
+	expect(declared).toHaveLength(1);
+	expect(fold(declared, 0)).toEqual({ collapsed: true, digest: "1 次工具调用 · 2.0s" });
+	// The markers of the time modeling was two features are custom rows like any other.
+	for (const stale of ["zg-code-modeling", "zg-modeling-attach"]) {
+		const row = { role: "custom" as const, customType: stale, content: text("x"), timestamp: 1 } as AgentMessageView;
+		expect(isModelingBoundary(row)).toBe(false);
+		expect(isNoticeMessage(row)).toBe(false);
+	}
+});
+
+test("a duration of a minute or more is rounded before it is split", () => {
+	// 119.6 seconds used to read "1m60s".
+	expect(runDigest(user("a", 1000), [assistant("done", 120_600)])).toBe("2m0s");
+	expect(runDigest(user("a", 1000), [assistant("done", 61_000)])).toBe("1m0s");
+	expect(runDigest(user("a", 1000), [assistant("done", 119_400)])).toBe("1m58s");
+});
+
 test("a stretch ending on a thinking-only assistant folds", () => {
 	// What a compaction boundary leaves behind: the model was cut while still
 	// thinking, so the last assistant message has no prose — only thinking rounds.
@@ -184,4 +241,50 @@ test("messageKey and formatTokens stay stable", () => {
 	expect(formatTokens(999)).toBe("999");
 	expect(formatTokens(1500)).toBe("1.5k");
 	expect(formatTokens(2500000)).toBe("2.5M");
+});
+
+test("a custom message is matched to its snapshot copy although their timestamps differ", () => {
+	// The SDK stamps the event with the time the message was sent at and the
+	// session entry with the time it was appended: 3 ms apart in a captured
+	// modeling run. The role-plus-timestamp key never matched, so the event's
+	// copy stayed at the end of the transcript, where a folded run shows its
+	// last message: the run ended on a second「业务建模已启动」card and the agent's
+	// closing summary never appeared.
+	const start = {
+		role: "custom",
+		customType: "zg-modeling",
+		content: "【业务建模】现在开始业务建模。",
+		display: true,
+	};
+	const fromEvent = { ...start, timestamp: 1795613676633 } as AgentMessageView;
+	const fromSnapshot = { ...start, timestamp: 1795613676636 } as AgentMessageView;
+	expect(messageKey(fromEvent)).not.toBe(messageKey(fromSnapshot));
+	expect(isInSnapshot(fromEvent, [fromSnapshot], [fromEvent])).toBe(true);
+	// Nothing that says the same thing in the snapshot: the event's copy is all there is.
+	expect(isInSnapshot(fromEvent, [], [fromEvent])).toBe(false);
+	// Another type, or other words, is another message.
+	expect(isInSnapshot(fromEvent, [{ ...fromSnapshot, customType: "zg-goal" } as AgentMessageView], [fromEvent])).toBe(
+		false,
+	);
+	expect(
+		isInSnapshot(fromEvent, [{ ...fromSnapshot, content: "【业务建模 · 结束】" } as AgentMessageView], [fromEvent]),
+	).toBe(false);
+	// Every other role still needs the same timestamp.
+	const tool = toolResult(1000);
+	expect(isInSnapshot(tool, [toolResult(1003)], [tool])).toBe(false);
+	expect(isInSnapshot(tool, [toolResult(1000)], [tool])).toBe(true);
+});
+
+test("only as many identical custom messages are matched as the snapshot holds", () => {
+	const words = { role: "custom", customType: "zg-loop-guard", content: text("【输出重复】上一次输出已被中止。") };
+	const first = { ...words, timestamp: 1000 } as AgentMessageView;
+	const second = { ...words, timestamp: 5000 } as AgentMessageView;
+	const third = { ...words, timestamp: 9000 } as AgentMessageView;
+	// The snapshot holds the second. The first is matched by what it says, the
+	// second by its timestamp, and the third is still outstanding.
+	expect(isInSnapshot(first, [second], [first, second, third])).toBe(true);
+	expect(isInSnapshot(second, [second], [first, second, third])).toBe(true);
+	expect(isInSnapshot(third, [second], [first, second, third])).toBe(false);
+	// Once the snapshot holds it too, it is matched.
+	expect(isInSnapshot(third, [second, { ...third, timestamp: 9006 } as AgentMessageView], [third])).toBe(true);
 });

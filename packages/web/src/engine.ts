@@ -27,6 +27,7 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { createApiModelReadTools, type ModelingReadPort } from "./apimodel-tool.ts";
 import { parseCodeReproductionResult } from "./code-reproduction.ts";
 import { type CommanderPort, createCommanderTools, formatTaskBoard, retryDecision } from "./commander-tools.ts";
 import type { CredentialStore } from "./credential-store.ts";
@@ -49,12 +50,14 @@ import { clampRoundLimit } from "./goal.ts";
 import { t } from "./i18n.ts";
 import { modelsJsonPath } from "./model-config.ts";
 import { resolveLibraryRole } from "./model-library.ts";
+import { buildModelingBrief, modelingRecordLine } from "./modeling.ts";
 import { hasEnabledNotifyChannel, sendNotifications } from "./notify.ts";
 import { readNotifyConfig } from "./notify-config.ts";
 import { readPermissionsConfig } from "./permissions.ts";
 import { findPreset, listEnabledPresets, listPresets, presetBriefLines } from "./presets.ts";
 import { listProjects } from "./projects.ts";
 import type {
+	SentinelApiModelSummary,
 	SentinelEngine,
 	SentinelEngineCreateInput,
 	SentinelEngineEvent,
@@ -90,6 +93,16 @@ const SCHEDULE_TIMER_MAX_MS = 60_000;
 /** Bound one scheduler pass; each action can make the next action immediately due. */
 const SCHEDULE_MAX_ACTIONS = 100;
 
+/** What the commander reads in a host without business-modeling records: nothing, and the tool says so. */
+const NO_MODELING_RECORDS: ModelingReadPort = {
+	list: () => [],
+	read: () => undefined,
+	guide: () => buildModelingBrief(null, []),
+};
+
+/** How many of the project's existing modeling records the commander's brief lists. */
+const MAX_BRIEFED_RECORDS = 20;
+
 /**
  * Commander execution guardrails. The commander gets bash and read so it can
  * scope and decompose targets (is this a web box? which hosts look alike?),
@@ -122,6 +135,12 @@ export interface EngineHooks {
 	/** Initialize optional recording after insertion, before any commander starts. */
 	onCreated?(engine: SentinelEngine, options: { recordWorkLinks?: boolean; previousEngineId?: string }): Promise<void>;
 	credentialStore?(): CredentialStore;
+	/**
+	 * Read-only access to a project's business-modeling records, for the
+	 * commander's `api_model_read`: it plans around what is already mapped and
+	 * dispatches the rest. Absent in a host that has no modeling records.
+	 */
+	modelingReadPort?(projectId: string): ModelingReadPort;
 	/** Delivery results appear alongside chat and open-source notifications. */
 	onNotifyStatus?(status: SentinelNotifyStatus): void;
 	/** Save the final report and images before marking the engineering run complete. */
@@ -1325,12 +1344,14 @@ export class EngineManager {
 		const submission = this.store.submission(entry.engine.id);
 		if (submission) prepareSubmissionInput(project, entry.engine.id, submission);
 		const commanderPermissions = readPermissionsConfig(this.agentDir).commander;
+		const modeling = this.hooks.modelingReadPort?.(project.id) ?? NO_MODELING_RECORDS;
 		const brief = buildCommanderBrief(
 			entry.engine,
 			submission?.doctrines ?? this.doctrines(),
 			this.commanderPresets(entry.engine),
 			kind,
 			commanderPermissions,
+			modeling.list(),
 		);
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: project.cwd,
@@ -1362,6 +1383,9 @@ export class EngineManager {
 			},
 			customTools: [
 				...createCommanderTools(this.commanderPort(entry)),
+				// The commander reads the project's business models — to plan around
+				// what is mapped and to dispatch the rest — and has no way to write one.
+				...createApiModelReadTools(modeling),
 				...(submission?.credentials?.scope === "project" && this.hooks.credentialStore
 					? createCredentialTools(
 							new SessionCredentialAccess({
@@ -2096,6 +2120,10 @@ export function resolveDispatchPreset(
  * The commander's system prompt: role, targets, doctrines, presets, and the rules.
  * Exported for tests: what the commander is told about presets is the whole point
  * of the switch, and the wording differs per engine.
+ *
+ * `modelingRecords` are the project's business models as they stand when the
+ * commander starts. The prompt is frozen for the session's life, so the list is
+ * a starting point; the commander reads what changed with `api_model_read`.
  */
 export function buildCommanderBrief(
 	engine: SentinelEngine,
@@ -2103,6 +2131,7 @@ export function buildCommanderBrief(
 	presets: readonly SentinelPreset[],
 	kind: "initial" | "resume",
 	permissions: { bash: boolean; read: boolean },
+	modelingRecords: readonly SentinelApiModelSummary[] = [],
 ): string {
 	const doctrineText = doctrines
 		.filter((doctrine) => engine.doctrines.includes(doctrine.id))
@@ -2160,6 +2189,18 @@ export function buildCommanderBrief(
 					reportTemplatePrompt(engine.reportTemplate),
 				]
 			: []),
+		"业务建模（本项目的接口与业务逻辑模型）：",
+		"- 你可以用 api_model_read 读取本项目的业务建模记录：不传 id 列出全部；传 id 按 part 读——overview 概览、document 接口文档、entities 业务实体、apis 接口的源码映射、logic 业务逻辑模型（要再给 section）。你只读不写，建模由执行 Agent 完成。",
+		"- 需要业务建模时用 dispatch_task 派发任务，在 objective 里写明「做业务建模」，并写清：依据什么（有流量就从流量还原接口文档；工作目录里有源码就读源码，读源码时也会把源码里声明的接口写进接口文档；都有就都做）、目标或源码范围（工作目录内的仓库、目录、模块）、结束时要覆盖的内容。执行 Agent 收到后会自己用 api_model_read 取操作指引，你不用把指引抄进任务指令。",
+		"- 派发前先读已有的记录：已经覆盖且没有变化的模块不必重做，任务范围只写缺的和变化的。审计越权、状态跳转、资源归属这类逻辑问题时，把相关接口的校验位置和规则写进任务指令（它们在记录的 apis 和 logic 里）。",
+		"- 本工程启动时项目已有的业务建模记录（之后的变化用 api_model_read 查看）：",
+		...(modelingRecords.length > 0
+			? modelingRecords.slice(0, MAX_BRIEFED_RECORDS).map(modelingRecordLine)
+			: ["- 暂无。"]),
+		...(modelingRecords.length > MAX_BRIEFED_RECORDS
+			? [`- 另有 ${modelingRecords.length - MAX_BRIEFED_RECORDS} 份未列出。`]
+			: []),
+		"",
 		"工具权限与使用纪律：",
 		permissions.read
 			? "- read 已启用：主动读取与拆解任务有关的目标附件、项目文件和已有证据，形成自包含的任务指令；只能读取，不能修改。"

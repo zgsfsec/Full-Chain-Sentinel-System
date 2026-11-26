@@ -21,6 +21,43 @@ export function messageKey(message: { role?: string; timestamp?: number }): stri
 	return `${message.role ?? "?"}:${message.timestamp ?? JSON.stringify(message)}`;
 }
 
+/** What a custom message says: its type and its content, which is how its two copies are matched. */
+export function customStamp(message: Extract<AgentMessageView, { role: "custom" }>): string {
+	return `${message.customType}:${JSON.stringify(message.content)}`;
+}
+
+/**
+ * Whether a message that arrived through the event stream is already carried by
+ * the snapshot, and so must stop being rendered from the event-built list.
+ *
+ * A message is matched by role plus timestamp. A custom message is the
+ * exception: the SDK stamps the event with the time the message was sent at, and
+ * the session entry — which is what the snapshot is built from — with the time
+ * it was appended, a few milliseconds later, so the two never share a key. Left
+ * alone, the event's copy outlived its run at the end of the transcript, and a
+ * folded run shows its last message: a modeling run ended on a second「已启动」
+ * card and its closing summary never appeared. Those are matched by what they
+ * say instead. Two custom messages can say the same thing, so only as many
+ * pending copies are matched as the snapshot holds; `pending` is the list the
+ * message sits in, which is what lets the copies be counted one by one.
+ */
+export function isInSnapshot(
+	message: AgentMessageView,
+	snapshot: readonly AgentMessageView[],
+	pending: readonly AgentMessageView[],
+): boolean {
+	const key = messageKey(message);
+	if (snapshot.some((entry) => messageKey(entry) === key)) return true;
+	if (message.role !== "custom") return false;
+	const stamp = customStamp(message);
+	const sameWords = (entry: AgentMessageView) => entry.role === "custom" && customStamp(entry) === stamp;
+	const held = snapshot.filter(sameWords).length;
+	// Copies of the same message ahead of this one in the pending list are matched first.
+	const position = pending.indexOf(message);
+	const ahead = position < 0 ? 0 : pending.slice(0, position).filter(sameWords).length;
+	return ahead < held;
+}
+
 /** Text blocks of a message or content list, ignoring thinking and tool calls. */
 export function textFromContent(content: unknown): string {
 	if (typeof content === "string") return content;
@@ -53,7 +90,10 @@ function firstTimestamp(messages: readonly AgentMessageView[]): number | undefin
 function formatDuration(ms: number): string {
 	if (ms < 1000) return `${ms}ms`;
 	if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-	return `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`;
+	// Rounded to the second before it is split: rounding the remainder on its own
+	// turns 119.6 seconds into "1m60s".
+	const seconds = Math.round(ms / 1000);
+	return `${Math.floor(seconds / 60)}m${seconds % 60}s`;
 }
 
 /** What a folded run did, for its one-line row: tool calls, thinking rounds, elapsed. */
@@ -113,6 +153,22 @@ export function isGoalMessage(message: AgentMessageView): boolean {
 	return message.role === "custom" && message.customType === "zg-goal";
 }
 
+/** How the line that closes a modeling run opens: 【… · 结束】. */
+const CLOSING_RUN = /^【[^【】]* · 结束】/;
+
+/**
+ * Whether a message is a marker the console injects on the operator's action
+ * rather than during a run: the briefing that starts a modeling run. Like a goal
+ * row it is a boundary: the run a briefing starts folds under it, so its card
+ * stays in view, and a second run started in the same conversation is a stretch
+ * of its own, not folded into the first with the idle time in between counted as
+ * work. The line that closes a run is not a boundary: it is a notice inside the run.
+ */
+export function isModelingBoundary(message: AgentMessageView): boolean {
+	if (message.role !== "custom" || message.customType !== "zg-modeling") return false;
+	return !CLOSING_RUN.test(textFromContent(message.content).trimStart());
+}
+
 export interface RunGroup {
 	key: string;
 	/** The operator instruction this run answers; absent for a kept stretch with no prompt. */
@@ -128,14 +184,14 @@ export interface RunGroup {
  * A compaction summary stays inside the run it happened in: it is process, not a
  * boundary — one task that went through N compactions folds into ONE row (the
  * digest reports 压缩), and the summaries render as their own cards only when
- * the run is expanded. A goal row is a boundary: each automatic round is its own
- * stretch, and folding one round into another would hide where the agent
- * continued on its own.
+ * the run is expanded. A goal row and a modeling marker are boundaries: each
+ * automatic round is its own stretch, and folding one round into another would
+ * hide where the agent continued on its own.
  */
 export function groupRuns(messages: readonly AgentMessageView[]): RunGroup[] {
 	const groups: RunGroup[] = [];
 	for (const message of messages) {
-		if (message.role === "user" || isGoalMessage(message)) {
+		if (message.role === "user" || isGoalMessage(message) || isModelingBoundary(message)) {
 			groups.push({ key: `run-${messageKey(message)}`, prompt: message, body: [] });
 			continue;
 		}
@@ -157,9 +213,7 @@ export function groupRuns(messages: readonly AgentMessageView[]): RunGroup[] {
 export function isNoticeMessage(message: AgentMessageView): boolean {
 	return (
 		message.role === "custom" &&
-		(message.customType === "zg-loop-guard" ||
-			message.customType === "zg-modeling" ||
-			message.customType === "zg-modeling-attach")
+		(message.customType === "zg-loop-guard" || message.customType === "zg-modeling")
 	);
 }
 

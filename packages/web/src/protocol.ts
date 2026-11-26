@@ -1306,14 +1306,14 @@ export interface SentinelCodeOneShotInput {
 }
 
 // ---------------------------------------------------------------------------
-// 业务建模（Business modeling）
+// 业务建模（Business modeling: the interfaces restored from traffic, and the
+// models read out of the project's source）
 // ---------------------------------------------------------------------------
 
 /**
- * Lifecycle of one modeling run. `modeling` is the only live state: the two
- * modeling tools are mounted in the session that started it. `done` is the
- * agent's own declaration, `manual` is the operator ending it, `failed` marks a
- * run whose session went away before it delivered anything.
+ * Lifecycle of one modeling run. `modeling` is the only live state; `done` is
+ * the agent's own declaration, `manual` is the operator ending it, `failed`
+ * marks a run that ended before it delivered anything.
  */
 export type SentinelApiModelStatus = "modeling" | "done" | "manual" | "failed";
 
@@ -1343,7 +1343,12 @@ export interface SentinelApiModelEntity {
 	relations?: SentinelApiModelRelation[];
 }
 
-/** One stored modeling run. Every run is a new record; history is never overwritten. */
+/**
+ * One stored modeling run. It has two parts and either may be empty: the
+ * interface document the agent restored from traffic (`openapi`, `entities`),
+ * and what it read out of the project's source (`apis`, `logic`). Every run is
+ * a new record; history is never overwritten.
+ */
 export interface SentinelApiModel {
 	id: string;
 	projectId: string | null;
@@ -1351,41 +1356,55 @@ export interface SentinelApiModel {
 	sessionId: string | null;
 	sessionPath: string | null;
 	title: string;
-	/** What was modeled: a base URL, a host, or the operator's own words. */
+	/** What was restored from traffic: a base URL, a host, or the operator's own words. Empty when this part was not done. */
 	target: string;
+	/** The part of the source that was read: a repository, a directory, or the operator's own words. Empty when this part was not done. */
+	source: string;
 	status: SentinelApiModelStatus;
-	/** OpenAPI 3.x document, verbatim. */
+	/** OpenAPI 3.x document, verbatim. It has no paths when interfaces were not restored. */
 	openapi: Record<string, unknown>;
 	entities: SentinelApiModelEntity[];
+	/** The endpoints as the source shows them, in the order they were submitted. */
+	apis: SentinelApiSourceMapping[];
+	logic: SentinelBusinessLogicModel;
 	pathCount: number;
 	operationCount: number;
 	/** How many submissions the run made; 0 means the agent never delivered. */
 	submissions: number;
-	/** Why the run ended without a document, when it did. */
+	/** Why the run ended without a model, when it did. */
 	error?: string;
 	createdAt: string;
 	updatedAt: string;
 	doneAt: string | null;
 }
 
-/** A run without the document body, for lists. */
-export type SentinelApiModelSummary = Omit<SentinelApiModel, "openapi" | "entities"> & { entityCount: number };
+/** A run without the two bodies, for lists. */
+export type SentinelApiModelSummary = Omit<SentinelApiModel, "openapi" | "entities" | "apis" | "logic"> & {
+	entityCount: number;
+	apiCount: number;
+	stateMachineCount: number;
+	ruleCount: number;
+};
 
 /** List filters; every field is optional and they combine with AND. */
 export interface SentinelApiModelFilters {
 	status?: SentinelApiModelStatus;
 	projectId?: string;
-	/** Case-insensitive substring match on title and target. */
+	/** Case-insensitive substring match on title, target and source. */
 	search?: string;
 }
 
-/** One line of a run's audit trail. */
+/** One line of a run's audit trail, with the counters as they stood at the time. */
 export interface SentinelApiModelEvent {
 	at: string;
 	kind: "created" | "submitted" | "done" | "manual" | "failed";
 	note?: string;
 	pathCount?: number;
 	operationCount?: number;
+	entityCount?: number;
+	apiCount?: number;
+	stateMachineCount?: number;
+	ruleCount?: number;
 }
 
 /** Live state of the modeling run in the viewed session, if any. */
@@ -1393,10 +1412,165 @@ export interface SentinelModelingState {
 	runId: string;
 	title: string;
 	target: string;
+	source: string;
 	startedAt: string;
 	pathCount: number;
 	operationCount: number;
 	entityCount: number;
+	apiCount: number;
+	stateMachineCount: number;
+	ruleCount: number;
+}
+
+// ---------------------------------------------------------------------------
+// The source half of a modeling record
+// ---------------------------------------------------------------------------
+
+/**
+ * A place in the source, as the agent read it. `file` is the path inside the
+ * project container (`/work/...`) and lines are 1-based. The console puts a
+ * submitted path into this form; it does not check that the file or the line
+ * exists, so a location is the agent's claim and nothing more.
+ */
+export interface SentinelCodeLocation {
+	file: string;
+	line: number;
+	endLine?: number;
+}
+
+/** One step of an endpoint's call chain, from the handler inward. */
+export interface SentinelCodeCallStep {
+	layer: "service" | "repository" | "util" | "middleware" | "other";
+	name: string;
+	location: SentinelCodeLocation;
+	note?: string;
+}
+
+/** A table an endpoint reads or writes, and where in the code that happens. */
+export interface SentinelCodeDataAccess {
+	operation: "read" | "write";
+	table: string;
+	columns?: string[];
+	/** The function or mapper the access goes through, when that is not clear from the call chain. */
+	via?: string;
+	location: SentinelCodeLocation;
+}
+
+/** Where an endpoint's path checks the caller: login, permission, or ownership of the record. */
+export interface SentinelCodeAuthCheck {
+	kind: "authentication" | "authorization" | "ownership" | "other";
+	note?: string;
+	location: SentinelCodeLocation;
+}
+
+/** A call an endpoint's path makes to something outside the code base. */
+export interface SentinelCodeExternalCall {
+	kind: "http" | "rpc" | "mq" | "cache" | "file" | "other";
+	target: string;
+	note?: string;
+	location: SentinelCodeLocation;
+}
+
+/**
+ * One endpoint as the source shows it. The four lists are always present and
+ * may be empty: an empty `authChecks` is the agent's finding that there is no
+ * check on this path, which is not the same as not having looked.
+ */
+export interface SentinelApiSourceMapping {
+	/** Upper case (`GET`, `POST`, ...), or `ANY` where one handler serves every method. */
+	method: string;
+	/** The route as the source declares it, placeholders included: `/api/orders/{id}`. */
+	path: string;
+	module?: string;
+	summary?: string;
+	handler: { name: string; location: SentinelCodeLocation };
+	callChain: SentinelCodeCallStep[];
+	dataAccess: SentinelCodeDataAccess[];
+	authChecks: SentinelCodeAuthCheck[];
+	externalCalls: SentinelCodeExternalCall[];
+	/** `verified` was read in the source; `inferred` is concluded from reading part of it. */
+	confidence?: "verified" | "inferred";
+	notes?: string;
+}
+
+/** A business entity as the code models it: most often a table or a domain class. */
+export interface SentinelCodeEntity {
+	name: string;
+	description?: string;
+	/** The table or document store behind it. */
+	table?: string;
+	/** Who owns the records: the entity or role whose rows these are. */
+	owner?: string;
+	fields?: Array<{ name: string; meaning?: string }>;
+	locations: SentinelCodeLocation[];
+}
+
+export interface SentinelCodeRelation {
+	from: string;
+	to: string;
+	/** How the two are connected: `1:1`, `1:N`, `N:M`, or the code's own word for it. */
+	kind: string;
+	description?: string;
+	locations: SentinelCodeLocation[];
+}
+
+export interface SentinelCodeTransition {
+	from: string;
+	to: string;
+	/** What brings the change about, usually an endpoint: `POST /api/orders/{id}/pay`. */
+	trigger?: string;
+	/** What must hold before the change is allowed. */
+	guard?: string;
+	/** What the change writes, beyond the state itself. */
+	effect?: string;
+	locations: SentinelCodeLocation[];
+}
+
+export interface SentinelCodeStateMachine {
+	/** What has the states: an entity, or an entity in a process (`订单`, `提现申请`). */
+	subject: string;
+	/** The column or field that holds the state. */
+	field?: string;
+	description?: string;
+	states: Array<{ name: string; meaning?: string }>;
+	transitions: SentinelCodeTransition[];
+	/** The state a new record starts in. */
+	initial?: string;
+	locations: SentinelCodeLocation[];
+}
+
+export type SentinelCodeRuleKind = "precondition" | "postcondition" | "invariant" | "ownership";
+
+/** One business rule: something the code enforces, or relies on, across endpoints. */
+export interface SentinelCodeRule {
+	/** Stable across submissions, so a corrected rule replaces the one it fixes. */
+	id: string;
+	kind: SentinelCodeRuleKind;
+	/** What the rule is about: an entity, an endpoint, an operation. */
+	subject: string;
+	statement: string;
+	/** The endpoints the rule touches, each as `METHOD /path`. */
+	apis?: string[];
+	note?: string;
+	locations: SentinelCodeLocation[];
+}
+
+/** A dependency between two endpoints that lives in the business, not in one call. */
+export interface SentinelCodeApiDependency {
+	from: string;
+	to: string;
+	kind: "calls" | "requires" | "triggers" | "mutates" | "other";
+	description?: string;
+	locations: SentinelCodeLocation[];
+}
+
+/** The business logic of the source: what it enforces, beyond what each endpoint does. */
+export interface SentinelBusinessLogicModel {
+	entities: SentinelCodeEntity[];
+	relations: SentinelCodeRelation[];
+	stateMachines: SentinelCodeStateMachine[];
+	rules: SentinelCodeRule[];
+	apiDependencies: SentinelCodeApiDependency[];
 }
 
 // ---------------------------------------------------------------------------
@@ -1887,17 +2061,11 @@ export interface SentinelStateSnapshot {
 	/** The preset agent the active session was created with; null means the default agent. */
 	preset: SentinelSessionPresetView | null;
 	/**
-	 * The business-modeling run in the active session, with live counters; null
-	 * when this session is not modeling. The modeling tools are only mounted
-	 * while this is set, so the console can state whether they are available.
+	 * The modeling run in the active session, with live counters; null when this
+	 * session is not modeling. The modeling tools are declared in every agent
+	 * session; this says whether a run is in force here.
 	 */
 	modeling: SentinelModelingState | null;
-	/**
-	 * Modeling records the operator attached to the active session from the
-	 * composer (带建模数据); empty when none. While set, the read-only
-	 * `api_model_read` is mounted so the model can read the full documents.
-	 */
-	modelingAttached: Array<{ id: string; title: string }>;
 	/** Which mode applies and how the gatekeeper model is doing. */
 	gatekeeper: SentinelGatekeeperView;
 	/**
@@ -1936,12 +2104,6 @@ export type SentinelClientMessage =
 			streamingBehavior?: "steer" | "followUp";
 			images?: ImageContent[];
 			notify?: boolean;
-			/**
-			 * Modeling records to attach to this fresh conversation (带建模数据).
-			 * Honored only for a conversation that has no messages yet, and only on
-			 * this one prompt; their catalog is injected before the text runs.
-			 */
-			attachModelIds?: string[];
 	  }
 	| { type: "abort" }
 	| { type: "compact" }
@@ -2310,15 +2472,14 @@ export type SentinelClientMessage =
 	| { type: "save_supervisor_config"; config: SentinelSupervisorConfig }
 	| { type: "test_supervisor" }
 	/**
-	 * Start business modeling in the viewed session. No payload: the objective
-	 * comes from the conversation the operator is already in. Refused while the
-	 * session runs or while a modeling run is already active.
+	 * Start business modeling in the viewed session. No payload: it only sends
+	 * the modeling instruction to the agent, which decides from what the project
+	 * holds whether to restore interfaces from traffic, read the source, or do
+	 * both. The record is opened by the agent's first submission.
 	 */
 	| { type: "start_modeling" }
 	/** End the run in the viewed session (the operator's own way out). */
 	| { type: "end_modeling" }
-	/** Remove the modeling records attached to the viewed session (带建模数据). */
-	| { type: "detach_modeling" }
 	/** The Android device page: pull the full gateway state. */
 	| { type: "droid_state" }
 	| { type: "droid_token_create"; label: string }
@@ -2343,8 +2504,12 @@ export type SentinelClientMessage =
 	| { type: "list_api_models"; filters?: SentinelApiModelFilters }
 	| { type: "get_api_model"; id: string }
 	| { type: "delete_api_model"; id: string }
-	/** Render one run as a downloadable file; the browser turns it into a download. */
-	| { type: "export_api_model"; id: string; format: "json" | "yaml" }
+	/**
+	 * Render one run as a downloadable file; the browser turns it into a
+	 * download. `json` and `yaml` are the interface document; `record` and
+	 * `markdown` are the whole run, both halves.
+	 */
+	| { type: "export_api_model"; id: string; format: "json" | "yaml" | "record" | "markdown" }
 	/** Open-source watch: every monitor of every project; the page filters. */
 	| { type: "list_code_monitors" }
 	/** Probe a repository's branches before a monitor exists, for the multi-select. */
@@ -2610,7 +2775,7 @@ export type SentinelServerMessage =
 	| { type: "api_models"; items: SentinelApiModelSummary[] }
 	| { type: "api_model"; model: SentinelApiModel; events: SentinelApiModelEvent[] }
 	| { type: "api_model_result"; action: string; id?: string; ok: boolean; error?: string }
-	| { type: "api_model_export"; filename: string; format: "json" | "yaml"; text: string }
+	| { type: "api_model_export"; filename: string; format: "json" | "yaml" | "record" | "markdown"; text: string }
 	| {
 			type: "droid_state";
 			/** The viewed conversation's switch; device and token lists are global. */

@@ -119,7 +119,7 @@ Edit raw HTTP requests in tabs, select the project, direct, or MITM route, inspe
 
 ### 7. API modeling
 
-Organize target workflows and endpoints into OpenAPI 3.0 documents. Browse model status, targets, endpoint and entity counts, inspect details, or export the specification.
+Have the agent record a model of the project's business. Each run is one record with two parts, and the agent decides what each part is based on from what it has: **interface document** — an OpenAPI 3.0 document with the business entities, restored from actual responses where there is traffic and written from the interfaces the source declares when there is only source; **read the source** — when the work directory holds source, record each endpoint's call chain, where the caller is checked, the tables it touches, and the business rules behind it (state machines, ownership, cross-endpoint dependencies) for code audits. Every claim carries a code location, which the console does not verify against the files. Browse status, scope and the counts of both parts per project, inspect details, or export. Every agent can read the project's existing records, and in engineering mode the commander dispatches modeling to workers by writing it into the task.
 
 <details>
 <summary>View screenshots</summary>

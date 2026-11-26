@@ -4975,6 +4975,8 @@ body {
 	height: auto;
 	padding: 8px 10px;
 	white-space: normal;
+	/* A button centres its text; a description that wraps must start at the same edge as its title. */
+	text-align: left;
 }
 
 .pickmenu__action .pickmenu__item-text {

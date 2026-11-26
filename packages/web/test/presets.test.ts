@@ -415,6 +415,10 @@ test("source audit is available by default with an upload hint and evidence-base
 	expect(audit?.text).toContain("跨文件、跨函数追踪数据流");
 	expect(audit?.text).toContain("待确认的问题单独列为待核实项");
 	expect(audit?.text).toContain("不得编造发现");
+	// A large project is recorded as models first; the preset is what makes that the operator's request.
+	expect(audit?.text).toContain("做一次业务建模里读源码的部分");
+	expect(audit?.text).toContain("source_model_submit");
+	expect(audit?.text).toContain("api_model_done");
 });
 
 test("an existing console gains the audit preset once and retains the operator's edits", () => {

@@ -19,6 +19,33 @@ test("opens before sending, accepts only the selected record and scope, and keep
 	expect(vi.getTimerCount()).toBe(0);
 });
 
+test("refresh asks for the open record again without blanking it", () => {
+	const update = vi.fn();
+	const request = new DetailRequest<{ status: string }>(update);
+	const send = vi.fn();
+	request.open("p1", "code-1", send);
+	request.accept("p1", "code-1", { status: "modeling" });
+	update.mockClear();
+	// The operator closed the record from its drill-down: it is read again, and
+	// what is on screen stays until the answer replaces it.
+	request.refresh();
+	expect(send).toHaveBeenCalledTimes(2);
+	expect(update).not.toHaveBeenCalled();
+	expect(request.current?.data).toEqual({ status: "modeling" });
+	expect(request.accept("p1", "code-1", { status: "manual" })).toBe(true);
+	expect(request.current?.data).toEqual({ status: "manual" });
+	// With nothing open there is nothing to ask for, and a send that fails arms nothing.
+	request.close();
+	send.mockClear();
+	request.refresh();
+	expect(send).not.toHaveBeenCalled();
+	request.open("p1", "code-2", () => {
+		throw new Error("offline");
+	});
+	request.refresh();
+	expect(vi.getTimerCount()).toBe(0);
+});
+
 test("switching, closing and disposing reject stale replies and release timers", () => {
 	const update = vi.fn();
 	const request = new DetailRequest<string>(update);

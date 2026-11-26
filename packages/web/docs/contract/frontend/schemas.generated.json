@@ -2749,7 +2749,7 @@
 					}
 				},
 				{
-					"$ref": "#/$defs/Pick__SecurityCheckSource__name_enabled_branch_intervalHours_directory_repository"
+					"$ref": "#/$defs/Pick__SecurityCheckSource__name_enabled_branch_repository_intervalHours_directory"
 				}
 			]
 		},
@@ -4435,7 +4435,7 @@
 				"commit"
 			]
 		},
-		"Omit__SentinelApiModel__openapi_entities": {
+		"Omit__SentinelApiModel__openapi_entities_apis_logic": {
 			"type": "object",
 			"properties": {
 				"createdAt": {
@@ -4449,7 +4449,7 @@
 				},
 				"error": {
 					"type": "string",
-					"description": "Why the run ended without a document, when it did."
+					"description": "Why the run ended without a model, when it did."
 				},
 				"id": {
 					"type": "string"
@@ -4479,6 +4479,10 @@
 						"null"
 					]
 				},
+				"source": {
+					"type": "string",
+					"description": "The part of the source that was read: a repository, a directory, or the operator's own words. Empty when this part was not done."
+				},
 				"status": {
 					"$ref": "#/$defs/SentinelApiModelStatus"
 				},
@@ -4488,7 +4492,7 @@
 				},
 				"target": {
 					"type": "string",
-					"description": "What was modeled: a base URL, a host, or the operator's own words."
+					"description": "What was restored from traffic: a base URL, a host, or the operator's own words. Empty when this part was not done."
 				},
 				"title": {
 					"type": "string"
@@ -4499,6 +4503,7 @@
 			},
 			"required": [
 				"status",
+				"source",
 				"id",
 				"sessionId",
 				"projectId",
@@ -5149,7 +5154,7 @@
 				"id"
 			]
 		},
-		"Pick__SecurityCheckSource__name_enabled_branch_intervalHours_directory_repository": {
+		"Pick__SecurityCheckSource__name_enabled_branch_repository_intervalHours_directory": {
 			"type": "object",
 			"properties": {
 				"branch": {
@@ -5175,9 +5180,9 @@
 				"name",
 				"enabled",
 				"branch",
+				"repository",
 				"intervalHours",
-				"directory",
-				"repository"
+				"directory"
 			]
 		},
 		"PocImportJobStatus": {
@@ -6020,8 +6025,15 @@
 		},
 		"SentinelApiModel": {
 			"type": "object",
-			"description": "One stored modeling run. Every run is a new record; history is never overwritten.",
+			"description": "One stored modeling run. It has two parts and either may be empty: the interface document the agent restored from traffic (`openapi`, `entities`), and what it read out of the project's source (`apis`, `logic`). Every run is a new record; history is never overwritten.",
 			"properties": {
+				"apis": {
+					"type": "array",
+					"description": "The endpoints as the source shows them, in the order they were submitted.",
+					"items": {
+						"$ref": "#/$defs/SentinelApiSourceMapping"
+					}
+				},
 				"createdAt": {
 					"type": "string"
 				},
@@ -6039,14 +6051,17 @@
 				},
 				"error": {
 					"type": "string",
-					"description": "Why the run ended without a document, when it did."
+					"description": "Why the run ended without a model, when it did."
 				},
 				"id": {
 					"type": "string"
 				},
+				"logic": {
+					"$ref": "#/$defs/SentinelBusinessLogicModel"
+				},
 				"openapi": {
 					"$ref": "#/$defs/Record__string__unknown",
-					"description": "OpenAPI 3.x document, verbatim."
+					"description": "OpenAPI 3.x document, verbatim. It has no paths when interfaces were not restored."
 				},
 				"operationCount": {
 					"type": "number"
@@ -6073,6 +6088,10 @@
 						"null"
 					]
 				},
+				"source": {
+					"type": "string",
+					"description": "The part of the source that was read: a repository, a directory, or the operator's own words. Empty when this part was not done."
+				},
 				"status": {
 					"$ref": "#/$defs/SentinelApiModelStatus"
 				},
@@ -6082,7 +6101,7 @@
 				},
 				"target": {
 					"type": "string",
-					"description": "What was modeled: a base URL, a host, or the operator's own words."
+					"description": "What was restored from traffic: a base URL, a host, or the operator's own words. Empty when this part was not done."
 				},
 				"title": {
 					"type": "string"
@@ -6098,9 +6117,12 @@
 				"sessionPath",
 				"title",
 				"target",
+				"source",
 				"status",
 				"openapi",
 				"entities",
+				"apis",
+				"logic",
 				"pathCount",
 				"operationCount",
 				"submissions",
@@ -6138,10 +6160,16 @@
 		},
 		"SentinelApiModelEvent": {
 			"type": "object",
-			"description": "One line of a run's audit trail.",
+			"description": "One line of a run's audit trail, with the counters as they stood at the time.",
 			"properties": {
+				"apiCount": {
+					"type": "number"
+				},
 				"at": {
 					"type": "string"
+				},
+				"entityCount": {
+					"type": "number"
 				},
 				"kind": {
 					"enum": [
@@ -6159,6 +6187,12 @@
 					"type": "number"
 				},
 				"pathCount": {
+					"type": "number"
+				},
+				"ruleCount": {
+					"type": "number"
+				},
+				"stateMachineCount": {
 					"type": "number"
 				}
 			},
@@ -6194,7 +6228,7 @@
 				},
 				"search": {
 					"type": "string",
-					"description": "Case-insensitive substring match on title and target."
+					"description": "Case-insensitive substring match on title, target and source."
 				},
 				"status": {
 					"enum": [
@@ -6225,7 +6259,7 @@
 			]
 		},
 		"SentinelApiModelStatus": {
-			"description": "Lifecycle of one modeling run. `modeling` is the only live state: the two modeling tools are mounted in the session that started it. `done` is the agent's own declaration, `manual` is the operator ending it, `failed` marks a run whose session went away before it delivered anything.",
+			"description": "Lifecycle of one modeling run. `modeling` is the only live state; `done` is the agent's own declaration, `manual` is the operator ending it, `failed` marks a run that ended before it delivered anything.",
 			"enum": [
 				"done",
 				"failed",
@@ -6234,22 +6268,112 @@
 			]
 		},
 		"SentinelApiModelSummary": {
-			"description": "A run without the document body, for lists.",
+			"description": "A run without the two bodies, for lists.",
 			"allOf": [
 				{
-					"$ref": "#/$defs/Omit__SentinelApiModel__openapi_entities"
+					"$ref": "#/$defs/Omit__SentinelApiModel__openapi_entities_apis_logic"
 				},
 				{
 					"type": "object",
 					"properties": {
+						"apiCount": {
+							"type": "number"
+						},
 						"entityCount": {
+							"type": "number"
+						},
+						"ruleCount": {
+							"type": "number"
+						},
+						"stateMachineCount": {
 							"type": "number"
 						}
 					},
 					"required": [
-						"entityCount"
+						"entityCount",
+						"apiCount",
+						"stateMachineCount",
+						"ruleCount"
 					]
 				}
+			]
+		},
+		"SentinelApiSourceMapping": {
+			"type": "object",
+			"description": "One endpoint as the source shows it. The four lists are always present and may be empty: an empty `authChecks` is the agent's finding that there is no check on this path, which is not the same as not having looked.",
+			"properties": {
+				"authChecks": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeAuthCheck"
+					}
+				},
+				"callChain": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeCallStep"
+					}
+				},
+				"confidence": {
+					"description": "`verified` was read in the source; `inferred` is concluded from reading part of it.",
+					"enum": [
+						"verified",
+						"inferred"
+					]
+				},
+				"dataAccess": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeDataAccess"
+					}
+				},
+				"externalCalls": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeExternalCall"
+					}
+				},
+				"handler": {
+					"type": "object",
+					"properties": {
+						"location": {
+							"$ref": "#/$defs/SentinelCodeLocation"
+						},
+						"name": {
+							"type": "string"
+						}
+					},
+					"required": [
+						"name",
+						"location"
+					]
+				},
+				"method": {
+					"type": "string",
+					"description": "Upper case (`GET`, `POST`, ...), or `ANY` where one handler serves every method."
+				},
+				"module": {
+					"type": "string"
+				},
+				"notes": {
+					"type": "string"
+				},
+				"path": {
+					"type": "string",
+					"description": "The route as the source declares it, placeholders included: `/api/orders/{id}`."
+				},
+				"summary": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"method",
+				"path",
+				"handler",
+				"callChain",
+				"dataAccess",
+				"authChecks",
+				"externalCalls"
 			]
 		},
 		"SentinelApprovalRequest": {
@@ -7247,6 +7371,49 @@
 				"promptCache"
 			]
 		},
+		"SentinelBusinessLogicModel": {
+			"type": "object",
+			"description": "The business logic of the source: what it enforces, beyond what each endpoint does.",
+			"properties": {
+				"apiDependencies": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeApiDependency"
+					}
+				},
+				"entities": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeEntity"
+					}
+				},
+				"relations": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeRelation"
+					}
+				},
+				"rules": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeRule"
+					}
+				},
+				"stateMachines": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeStateMachine"
+					}
+				}
+			},
+			"required": [
+				"entities",
+				"relations",
+				"stateMachines",
+				"rules",
+				"apiDependencies"
+			]
+		},
 		"SentinelCodeActivityCounts": {
 			"type": "object",
 			"properties": {
@@ -7327,6 +7494,95 @@
 				"page",
 				"pageSize",
 				"counts"
+			]
+		},
+		"SentinelCodeApiDependency": {
+			"type": "object",
+			"description": "A dependency between two endpoints that lives in the business, not in one call.",
+			"properties": {
+				"description": {
+					"type": "string"
+				},
+				"from": {
+					"type": "string"
+				},
+				"kind": {
+					"enum": [
+						"other",
+						"calls",
+						"requires",
+						"triggers",
+						"mutates"
+					]
+				},
+				"locations": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeLocation"
+					}
+				},
+				"to": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"from",
+				"to",
+				"kind",
+				"locations"
+			]
+		},
+		"SentinelCodeAuthCheck": {
+			"type": "object",
+			"description": "Where an endpoint's path checks the caller: login, permission, or ownership of the record.",
+			"properties": {
+				"kind": {
+					"enum": [
+						"other",
+						"authorization",
+						"authentication",
+						"ownership"
+					]
+				},
+				"location": {
+					"$ref": "#/$defs/SentinelCodeLocation"
+				},
+				"note": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"kind",
+				"location"
+			]
+		},
+		"SentinelCodeCallStep": {
+			"type": "object",
+			"description": "One step of an endpoint's call chain, from the handler inward.",
+			"properties": {
+				"layer": {
+					"enum": [
+						"other",
+						"service",
+						"middleware",
+						"util",
+						"repository"
+					]
+				},
+				"location": {
+					"$ref": "#/$defs/SentinelCodeLocation"
+				},
+				"name": {
+					"type": "string"
+				},
+				"note": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"layer",
+				"name",
+				"location"
 			]
 		},
 		"SentinelCodeCheckJob": {
@@ -7721,6 +7977,116 @@
 				"dispatched"
 			]
 		},
+		"SentinelCodeDataAccess": {
+			"type": "object",
+			"description": "A table an endpoint reads or writes, and where in the code that happens.",
+			"properties": {
+				"columns": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"location": {
+					"$ref": "#/$defs/SentinelCodeLocation"
+				},
+				"operation": {
+					"enum": [
+						"read",
+						"write"
+					]
+				},
+				"table": {
+					"type": "string"
+				},
+				"via": {
+					"type": "string",
+					"description": "The function or mapper the access goes through, when that is not clear from the call chain."
+				}
+			},
+			"required": [
+				"operation",
+				"table",
+				"location"
+			]
+		},
+		"SentinelCodeEntity": {
+			"type": "object",
+			"description": "A business entity as the code models it: most often a table or a domain class.",
+			"properties": {
+				"description": {
+					"type": "string"
+				},
+				"fields": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"meaning": {
+								"type": "string"
+							},
+							"name": {
+								"type": "string"
+							}
+						},
+						"required": [
+							"name"
+						]
+					}
+				},
+				"locations": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeLocation"
+					}
+				},
+				"name": {
+					"type": "string"
+				},
+				"owner": {
+					"type": "string",
+					"description": "Who owns the records: the entity or role whose rows these are."
+				},
+				"table": {
+					"type": "string",
+					"description": "The table or document store behind it."
+				}
+			},
+			"required": [
+				"name",
+				"locations"
+			]
+		},
+		"SentinelCodeExternalCall": {
+			"type": "object",
+			"description": "A call an endpoint's path makes to something outside the code base.",
+			"properties": {
+				"kind": {
+					"enum": [
+						"other",
+						"http",
+						"file",
+						"cache",
+						"rpc",
+						"mq"
+					]
+				},
+				"location": {
+					"$ref": "#/$defs/SentinelCodeLocation"
+				},
+				"note": {
+					"type": "string"
+				},
+				"target": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"kind",
+				"target",
+				"location"
+			]
+		},
 		"SentinelCodeImportState": {
 			"type": "object",
 			"description": "Server-side progress of a bulk monitor import.",
@@ -7782,6 +8148,25 @@
 				"failed",
 				"queued",
 				"running"
+			]
+		},
+		"SentinelCodeLocation": {
+			"type": "object",
+			"description": "A place in the source, as the agent read it. `file` is the path inside the project container (`/work/...`) and lines are 1-based. The console puts a submitted path into this form; it does not check that the file or the line exists, so a location is the agent's claim and nothing more.",
+			"properties": {
+				"endLine": {
+					"type": "number"
+				},
+				"file": {
+					"type": "string"
+				},
+				"line": {
+					"type": "number"
+				}
+			},
+			"required": [
+				"file",
+				"line"
 			]
 		},
 		"SentinelCodeMonitor": {
@@ -8180,11 +8565,181 @@
 				"autoDispatch"
 			]
 		},
+		"SentinelCodeRelation": {
+			"type": "object",
+			"properties": {
+				"description": {
+					"type": "string"
+				},
+				"from": {
+					"type": "string"
+				},
+				"kind": {
+					"type": "string",
+					"description": "How the two are connected: `1:1`, `1:N`, `N:M`, or the code's own word for it."
+				},
+				"locations": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeLocation"
+					}
+				},
+				"to": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"from",
+				"to",
+				"kind",
+				"locations"
+			]
+		},
+		"SentinelCodeRule": {
+			"type": "object",
+			"description": "One business rule: something the code enforces, or relies on, across endpoints.",
+			"properties": {
+				"apis": {
+					"type": "array",
+					"description": "The endpoints the rule touches, each as `METHOD /path`.",
+					"items": {
+						"type": "string"
+					}
+				},
+				"id": {
+					"type": "string",
+					"description": "Stable across submissions, so a corrected rule replaces the one it fixes."
+				},
+				"kind": {
+					"$ref": "#/$defs/SentinelCodeRuleKind"
+				},
+				"locations": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeLocation"
+					}
+				},
+				"note": {
+					"type": "string"
+				},
+				"statement": {
+					"type": "string"
+				},
+				"subject": {
+					"type": "string",
+					"description": "What the rule is about: an entity, an endpoint, an operation."
+				}
+			},
+			"required": [
+				"id",
+				"kind",
+				"subject",
+				"statement",
+				"locations"
+			]
+		},
+		"SentinelCodeRuleKind": {
+			"enum": [
+				"ownership",
+				"precondition",
+				"postcondition",
+				"invariant"
+			]
+		},
 		"SentinelCodeScheduleKind": {
 			"description": "How a monitor decides when the next check is due.",
 			"enum": [
 				"interval",
 				"cron"
+			]
+		},
+		"SentinelCodeStateMachine": {
+			"type": "object",
+			"properties": {
+				"description": {
+					"type": "string"
+				},
+				"field": {
+					"type": "string",
+					"description": "The column or field that holds the state."
+				},
+				"initial": {
+					"type": "string",
+					"description": "The state a new record starts in."
+				},
+				"locations": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeLocation"
+					}
+				},
+				"states": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"meaning": {
+								"type": "string"
+							},
+							"name": {
+								"type": "string"
+							}
+						},
+						"required": [
+							"name"
+						]
+					}
+				},
+				"subject": {
+					"type": "string",
+					"description": "What has the states: an entity, or an entity in a process (`订单`, `提现申请`)."
+				},
+				"transitions": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeTransition"
+					}
+				}
+			},
+			"required": [
+				"subject",
+				"states",
+				"transitions",
+				"locations"
+			]
+		},
+		"SentinelCodeTransition": {
+			"type": "object",
+			"properties": {
+				"effect": {
+					"type": "string",
+					"description": "What the change writes, beyond the state itself."
+				},
+				"from": {
+					"type": "string"
+				},
+				"guard": {
+					"type": "string",
+					"description": "What must hold before the change is allowed."
+				},
+				"locations": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SentinelCodeLocation"
+					}
+				},
+				"to": {
+					"type": "string"
+				},
+				"trigger": {
+					"type": "string",
+					"description": "What brings the change about, usually an endpoint: `POST /api/orders/{id}/pay`."
+				}
+			},
+			"required": [
+				"from",
+				"to",
+				"locations"
 			]
 		},
 		"SentinelCodeVerdict": {
@@ -10398,6 +10953,9 @@
 			"type": "object",
 			"description": "Live state of the modeling run in the viewed session, if any.",
 			"properties": {
+				"apiCount": {
+					"type": "number"
+				},
 				"entityCount": {
 					"type": "number"
 				},
@@ -10407,11 +10965,20 @@
 				"pathCount": {
 					"type": "number"
 				},
+				"ruleCount": {
+					"type": "number"
+				},
 				"runId": {
+					"type": "string"
+				},
+				"source": {
 					"type": "string"
 				},
 				"startedAt": {
 					"type": "string"
+				},
+				"stateMachineCount": {
+					"type": "number"
 				},
 				"target": {
 					"type": "string"
@@ -10424,10 +10991,14 @@
 				"runId",
 				"title",
 				"target",
+				"source",
 				"startedAt",
 				"pathCount",
 				"operationCount",
-				"entityCount"
+				"entityCount",
+				"apiCount",
+				"stateMachineCount",
+				"ruleCount"
 			]
 		},
 		"SentinelModelLibraryView": {
@@ -12575,7 +13146,7 @@
 					"type": "boolean"
 				},
 				"modeling": {
-					"description": "The business-modeling run in the active session, with live counters; null when this session is not modeling. The modeling tools are only mounted while this is set, so the console can state whether they are available.",
+					"description": "The modeling run in the active session, with live counters; null when this session is not modeling. The modeling tools are declared in every agent session; this says whether a run is in force here.",
 					"anyOf": [
 						{
 							"$ref": "#/$defs/SentinelModelingState"
@@ -12584,25 +13155,6 @@
 							"type": "null"
 						}
 					]
-				},
-				"modelingAttached": {
-					"type": "array",
-					"description": "Modeling records the operator attached to the active session from the composer (带建模数据); empty when none. While set, the read-only `api_model_read` is mounted so the model can read the full documents.",
-					"items": {
-						"type": "object",
-						"properties": {
-							"id": {
-								"type": "string"
-							},
-							"title": {
-								"type": "string"
-							}
-						},
-						"required": [
-							"id",
-							"title"
-						]
-					}
 				},
 				"pendingApprovals": {
 					"type": "array",
@@ -12718,7 +13270,6 @@
 				"sessionStatus",
 				"preset",
 				"modeling",
-				"modelingAttached",
 				"gatekeeper",
 				"compacting",
 				"compactionStartedAt",
@@ -16488,17 +17039,6 @@
 				"id"
 			]
 		},
-		"Ws.client.detach_modeling": {
-			"type": "object",
-			"properties": {
-				"type": {
-					"const": "detach_modeling"
-				}
-			},
-			"required": [
-				"type"
-			]
-		},
 		"Ws.client.dismiss_code_monitor_import": {
 			"type": "object",
 			"properties": {
@@ -16996,7 +17536,9 @@
 				"format": {
 					"enum": [
 						"json",
-						"yaml"
+						"markdown",
+						"yaml",
+						"record"
 					]
 				},
 				"id": {
@@ -18161,13 +18703,6 @@
 			"properties": {
 				"type": {
 					"const": "prompt"
-				},
-				"attachModelIds": {
-					"type": "array",
-					"description": "Modeling records to attach to this fresh conversation (带建模数据). Honored only for a conversation that has no messages yet, and only on this one prompt; their catalog is injected before the text runs.",
-					"items": {
-						"type": "string"
-					}
 				},
 				"images": {
 					"type": "array",
@@ -20001,7 +20536,9 @@
 				"format": {
 					"enum": [
 						"json",
-						"yaml"
+						"markdown",
+						"yaml",
+						"record"
 					]
 				},
 				"filename": {
@@ -22835,9 +23372,6 @@
 		"Ws.client.delete_websearch_key": {
 			"$ref": "#/$defs/Ws.client.delete_websearch_key"
 		},
-		"Ws.client.detach_modeling": {
-			"$ref": "#/$defs/Ws.client.detach_modeling"
-		},
 		"Ws.client.dismiss_code_monitor_import": {
 			"$ref": "#/$defs/Ws.client.dismiss_code_monitor_import"
 		},
@@ -23779,7 +24313,7 @@
 		}
 	},
 	"typesSource": {
-		"hash": "e4baa8e27a46afa53a7edf3274ced4acb6e5142daa1ffb540e53710fc645bd53",
+		"hash": "82b87362189149f16123c94aa093136ea58d2933db479a94284f90c787ef7fff",
 		"files": [
 			"packages/agent/src/agent-loop.ts",
 			"packages/agent/src/agent.ts",
@@ -24458,6 +24992,7 @@
 			"packages/web/src/session-usage-store.ts",
 			"packages/web/src/share-link.ts",
 			"packages/web/src/singbox.ts",
+			"packages/web/src/sourcemodels.ts",
 			"packages/web/src/sources.ts",
 			"packages/web/src/sqlite.ts",
 			"packages/web/src/subagent-store.ts",

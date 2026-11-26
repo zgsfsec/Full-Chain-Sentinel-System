@@ -6,7 +6,7 @@
 | --- | --- |
 | 上行消息 | 10 种 |
 | 下行消息 | 5 种 |
-| 处理代码 | `packages/web/src/server.ts` 第 2196–2253 行 |
+| 处理代码 | `packages/web/src/server.ts` 第 2192–2249 行 |
 | 运行时方法 | `packages/web/src/sentinel-session.ts` 的 `getModelLibrary` 到 `setReviewerAuto`，第 4570–4683 行 |
 | 存取函数 | `packages/web/src/model-library.ts` |
 

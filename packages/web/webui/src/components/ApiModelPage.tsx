@@ -1,30 +1,36 @@
 /**
- * The business-modeling page: the OpenAPI documents the agent produced.
+ * The business-modeling page: what the agent recorded about the project's business.
  *
- * Modeling happens inside an ordinary conversation — the operator presses 业务建模
- * in the composer, the agent gets two extra tools for the run, and the result
- * lands here. This page is read-only by construction: the document is the
- * agent's record of what it verified, so the operator inspects it, exports it,
- * or deletes it, but editing it here would blur "the model inferred this" and
- * "someone corrected it".
+ * Modeling happens inside an ordinary conversation or an engineering task's
+ * worker — the operator sends the instruction from the composer, or the
+ * commander dispatches it as a task — and the result lands here. One run is one
+ * record, with two halves: the interface document restored from the target's
+ * traffic (an OpenAPI document with the business entities inferred along the
+ * way), and what the agent read out of the project's source (the mapping of each
+ * endpoint and the business logic model). A record holds whichever halves the
+ * run's inputs allowed for.
  *
- * The list is project-scoped like the vulnerability hub: a model belongs to the
- * scope it was produced in. One row opens a drill-down view: the document in an
- * embedded Swagger UI (the same reader the operator uses for any other API doc),
- * plus the business entities and relations and the audit trail — the two things
- * Swagger UI has no notion of.
+ * This page is read-only by construction: a record is the agent's account of
+ * what it verified or read, so the operator inspects it, exports it, or deletes
+ * it, but editing it here would blur "the model inferred this" and "someone
+ * corrected it".
+ *
+ * The list is project-scoped like the vulnerability hub: a record belongs to the
+ * scope it was produced in. One row opens a drill-down with a tab per part —
+ * only the parts the record has — plus the audit trail.
  */
 
-import { ArrowLeftOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, DownOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { ProTable } from "@ant-design/pro-components";
 import type { ProColumns } from "@ant-design/pro-components";
-import { Alert, Button, Card, Empty, Input, Select, Space, Tabs, Tag, Timeline, Typography } from "antd";
+import { Alert, Button, Card, Dropdown, Empty, Input, Select, Space, Tabs, Tag, Timeline, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import swaggerUiCss from "swagger-ui-dist/swagger-ui.css?url";
 import swaggerUiBundle from "swagger-ui-dist/swagger-ui-bundle.js?url";
 import { t } from "../i18n.ts";
 import type { DetailLoadState } from "../detail-request.ts";
 import { DetailLoading } from "../ui/DetailLoading.tsx";
+import { Page } from "../ui/Page.tsx";
 import type {
 	SentinelApiModel,
 	SentinelApiModelEntity,
@@ -32,35 +38,44 @@ import type {
 	SentinelApiModelStatus,
 	SentinelApiModelSummary,
 } from "../types.ts";
-import { SENTINEL_API_MODEL_STATUS_LABELS } from "../types.ts";
-import { Page } from "../ui/Page.tsx";
+import { CodeModelApiPane } from "./codemodel/CodeModelApiPane.tsx";
+import { CodeModelLogicPane } from "./codemodel/CodeModelLogicPane.tsx";
+import { formatModelTime, MODEL_STATUS_FILTERS, ModelStatusChip } from "./modelStatus.tsx";
 import "./apimodel-page.css";
+import "./codemodel/codemodel.css";
 
 const { Text } = Typography;
 
-const STATUS_COLORS: Record<SentinelApiModelStatus, string> = {
-	modeling: "blue",
-	done: "green",
-	manual: "default",
-	failed: "red",
+/** What a record can be exported as: the interface document as OpenAPI, or the whole record. */
+type ExportFormat = "json" | "yaml" | "record" | "markdown";
+
+/** The panes of a drill-down. Which ones a record has is decided per record. */
+type DetailPane = "document" | "entities" | "apis" | "logic" | "timeline";
+
+const PANE_LABELS: Record<DetailPane, string> = {
+	document: t("接口文档"),
+	entities: t("业务实体"),
+	apis: t("源码映射"),
+	logic: t("业务逻辑"),
+	timeline: t("时间线"),
 };
 
-const STATUS_FILTERS: { value: SentinelApiModelStatus | ""; label: string }[] = [
-	{ value: "", label: t("全部") },
-	{ value: "modeling", label: t("建模中") },
-	{ value: "done", label: t("已完成") },
-	{ value: "manual", label: t("人工结束") },
-	{ value: "failed", label: t("失败") },
-];
+/** How many items the business-logic model holds across its five lists. */
+function logicCount(model: SentinelApiModel): number {
+	const { logic } = model;
+	return (
+		logic.entities.length +
+		logic.relations.length +
+		logic.stateMachines.length +
+		logic.rules.length +
+		logic.apiDependencies.length
+	);
+}
 
-/** The three panes of a drill-down. The document is the default: it is the deliverable. */
-type DetailPane = "doc" | "entities" | "timeline";
-
-const DETAIL_PANES: { value: DetailPane; label: string }[] = [
-	{ value: "doc", label: t("接口文档") },
-	{ value: "entities", label: t("业务实体") },
-	{ value: "timeline", label: t("时间线") },
-];
+/** Whether the record's source half was done at all. */
+function hasSource(model: SentinelApiModel): boolean {
+	return Boolean(model.source) || model.apis.length > 0 || logicCount(model) > 0;
+}
 
 /**
  * One document as a standalone Swagger UI page.
@@ -86,21 +101,41 @@ function swaggerDocumentHtml(openapi: Record<string, unknown>): string {
 	].join("");
 }
 
-function formatTime(iso: string | null): string {
-	if (!iso) return "—";
-	return iso.slice(0, 19).replace("T", " ");
+/**
+ * The panes a record has, each with what it counts. A part the record does not
+ * have gets no tab, so the tabs are exactly what there is to read; the audit
+ * trail is always there.
+ */
+function panesOf(
+	detail: SentinelApiModel,
+	events: readonly SentinelApiModelEvent[],
+): Array<{ value: DetailPane; count: number }> {
+	return [
+		...(detail.pathCount > 0 ? [{ value: "document" as const, count: detail.pathCount }] : []),
+		...(detail.entities.length > 0 ? [{ value: "entities" as const, count: detail.entities.length }] : []),
+		...(detail.apis.length > 0 ? [{ value: "apis" as const, count: detail.apis.length }] : []),
+		...(logicCount(detail) > 0 ? [{ value: "logic" as const, count: logicCount(detail) }] : []),
+		{ value: "timeline" as const, count: events.length },
+	];
 }
 
-/** Human line for one audit entry. */
+/** Human line for one audit entry: what the record held after it. */
 function eventLabel(event: SentinelApiModelEvent): string {
 	switch (event.kind) {
 		case "created":
 			return t("建模开始");
-		case "submitted":
-			return t("提交（{paths} 路径 / {ops} 操作）", {
-				paths: event.pathCount ?? 0,
-				ops: event.operationCount ?? 0,
-			});
+		case "submitted": {
+			const parts: string[] = [];
+			if ((event.pathCount ?? 0) > 0) {
+				parts.push(t("{paths} 路径 / {ops} 操作", { paths: event.pathCount ?? 0, ops: event.operationCount ?? 0 }));
+			}
+			if ((event.apiCount ?? 0) > 0) parts.push(t("{apis} 条接口映射", { apis: event.apiCount ?? 0 }));
+			if ((event.stateMachineCount ?? 0) > 0) {
+				parts.push(t("{machines} 个状态机", { machines: event.stateMachineCount ?? 0 }));
+			}
+			if ((event.ruleCount ?? 0) > 0) parts.push(t("{rules} 条规则", { rules: event.ruleCount ?? 0 }));
+			return parts.length > 0 ? t("提交（{counts}）", { counts: parts.join(" / ") }) : t("提交");
+		}
 		case "done":
 			return t("Agent 声明完成");
 		case "manual":
@@ -108,14 +143,6 @@ function eventLabel(event: SentinelApiModelEvent): string {
 		case "failed":
 			return t("失败");
 	}
-}
-
-function StatusChip({ status }: { status: SentinelApiModelStatus }) {
-	return (
-		<Tag color={STATUS_COLORS[status]} variant="filled">
-			{SENTINEL_API_MODEL_STATUS_LABELS[status]}
-		</Tag>
-	);
 }
 
 function EntityCard({ entity }: { entity: SentinelApiModelEntity }) {
@@ -188,49 +215,69 @@ export function ApiModelPage({
 	onDelete(id: string): void;
 	/** Close a run that is still 建模中 (its session may be long gone). */
 	onEnd(id: string): void;
-	onExport(id: string, format: "json" | "yaml"): void;
+	onExport(id: string, format: ExportFormat): void;
 	onOpenSession(path: string): void;
 }) {
 	const [search, setSearch] = useState("");
 	const [status, setStatus] = useState<SentinelApiModelStatus | "">("");
-	const [pane, setPane] = useState<DetailPane>("doc");
+	/** The pane the operator picked; null means the record's first tab. */
+	const [picked, setPicked] = useState<DetailPane | null>(null);
 
-	// Opening another record lands on its document, not on the pane the previous
+	// Opening another record lands on its first tab, not on the pane the previous
 	// record happened to be on.
-	useEffect(() => setPane("doc"), [detail?.id]);
+	useEffect(() => setPicked(null), [detail?.id]);
 
 	const visible = useMemo(() => {
 		const needle = search.trim().toLowerCase();
 		return items.filter((item) => {
 			if (status && item.status !== status) return false;
 			if (!needle) return true;
-			return item.title.toLowerCase().includes(needle) || item.target.toLowerCase().includes(needle);
+			return (
+				item.title.toLowerCase().includes(needle) ||
+				item.target.toLowerCase().includes(needle) ||
+				item.source.toLowerCase().includes(needle)
+			);
 		});
 	}, [items, search, status]);
 
 	if (!hasProject) {
 		return (
 			<Page title={t("业务建模")} description={t("业务建模的成果按项目归档")}>
-				<Empty
-					image={Empty.PRESENTED_IMAGE_SIMPLE}
-					description={t("请先在侧栏顶部创建或选择一个项目")}
-				/>
+				<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("请先在侧栏顶部创建或选择一个项目")} />
 			</Page>
 		);
 	}
 
 	if (!detail && detailState) {
-		return <Page title={t("业务建模")} extra={<Button icon={<ArrowLeftOutlined />} onClick={onClose}>{t("返回列表")}</Button>}>
-			<DetailLoading error={detailState.error} onRetry={onRetryDetail} />
-		</Page>;
+		return (
+			<Page title={t("业务建模")} extra={<Button icon={<ArrowLeftOutlined />} onClick={onClose}>{t("返回列表")}</Button>}>
+				<DetailLoading error={detailState.error} onRetry={onRetryDetail} />
+			</Page>
+		);
 	}
 
 	if (detail) {
+		const panes = panesOf(detail, events);
+		const pane = panes.some((entry) => entry.value === picked) ? (picked as DetailPane) : panes[0].value;
+		const source = hasSource(detail);
+		// One menu, four forms: the interface document as OpenAPI when there is one, and the whole record.
+		const exports = [
+			...(detail.pathCount > 0
+				? [
+						{ key: "json", label: t("接口文档（OpenAPI JSON）") },
+						{ key: "yaml", label: t("接口文档（OpenAPI YAML）") },
+					]
+				: []),
+			{ key: "record", label: t("完整记录（JSON）") },
+			{ key: "markdown", label: t("完整记录（Markdown）") },
+		];
+		const paneClass = (value: DetailPane) => (pane === value ? "apimodel-pane is-active" : "apimodel-pane");
+		const has = (value: DetailPane) => panes.some((entry) => entry.value === value);
 		// The drill-down does not scroll as a page: the pane the operator is on owns
-		// the scroll, so the document reads like any full-height API doc.
+		// the scroll, so a document reads like any full-height API doc.
 		return (
 			<Page
-				className="apimodel-detail"
+				className="apimodel-detail codemodel-detail"
 				title={t("业务建模")}
 				description={detail.title}
 				extra={
@@ -238,12 +285,11 @@ export function ApiModelPage({
 						<Button size="small" onClick={onClose}>
 							{t("返回列表")}
 						</Button>
-						<Button size="small" onClick={() => onExport(detail.id, "json")}>
-							{t("导出 JSON")}
-						</Button>
-						<Button size="small" onClick={() => onExport(detail.id, "yaml")}>
-							{t("导出 YAML")}
-						</Button>
+						<Dropdown menu={{ items: exports, onClick: ({ key }) => onExport(detail.id, key as ExportFormat) }}>
+							<Button size="small">
+								{t("导出")} <DownOutlined />
+							</Button>
+						</Dropdown>
 						{detail.status === "modeling" ? (
 							<Button size="small" onClick={() => onEnd(detail.id)}>
 								{t("标记已结束")}
@@ -263,7 +309,7 @@ export function ApiModelPage({
 				}
 			>
 				<div className="apimodel-meta">
-					<StatusChip status={detail.status} />
+					<ModelStatusChip status={detail.status} />
 					<Text type="secondary">
 						{t("目标")} <Text strong>{detail.target || t("未记录目标")}</Text>
 					</Text>
@@ -276,11 +322,27 @@ export function ApiModelPage({
 					<Text type="secondary">
 						{t("实体")} <Text strong>{detail.entities.length}</Text>
 					</Text>
+					{source ? (
+						<>
+							<Text type="secondary">
+								{t("源码范围")} <Text strong>{detail.source || t("未记录")}</Text>
+							</Text>
+							<Text type="secondary">
+								{t("源码映射")} <Text strong>{detail.apis.length}</Text>
+							</Text>
+							<Text type="secondary">
+								{t("状态机")} <Text strong>{detail.logic.stateMachines.length}</Text>
+							</Text>
+							<Text type="secondary">
+								{t("规则")} <Text strong>{detail.logic.rules.length}</Text>
+							</Text>
+						</>
+					) : null}
 					<Text type="secondary">
 						{t("提交")} <Text strong>{detail.submissions}</Text> {t("次")}
 					</Text>
-					<Text type="secondary">{t("开始 {time}", { time: formatTime(detail.createdAt) })}</Text>
-					<Text type="secondary">{t("更新 {time}", { time: formatTime(detail.updatedAt) })}</Text>
+					<Text type="secondary">{t("开始 {time}", { time: formatModelTime(detail.createdAt) })}</Text>
+					<Text type="secondary">{t("更新 {time}", { time: formatModelTime(detail.updatedAt) })}</Text>
 					{detail.sessionPath ? (
 						<Button type="link" size="small" onClick={() => onOpenSession(detail.sessionPath as string)}>
 							{t("打开发起它的会话")}
@@ -293,49 +355,54 @@ export function ApiModelPage({
 
 				<Tabs
 					activeKey={pane}
-					onChange={(key) => setPane(key as DetailPane)}
-					items={DETAIL_PANES.map((entry) => ({
+					onChange={(key) => setPicked(key as DetailPane)}
+					items={panes.map((entry) => ({
 						key: entry.value,
 						label: (
 							<Space size={6}>
-								{entry.label}
-								{entry.value === "entities" ? <Tag variant="filled">{detail.entities.length}</Tag> : null}
-								{entry.value === "timeline" ? <Tag variant="filled">{events.length}</Tag> : null}
+								{PANE_LABELS[entry.value]}
+								<Tag variant="filled">{entry.count}</Tag>
 							</Space>
 						),
 					}))}
 				/>
 
 				<div className="apimodel-stage">
-					<div className={pane === "doc" ? "apimodel-pane is-active" : "apimodel-pane"}>
-						{detail.pathCount === 0 ? (
-							<Empty
-								image={Empty.PRESENTED_IMAGE_SIMPLE}
-								description={t("文档里还没有接口：Agent 提交后这里就是 Swagger UI。")}
-							/>
-						) : (
+					{/* Only the panes the record has are rendered at all, like their tabs. */}
+					{has("document") ? (
+						<div className={paneClass("document")}>
 							<iframe
 								className="apimodel-doc"
 								title={`Swagger UI · ${detail.title}`}
 								sandbox="allow-scripts"
 								srcDoc={swaggerDocumentHtml(detail.openapi)}
 							/>
-						)}
-					</div>
-					<div className={pane === "entities" ? "apimodel-pane is-active" : "apimodel-pane"}>
-						<div className="apimodel-pane__pad">
-							{detail.entities.length === 0 ? (
-								<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("这次建模没有整理业务实体。")} />
-							) : (
+						</div>
+					) : null}
+					{has("entities") ? (
+						<div className={paneClass("entities")}>
+							<div className="apimodel-pane__pad">
 								<div className="apimodel-entities">
 									{detail.entities.map((entity) => (
 										<EntityCard key={entity.name} entity={entity} />
 									))}
 								</div>
-							)}
+							</div>
 						</div>
-					</div>
-					<div className={pane === "timeline" ? "apimodel-pane is-active" : "apimodel-pane"}>
+					) : null}
+					{has("apis") ? (
+						<div className={paneClass("apis")}>
+							<CodeModelApiPane apis={detail.apis} />
+						</div>
+					) : null}
+					{has("logic") ? (
+						<div className={paneClass("logic")}>
+							<div className="apimodel-pane__pad">
+								<CodeModelLogicPane logic={detail.logic} />
+							</div>
+						</div>
+					) : null}
+					<div className={paneClass("timeline")}>
 						<div className="apimodel-pane__pad">
 							<Timeline
 								items={events.map((event, index) => ({
@@ -343,7 +410,7 @@ export function ApiModelPage({
 									content: (
 										<div className="apimodel-event">
 											<Text type="secondary" className="apimodel-event__time">
-												{formatTime(event.at)}
+												{formatModelTime(event.at)}
 											</Text>
 											<Text strong>{eventLabel(event)}</Text>
 											{event.note ? <Text type="secondary">{event.note}</Text> : null}
@@ -363,7 +430,7 @@ export function ApiModelPage({
 			title: t("名称"),
 			dataIndex: "title",
 			key: "title",
-			width: 260,
+			width: 240,
 			ellipsis: { showTitle: true },
 		},
 		{
@@ -371,15 +438,31 @@ export function ApiModelPage({
 			dataIndex: "status",
 			key: "status",
 			width: 100,
-			render: (_, item) => <StatusChip status={item.status} />,
+			render: (_, item) => <ModelStatusChip status={item.status} />,
 		},
 		{
-			title: t("目标"),
-			dataIndex: "target",
-			key: "target",
-			width: 200,
-			ellipsis: { showTitle: true },
-			render: (_, item) => <Text code>{item.target || "—"}</Text>,
+			title: t("范围"),
+			key: "scope",
+			width: 220,
+			// What the record covers: the traffic its interfaces were restored
+			// from, the part of the source that was read, or both.
+			render: (_, item) =>
+				item.target || item.source ? (
+					<div className="apimodel-scope">
+						{item.target ? (
+							<Text code className="apimodel-scope__line" title={item.target}>
+								{item.target}
+							</Text>
+						) : null}
+						{item.source ? (
+							<Text type="secondary" className="apimodel-scope__line" title={item.source}>
+								{item.source}
+							</Text>
+						) : null}
+					</div>
+				) : (
+					"—"
+				),
 		},
 		{
 			title: t("接口"),
@@ -391,19 +474,16 @@ export function ApiModelPage({
 				</Text>
 			),
 		},
-		{
-			title: t("实体"),
-			dataIndex: "entityCount",
-			key: "entities",
-			width: 80,
-			align: "right",
-		},
+		{ title: t("实体"), dataIndex: "entityCount", key: "entities", width: 70, align: "right" },
+		{ title: t("源码映射"), dataIndex: "apiCount", key: "apis", width: 90, align: "right" },
+		{ title: t("状态机"), dataIndex: "stateMachineCount", key: "stateMachines", width: 80, align: "right" },
+		{ title: t("规则"), dataIndex: "ruleCount", key: "rules", width: 70, align: "right" },
 		{
 			title: t("时间"),
 			dataIndex: "createdAt",
 			key: "createdAt",
 			width: 170,
-			render: (_, item) => <Text type="secondary">{formatTime(item.createdAt)}</Text>,
+			render: (_, item) => <Text type="secondary">{formatModelTime(item.createdAt)}</Text>,
 		},
 		{
 			title: t("操作"),
@@ -439,7 +519,7 @@ export function ApiModelPage({
 				search={false}
 				options={false}
 				pagination={false}
-				scroll={{ x: 1060 }}
+				scroll={{ x: 1300 }}
 				toolbar={{
 					title: (
 						<div className="apimodel-toolbar">
@@ -447,7 +527,7 @@ export function ApiModelPage({
 								allowClear
 								className="apimodel-search"
 								prefix={<SearchOutlined />}
-								placeholder={t("搜索名称或目标")}
+								placeholder={t("搜索名称、目标或源码范围")}
 								value={search}
 								onChange={(event) => setSearch(event.target.value)}
 							/>
@@ -455,7 +535,7 @@ export function ApiModelPage({
 								value={status}
 								style={{ width: 120 }}
 								onChange={(value) => setStatus(value as SentinelApiModelStatus | "")}
-								options={STATUS_FILTERS.map((entry) => ({ value: entry.value, label: entry.label }))}
+								options={MODEL_STATUS_FILTERS.map((entry) => ({ value: entry.value, label: entry.label }))}
 							/>
 						</div>
 					),
@@ -474,7 +554,7 @@ export function ApiModelPage({
 							image={Empty.PRESENTED_IMAGE_SIMPLE}
 							description={
 								items.length === 0
-									? t("还没有业务建模记录。")
+									? t("还没有业务建模记录。在输入框上方点「业务建模 → 开始建模」，让 Agent 还原目标的接口，或读一遍项目的源码。")
 									: search.trim()
 										? t("没有符合当前筛选的记录（共 {n} 份，当前有关键字）。", { n: items.length })
 										: t("没有符合当前筛选的记录（共 {n} 份）。", { n: items.length })

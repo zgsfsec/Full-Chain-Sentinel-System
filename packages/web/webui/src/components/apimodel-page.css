@@ -26,3 +26,18 @@
 	height: 100%;
 	box-sizing: border-box;
 }
+
+/* The scope cell: the traffic target on top, the source range under it. Either
+   line gives way with an ellipsis rather than pushing the other columns. */
+.apimodel-scope {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.apimodel-scope__line {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}

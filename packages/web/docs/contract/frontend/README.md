@@ -9,7 +9,7 @@
 | [http-api.json](http-api.json) | 98 个 HTTP 操作，OpenAPI 3.0：每个操作要过哪几道门、每个参数和请求体的示例、每种状态码的响应结构和示例 |
 | [sentinel.postman_collection.json](sentinel.postman_collection.json) | Postman 集合：同样的 98 个操作按功能分组，每个请求的 Examples 里存着各种状态码的响应样例；最后一个分组是 WebSocket |
 | [sentinel.postman_environment.json](sentinel.postman_environment.json) | Postman 环境：下面 5 个变量 |
-| [websocket-messages.json](websocket-messages.json) | 不导入，查：347 种 WebSocket 消息的结构、样例和服务端会回什么 |
+| [websocket-messages.json](websocket-messages.json) | 不导入，查：346 种 WebSocket 消息的结构、样例和服务端会回什么 |
 | [schemas.generated.json](schemas.generated.json) | 不导入：上面几个文件里响应结构的来源，从后端的 TypeScript 类型生成，可以拿去做校验或生成类型 |
 
 菜单名以各工具当前版本为准。
@@ -90,7 +90,7 @@ ApiFox：
 
 | 位置 | 内容 |
 | --- | --- |
-| `messages.client.<消息名>` | 浏览器发给服务端的 228 种。`example` 是样例，直接改了值就能发；`schema` 是它的结构；`replies` 是服务端只回给这条连接的消息，`broadcasts` 是发给所有连接的消息，`failures` 是处理失败时回的 `error` 文案 |
+| `messages.client.<消息名>` | 浏览器发给服务端的 227 种。`example` 是样例，直接改了值就能发；`schema` 是它的结构；`replies` 是服务端只回给这条连接的消息，`broadcasts` 是发给所有连接的消息，`failures` 是处理失败时回的 `error` 文案 |
 | `messages.server.<消息名>` | 服务端发给浏览器的 119 种。`sentWhen` 是什么情况下发出，`schema` 和 `example` 同上 |
 | `$defs` | `schema` 引用的结构定义 |
 | `domains` | 21 个功能域，每种消息属于哪一个，完整说明在哪个文档 |

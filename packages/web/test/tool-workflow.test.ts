@@ -21,8 +21,9 @@ beforeEach(() => {
 
 test.each([
 	{ names: ["web_extract"], context: "公开页面" },
-	{ names: ["api_model_read"], context: "已带入" },
-	{ names: ["api_model_submit", "api_model_done"], context: "明确要求业务建模" },
+	{ names: ["api_model_read"], context: "有没有业务建模记录" },
+	{ names: ["api_model_submit", "api_model_done"], context: "要求业务建模" },
+	{ names: ["source_model_submit", "api_model_done"], context: "要求业务建模" },
 	{ names: ["capture_import", "capture_search", "capture_get", "capture_replay"], context: "HTTP 证据" },
 	{ names: ["replay_flows", "replay_capture"], context: "报告截图" },
 	{
@@ -54,7 +55,8 @@ test.each([
 		expect(workflow).toContain(context);
 		for (const name of names) expect(workflow).toContain(name);
 		expect(workflow).not.toContain("poc_search");
-		if (names.includes("api_model_submit")) expect(workflow).toContain("不能因普通渗透任务自行启动建模");
+		if (names.includes("api_model_submit")) expect(workflow).toContain("普通渗透任务不自行启动建模");
+		if (names.includes("source_model_submit")) expect(workflow).toContain("普通代码审计不自行启动建模");
 		if (names.includes("replay_capture")) expect(workflow).toContain("会重新发送请求");
 	} finally {
 		harness.cleanup();
@@ -125,6 +127,7 @@ test("ordinary target instructions receive proactive workflow and POC rules in t
 		])
 			expect(system?.sections?.tool_workflow).toContain(name);
 		expect(prompt).not.toContain("api_model_submit");
+		expect(prompt).not.toContain("source_model_submit");
 	} finally {
 		harness.cleanup();
 	}

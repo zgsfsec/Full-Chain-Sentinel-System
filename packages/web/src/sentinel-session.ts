@@ -44,18 +44,20 @@ import {
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import {
-	createApiModelAttachTools,
+	createApiModelReadTools,
 	createApiModelTools,
-	type ModelingAttachPort,
 	type ModelingPort,
+	type ModelingReadPort,
 	type ModelingSubmitOutcome,
+	type SourceSubmitOutcome,
 } from "./apimodel-tool.ts";
 import {
+	type ApiModelExportFormat,
+	type ApiModelOrigin,
 	ApiModelStore,
 	type ApiModelSubmitInput,
 	apiModelsDbPath,
 	buildApiModelExport,
-	endpointsOf,
 } from "./apimodels.ts";
 import { ApprovalGate } from "./approval.ts";
 import {
@@ -170,19 +172,13 @@ import {
 	writeModelLibrary,
 } from "./model-library.ts";
 import {
-	buildModelingAttachMessage,
 	buildModelingBrief,
-	buildModelingCatalog,
 	buildModelingEndMessage,
-	MODELING_ATTACH_CUSTOM_TYPE,
-	MODELING_ATTACH_MESSAGE_CUSTOM_TYPE,
 	MODELING_MESSAGE_CUSTOM_TYPE,
 	MODELING_STATE_CUSTOM_TYPE,
-	type ModelingAttach,
 	type ModelingRun,
 	modelingState,
 	modelingToolLoadout,
-	readModelingAttach,
 	readModelingRun,
 } from "./modeling.ts";
 import {
@@ -329,6 +325,7 @@ import {
 } from "./session-status.ts";
 import { createSessionTitleTool } from "./session-title-tool.ts";
 import { SessionUsageStore } from "./session-usage-store.ts";
+import { countsOf, type SourceModelSubmitInput } from "./sourcemodels.ts";
 import { createSubagentTool } from "./subagent.ts";
 import { SubagentStore, subagentDbPath } from "./subagent-store.ts";
 import { SubagentRegistry } from "./subagents.ts";
@@ -384,7 +381,7 @@ export interface SentinelRuntimeHooks {
 	onPocChange(): void;
 	/** A subscription source changed (save/delete/sync); consoles refresh the settings page. */
 	onPocSourceChange(): void;
-	/** A business-modeling run changed (started, submitted, ended); consoles refresh the page. */
+	/** A business-modeling run changed (a submission stored, a run opened or ended); consoles refresh the page. */
 	onApiModelChange(): void;
 	/** A device came online/went offline, or the device page's data changed. */
 	onDroidChange(): void;
@@ -509,18 +506,19 @@ interface ManagedSession {
 	taskReleased?: boolean;
 	taskReleasePending?: boolean;
 	/**
-	 * The business-modeling run in force for this session, read from the branch
-	 * at (re)build time. The two modeling tools are active exactly while this is
-	 * set, so a session that is not modeling has no trace of the feature in its
-	 * tool list or its system prompt.
+	 * The business-modeling run in force for this session: the record its agent
+	 * is writing, opened by the first accepted submission and read back from the
+	 * branch at (re)build time. A reopened conversation resumes the run it was
+	 * left in, and an engineering task's worker can be in one as well.
 	 */
 	modeling?: ModelingRun;
 	/**
-	 * Modeling records the operator attached from the composer (带建模数据). The
-	 * catalog is injected once, with the first prompt; the read-only
-	 * `api_model_read` stays mounted until the operator removes the attachment.
+	 * The record this session was writing was closed while its agent was still
+	 * running. Until the agent's current run is over, a submit tool opens
+	 * nothing: without this the agent's next submission in the same run would
+	 * quietly start a new record, the moment after the run was closed.
 	 */
-	modelingAttach?: ModelingAttach;
+	modelingHalted?: boolean;
 	/**
 	 * Asset-mapping queries this session has spent, across all platforms and
 	 * including its sub-agents. Reset by a rebuild, which is what makes the
@@ -930,11 +928,9 @@ export class SentinelRuntime {
 			}),
 			presetId,
 			presetMissing: presetId !== null && presetText === null,
-			// Modeling is a console feature: an engineering task's worker never gets
-			// it, and a reopened conversation resumes the run it was left in.
-			modeling: task ? undefined : (readModelingRun(manager.getBranch()) ?? undefined),
-			// Attached records survive a restart the same way a run does.
-			modelingAttach: task ? undefined : (readModelingAttach(manager.getBranch()) ?? undefined),
+			// A reopened conversation resumes the modeling run it was left in. A task
+			// session starts from an empty branch, so it has none yet.
+			modeling: readModelingRun(manager.getBranch()) ?? undefined,
 			assetQueries: 0,
 			webQueries: 0,
 		};
@@ -1083,14 +1079,13 @@ export class SentinelRuntime {
 					)
 				: []),
 			...(webSearchOn ? createWebSearchTools(this.createWebSearchToolContext(managed, () => "主代理")) : []),
-			// The modeling tools are declared on every console session — the operator
-			// may start modeling by asking for it instead of pressing the button — and
-			// they carry their own "only call this when asked" wording. Task sessions
-			// do not get them at all, and a sub-agent only receives the tools in its
-			// own subset: business modeling stays an operator-driven action on a
-			// conversation.
-			...(task ? [] : createApiModelTools(this.createModelingPort(managed))),
-			...(task ? [] : createApiModelAttachTools(this.createModelingAttachPort(managed))),
+			// The modeling tools are declared on every conversation and every task
+			// session — the operator may ask for modeling instead of pressing the
+			// button, and the commander may make it a worker's task — and the ones
+			// that write carry their own "only call this when asked" wording. A
+			// sub-agent gets only the read tool, through `extraTools` below.
+			...createApiModelTools(this.createModelingPort(managed)),
+			...createApiModelReadTools(this.modelingReadPort(managed.projectId, managed.projectName)),
 			// The Android toolset is opt-in per conversation; off means unmounted,
 			// which keeps an Android toolset out of a Web-pentest session's prompt.
 			...(task ? [] : createDroidTools(this.createDroidToolContext(managed))),
@@ -1185,6 +1180,9 @@ export class SentinelRuntime {
 								...(subagentPermissions.web_search && webSearchOn
 									? createWebSearchTools(this.createWebSearchToolContext(managed, () => "子代理"))
 									: []),
+								// A sub-agent can read the project's modeling records but never
+								// write one: this is the read tool alone.
+								...createApiModelReadTools(this.modelingReadPort(managed.projectId, managed.projectName)),
 							],
 						}),
 					]
@@ -1221,9 +1219,8 @@ export class SentinelRuntime {
 				projectName: managed.projectName,
 			});
 		}
-		// The modeling tools are declared in every console session (see
-		// modelingToolLoadout); this only puts the read tool in place when the
-		// conversation carries attached records.
+		// The modeling tools are active by default; this only adds them back to a
+		// loadout restored from a transcript written before they existed.
 		this.applyModelingTools(managed);
 		this.applyDroidTools(managed);
 		this.applyIosTools(managed);
@@ -1250,6 +1247,10 @@ export class SentinelRuntime {
 			) {
 				this.recordSessionUsage(managed);
 			}
+			// A run of the agent that starts now is a fresh start for modeling: the
+			// operator sent a message, or the briefing pressed while the agent was
+			// running has come up. Whatever was ended in the run before is over.
+			if (event.type === "agent_start") managed.modelingHalted = false;
 			// Only the viewed session streams events; background sessions run silently.
 			if (managed.key === this.activeKey) this.hooks.onSessionEvent(event);
 			if (event.type === "tool_execution_start") {
@@ -1733,243 +1734,198 @@ export class SentinelRuntime {
 	// =========================================================================
 
 	/**
-	 * What the two modeling tools may do to the run of this session. The tools
+	 * What the modeling tools may do to the record of this session. The tools
 	 * validate their own arguments; every accepted change lands here, so the
-	 * record, the console refresh and the transcript marker happen in one place.
+	 * record, the branch entry and the console refresh happen in one place.
 	 */
 	private createModelingPort(managed: ManagedSession): ModelingPort {
 		return {
-			current: () =>
-				managed.modeling ? { runId: managed.modeling.runId, target: managed.modeling.target } : undefined,
-			ensureRun: () => this.ensureModelingRun(managed),
+			current: () => (managed.modeling ? { runId: managed.modeling.runId } : undefined),
 			submit: (input) => this.submitApiModel(managed, input),
+			submitSource: (input) => this.submitSourceModel(managed, input),
 			done: (summary) => {
 				// Not awaited: the tool call returns while the turn is still running, and
-				// closing the run mid-turn is exactly what the SDK expects (the new
-				// loadout takes effect on the next turn).
+				// closing the run mid-turn is exactly what the SDK expects (the next
+				// submission opens a new record).
 				void this.finishModeling(managed, "done", summary);
 			},
 		};
 	}
 
 	/**
-	 * The run in force for this session, opening one when the model is the one
-	 * starting it (the operator asked for modeling in the conversation instead of
-	 * pressing 业务建模). Record, branch entry and console refresh are the same as
-	 * the button's; only the briefing is skipped, because the tool descriptions
-	 * already said what to produce. No message is injected, so this cannot rebuild
-	 * the prompt in the middle of the turn that is calling the tool.
+	/**
+	 * Why a submission stores nothing in this session right now, or undefined
+	 * when it may be stored.
+	 *
+	 * A record can be ended or deleted from the page while the agent is running.
+	 * Its run is cleared then, so the session no longer points at it, and a
+	 * submission that arrives later in the same run would pass for a first one
+	 * and quietly open another record. `modelingHalted` refuses it until the
+	 * agent's next run. A session that still points at a record which is gone or
+	 * finished — one restored from a branch after the fact — is refused too.
 	 */
-	private ensureModelingRun(managed: ManagedSession): { runId: string; target: string } {
-		const existing = managed.modeling;
-		if (existing) return { runId: existing.runId, target: existing.target };
-		const sessionFile = managed.manager.getSessionFile();
-		const record = this.apiModels.beginRun({
-			projectId: managed.projectId,
-			sessionId: managed.manager.getSessionId(),
-			sessionPath: sessionFile ? resolveFsPath(sessionFile) : null,
-			title: managed.manager.getSessionName() ?? undefined,
-		});
-		const run: ModelingRun = { runId: record.id, target: "", startedAt: Date.now() };
-		managed.modeling = run;
-		managed.manager.appendCustomEntry(MODELING_STATE_CUSTOM_TYPE, { ...run });
-		this.applyModelingTools(managed);
-		this.hooks.onApiModelChange();
-		this.hooks.onStateChange();
-		return { runId: run.runId, target: run.target };
+	private submissionRefused(managed: ManagedSession): string | undefined {
+		if (managed.modelingHalted)
+			return t("这次业务建模已经结束，本轮不能再提交；需要继续建模，等本轮结束后重新点「开始建模」。");
+		if (!managed.modeling) return undefined;
+		const record = this.apiModels.get(managed.modeling.runId);
+		if (!record) return t("这条业务建模记录已被删除，不能再提交；需要继续建模，先点「结束建模」再重新开始。");
+		if (record.status !== "modeling")
+			return t("这条业务建模记录已经结束，不能再提交；需要继续建模，先点「结束建模」再重新开始。");
+		return undefined;
 	}
 
-	/** Store one submission and report the counters back to the tool. */
+	/** Store one interface-document submission and report the counters back to the tool. */
 	private submitApiModel(managed: ManagedSession, input: ApiModelSubmitInput): ModelingSubmitOutcome {
-		const run = managed.modeling;
-		if (!run) return { ok: false, errors: ["当前会话没有进行中的业务建模。"] };
-		const result = this.apiModels.submit(run.runId, input);
+		const refused = this.submissionRefused(managed);
+		if (refused) return { ok: false, errors: [refused] };
+		const result = managed.modeling
+			? this.apiModels.submit(managed.modeling.runId, input)
+			: this.apiModels.start(this.modelingOrigin(managed), input);
 		const record = result.model;
 		if (!record) return { ok: false, errors: result.errors ?? ["提交失败。"] };
-		// The target is whatever the model named on its first submission; the page
-		// and the closing marker read it from there.
-		if (!run.target && record.target) run.target = record.target;
-		this.hooks.onApiModelChange();
-		this.hooks.onStateChange();
+		this.noteModelingRecord(managed, record);
+		// Problems that did not refuse the document (an unnamed entity) come back
+		// as warnings: the endpoints are stored, the model can resubmit the list.
 		return {
 			ok: true,
 			pathCount: record.pathCount,
 			operationCount: record.operationCount,
 			entityCount: record.entities.length,
-			// Problems that did not refuse the document (an unnamed entity) come back
-			// as warnings: the endpoints are stored, the model can resubmit the list.
 			warnings: result.errors ?? [],
 		};
 	}
 
+	/** Store one source submission and report the counts back to the tool. */
+	private submitSourceModel(managed: ManagedSession, input: SourceModelSubmitInput): SourceSubmitOutcome {
+		const refused = this.submissionRefused(managed);
+		if (refused) return { ok: false, errors: [refused] };
+		// The session's directory is the host side of the project's work directory:
+		// it is what puts a cited path into its `/work/...` form.
+		const options = { hostWorkDir: managed.cwd };
+		const result = managed.modeling
+			? this.apiModels.submitSource(managed.modeling.runId, input, options)
+			: this.apiModels.startSource(this.modelingOrigin(managed), input, options);
+		if (!result.ok) return result;
+		this.noteModelingRecord(managed, result.model);
+		return { ok: true, counts: countsOf(result.model.apis, result.model.logic), warnings: result.warnings };
+	}
+
+	/** Where a record opened from this session belongs, as far as the session knows. */
+	private modelingOrigin(managed: ManagedSession): ApiModelOrigin {
+		const sessionFile = managed.manager.getSessionFile();
+		return {
+			projectId: managed.projectId,
+			sessionId: managed.manager.getSessionId(),
+			sessionPath: sessionFile ? resolveFsPath(sessionFile) : null,
+			title: managed.manager.getSessionName() ?? undefined,
+		};
+	}
+
 	/**
-	 * Bring the modeling tools of one session in line with its state: the two run
-	 * tools are always in the set (the model has to know modeling exists for the
-	 * operator to be able to ask for it in chat), and the read tool follows the
-	 * attached records. The SDK is only called when the set actually changes, which
+	 * A submission was stored. The first one is what opens the run: the branch
+	 * entry it writes is what makes the run survive a rebuild or a restart, while
+	 * the record itself lives in the hub database.
+	 */
+	private noteModelingRecord(managed: ManagedSession, record: SentinelApiModel): void {
+		if (!managed.modeling) {
+			managed.modeling = { runId: record.id };
+			managed.manager.appendCustomEntry(MODELING_STATE_CUSTOM_TYPE, { ...managed.modeling });
+		}
+		this.hooks.onApiModelChange();
+		this.hooks.onStateChange();
+	}
+
+	/**
+	 * Bring the modeling tools of one session in line with the loadout: they all
+	 * belong in it. The SDK is only called when the set actually changes, which
 	 * keeps a normal session's system prompt from being rebuilt for nothing.
 	 */
 	private applyModelingTools(managed: ManagedSession): void {
-		if (managed.taskSession) return;
 		const active = managed.session.getActiveToolNames();
-		const wanted = modelingToolLoadout(active, managed.modelingAttach !== undefined);
+		const wanted = modelingToolLoadout(active);
 		const changed = wanted.length !== active.length || wanted.some((name, index) => name !== active[index]);
 		if (changed) managed.session.setActiveToolsByName(wanted);
 	}
 
-	/** The read-only tool may read exactly the records attached to this session. */
-	private createModelingAttachPort(managed: ManagedSession): ModelingAttachPort {
+	/**
+	 * The read-only access to one project's modeling records: what every agent's
+	 * `api_model_read` is wired to — a conversation, a worker, a sub-agent and
+	 * the commander alike. It reads the records of that project and no others, so
+	 * what an agent may see is bounded by the project it works in.
+	 */
+	modelingReadPort(projectId: string | null, projectName: string | null = null): ModelingReadPort {
 		return {
-			attached: () => {
-				const attach = managed.modelingAttach;
-				if (!attach) return [];
-				return this.apiModels.getMany(attach.ids).map((model) => ({ id: model.id, title: model.title }));
-			},
+			list: () => this.projectModelingRecords(projectId),
 			read: (id) => {
-				const attach = managed.modelingAttach;
-				if (!attach || !attach.ids.includes(id)) return undefined;
 				const model = this.apiModels.get(id);
-				if (!model) return undefined;
-				return { title: model.title, document: model.openapi, entities: model.entities };
+				return model?.projectId === projectId ? model : undefined;
 			},
+			guide: () => buildModelingBrief(projectName, this.projectModelingRecords(projectId)),
 		};
 	}
 
-	/** The records attached to one session, in attach order; missing ones are skipped. */
-	private attachedRecordsOf(managed: ManagedSession): SentinelApiModel[] {
-		const attach = managed.modelingAttach;
-		return attach ? this.apiModels.getMany(attach.ids) : [];
+	/** The modeling records of one project, newest first; a session without a project has none to read. */
+	projectModelingRecords(projectId: string | null): SentinelApiModelSummary[] {
+		return projectId ? this.apiModels.list({ projectId }) : [];
 	}
 
 	/**
-	 * Attach records to a fresh conversation and inject their catalog as one
-	 * foldable row before the operator's first message runs. One-shot: the picker
-	 * does not offer this again on this conversation; the records stay attached
-	 * (and `api_model_read` mounted) until the operator removes them.
-	 */
-	private async attachModelingRecords(managed: ManagedSession, ids: string[]): Promise<void> {
-		// Requested order wins, unknown or duplicated ids are collapsed.
-		const models = this.apiModels.getMany(ids);
-		const ordered = ids.flatMap((id) => models.filter((model) => model.id === id));
-		if (ordered.length === 0) return;
-		managed.modelingAttach = { ids: [...new Set(ordered.map((model) => model.id))], at: Date.now() };
-		managed.manager.appendCustomEntry(MODELING_ATTACH_CUSTOM_TYPE, { ...managed.modelingAttach });
-		this.applyModelingTools(managed);
-		const catalog = buildModelingCatalog(
-			ordered.map((model) => ({
-				id: model.id,
-				title: model.title,
-				target: model.target,
-				pathCount: model.pathCount,
-				operationCount: model.operationCount,
-				endpoints: endpointsOf(model.openapi),
-				entities: model.entities,
-			})),
-		);
-		this.hooks.onStateChange();
-		try {
-			await managed.session.sendCustomMessage(
-				{
-					customType: MODELING_ATTACH_MESSAGE_CUSTOM_TYPE,
-					content: `${buildModelingAttachMessage(ordered.map((model) => model.title))}\n\n${catalog}`,
-					display: true,
-				},
-				{ triggerTurn: false },
-			);
-		} catch {
-			// The records are attached and the tool mounted; a marker that could not
-			// be written does not undo that.
-		}
-	}
-
-	/** Remove the attachment at the operator's request; the read tool goes with it. */
-	async detachModeling(): Promise<void> {
-		const active = this.active;
-		if (!active) throw new Error(t("会话尚未就绪，请重新选择项目"));
-		if (!active.modelingAttach) throw new Error(t("当前会话没有带入业务建模数据"));
-		if (active.session.isStreaming) throw new Error(t("Agent 正在运行，请先中止再移除"));
-		active.modelingAttach = undefined;
-		active.manager.appendCustomEntry(MODELING_ATTACH_CUSTOM_TYPE, null);
-		this.applyModelingTools(active);
-		this.hooks.onStateChange();
-		try {
-			await active.session.sendCustomMessage(
-				{
-					customType: MODELING_ATTACH_MESSAGE_CUSTOM_TYPE,
-					content: "【业务建模 · 已移除带入数据】带入的建模记录已从本会话移除，api_model_read 已摘除。",
-					display: true,
-				},
-				{ triggerTurn: false },
-			);
-		} catch {
-			// The state is cleared either way.
-		}
-	}
-
-	/** The attached records as the snapshot reports them, for the composer's state. */
-	private modelingAttachedView(managed: ManagedSession | undefined): Array<{ id: string; title: string }> {
-		if (!managed) return [];
-		return this.attachedRecordsOf(managed).map((model) => ({ id: model.id, title: model.title }));
-	}
-
-	/**
-	 * Start business modeling in the viewed conversation.
+	 * Start business modeling in the viewed conversation: what the button does.
 	 *
-	 * The tools are already declared (they always are), so what this adds is the
-	 * run: it records the run on the branch (a restart or a permission rebuild
-	 * resumes it) and injects the briefing as a visible row of its own. The agent
-	 * then works in the conversation it already has — same model, same
-	 * permissions, same command gate.
+	 * The button is only the instruction. It injects the briefing as a visible
+	 * row of its own and starts a turn on it; the agent then works in the
+	 * conversation it already has — same model, same permissions, same command
+	 * gate. No record is opened here: the agent's first accepted submission does
+	 * that, so a run that never gets that far leaves nothing behind.
 	 */
 	async startModeling(): Promise<void> {
 		const active = this.active;
 		if (!active) throw new Error(t("会话尚未就绪，请重新选择项目"));
 		if (active.taskSession) throw new Error(t("工程任务的会话不能做业务建模"));
-		if (active.session.isStreaming) throw new Error(t("Agent 正在运行，请先中止或等本轮结束再开始业务建模"));
-		if (active.modeling) throw new Error(t("当前会话已经在业务建模中"));
-		const sessionFile = active.manager.getSessionFile();
-		const record = this.apiModels.beginRun({
-			projectId: active.projectId,
-			sessionId: active.manager.getSessionId(),
-			sessionPath: sessionFile ? resolveFsPath(sessionFile) : null,
-			title: active.manager.getSessionName() ?? undefined,
-		});
-		const run: ModelingRun = { runId: record.id, target: "", startedAt: Date.now() };
-		active.modeling = run;
-		// The entry is what makes the run survive a rebuild or a restart; the record
-		// itself lives in the hub database.
-		active.manager.appendCustomEntry(MODELING_STATE_CUSTOM_TYPE, { ...run });
-		this.applyModelingTools(active);
-		this.hooks.onApiModelChange();
-		this.hooks.onStateChange();
 		// Not awaited: with `triggerTurn` the promise settles when the whole turn is
 		// over, and the WebSocket handler has to return while the agent works.
 		void active.session
 			.sendCustomMessage(
 				{
 					customType: MODELING_MESSAGE_CUSTOM_TYPE,
-					content: buildModelingBrief(
-						run.target,
-						active.projectName,
-						this.attachedRecordsOf(active).map((model) => ({ title: model.title, pathCount: model.pathCount })),
-					),
+					content: buildModelingBrief(active.projectName, this.projectModelingRecords(active.projectId)),
 					display: true,
 				},
-				{ triggerTurn: true },
+				// A follow-up, not a steer: pressed while the agent is still working, the
+				// briefing becomes the instruction of the next turn instead of being
+				// interleaved into the work in flight.
+				{ triggerTurn: true, deliverAs: "followUp" },
 			)
-			.catch((error: unknown) => {
-				void this.finishModeling(
-					active,
-					"failed",
-					t("建模指令注入失败：{error}", { error: error instanceof Error ? error.message : String(error) }),
-				);
+			.catch(async (error: unknown) => {
+				const reason = t("建模指令注入失败：{error}", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+				// A turn that fails after the agent already opened a record is a run
+				// that failed, not one that never started.
+				if (active.modeling) {
+					await this.finishModeling(active, "failed", reason);
+					return;
+				}
+				// Nothing was opened, so there is nothing to close; the transcript still
+				// has to say why no run started.
+				await active.session
+					.sendCustomMessage(
+						{
+							customType: MODELING_MESSAGE_CUSTOM_TYPE,
+							content: `【业务建模 · 结束】业务建模没有开始：${reason}`,
+							display: true,
+						},
+						{ triggerTurn: false },
+					)
+					.catch(() => undefined);
 			});
 	}
 
 	/**
 	 * End the run of the viewed session at the operator's request. Refused while
-	 * the agent runs: the rebuild would take the tools away mid-turn, and the
-	 * operator has 中止 for that.
+	 * the agent runs: the operator has 中止 for that, and a run ended under a
+	 * working agent would only be refused by its next submission.
 	 */
 	async endModeling(): Promise<void> {
 		const active = this.active;
@@ -1980,10 +1936,9 @@ export class SentinelRuntime {
 	}
 
 	/**
-	 * Close a run: drop the tools, clear the branch entry, close the record and
-	 * leave a closing row in the transcript. Idempotent — the agent's
-	 * `api_model_done` and the operator's button race by design, and the second
-	 * caller finds nothing to do.
+	 * Close a run: clear the branch entry, close the record and leave a closing
+	 * row in the transcript. Idempotent — the agent's `api_model_done` and the
+	 * operator's button race by design, and the second caller finds nothing to do.
 	 */
 	private async finishModeling(
 		managed: ManagedSession,
@@ -1993,29 +1948,27 @@ export class SentinelRuntime {
 		const run = managed.modeling;
 		if (!run) return;
 		managed.modeling = undefined;
+		// Ended under a running agent — from the page, or by the agent's own last
+		// call: what it submits in the rest of this run opens nothing.
+		managed.modelingHalted = managed.session.isStreaming;
 		managed.manager.appendCustomEntry(MODELING_STATE_CUSTOM_TYPE, null);
-		this.applyModelingTools(managed);
 		const record = this.apiModels.finish(run.runId, status, {
 			...(note ? { note } : {}),
 			...(status === "failed" && note ? { error: note } : {}),
 		});
 		this.hooks.onApiModelChange();
 		this.hooks.onStateChange();
-		const text = buildModelingEndMessage({
-			status,
-			pathCount: record?.pathCount ?? 0,
-			operationCount: record?.operationCount ?? 0,
-			entityCount: record?.entities.length ?? 0,
-			...(note ? { note } : {}),
-		});
+		// A record the page closed after the session last looked is left as it
+		// ended, and the row says how it actually ended.
+		const ended = record && record.status !== "modeling" ? record.status : status;
+		const text = buildModelingEndMessage({ status: ended, ...(note ? { note } : {}) }, record);
 		try {
 			await managed.session.sendCustomMessage(
 				{ customType: MODELING_MESSAGE_CUSTOM_TYPE, content: text, display: true },
 				{ triggerTurn: false },
 			);
 		} catch {
-			// The record is closed and the tools are gone; a marker that could not be
-			// written is not worth failing the caller over.
+			// The record is closed; a marker that could not be written is not worth failing the caller over.
 		}
 	}
 
@@ -2024,36 +1977,31 @@ export class SentinelRuntime {
 		const run = managed?.modeling;
 		if (!run) return null;
 		const record = this.apiModels.get(run.runId);
-		if (!record) return null;
-		return modelingState(run, {
-			title: record.title,
-			pathCount: record.pathCount,
-			operationCount: record.operationCount,
-			entityCount: record.entities.length,
-		});
+		return record ? modelingState(run, record) : null;
 	}
 
-	/** Every modeling run, newest first; the page filters by project and status. */
+	/** Every modeling record, newest first; the page filters by project and status. */
 	listApiModels(filters: SentinelApiModelFilters = {}): SentinelApiModelSummary[] {
 		return this.apiModels.list(filters);
 	}
 
-	/** One run with its audit trail. */
+	/** One record with its audit trail. */
 	getApiModel(id: string): { model: SentinelApiModel; events: SentinelApiModelEvent[] } | undefined {
 		const model = this.apiModels.get(id);
 		return model ? { model, events: this.apiModels.events(id) } : undefined;
 	}
 
-	/** The document as a file, in the requested format. */
-	exportApiModel(id: string, format: "json" | "yaml"): { filename: string; text: string } | undefined {
+	/** The record as a file: the interface document as OpenAPI, or the whole record. */
+	exportApiModel(id: string, format: ApiModelExportFormat): { filename: string; text: string } | undefined {
 		const model = this.apiModels.get(id);
 		return model ? buildApiModelExport(model, format) : undefined;
 	}
 
 	/**
 	 * Close a record from the page. When its session is loaded the run is ended
-	 * through the normal path (tools off, marker written); otherwise the record is
-	 * closed on its own, which is the way out of a run whose console went away.
+	 * through the normal path (branch entry cleared, closing row written);
+	 * otherwise the record is closed on its own, which is the way out of a run
+	 * whose console went away.
 	 */
 	finishApiModel(id: string, status: Exclude<SentinelApiModelStatus, "modeling">, note?: string): boolean {
 		for (const managed of this.sessions.values()) {
@@ -2071,32 +2019,20 @@ export class SentinelRuntime {
 	}
 
 	/**
-	 * Delete one run. Deleting the live record also ends the run: leaving the
-	 * tools mounted would let the agent submit into a record that is gone. A
-	 * deleted record an older conversation still carries as attached simply
-	 * disappears from that conversation's reads.
+	 * Delete one record. Deleting the live record also ends the run that writes
+	 * it: a session pointing at a record that is gone must not keep submitting
+	 * into it.
 	 */
 	deleteApiModel(id: string): boolean {
 		for (const managed of this.sessions.values()) {
 			if (managed.modeling?.runId === id) void this.finishModeling(managed, "manual", t("记录已被操作员删除"));
-			if (managed.modelingAttach?.ids.includes(id)) {
-				managed.modelingAttach = {
-					ids: managed.modelingAttach.ids.filter((attached) => attached !== id),
-					at: managed.modelingAttach.at,
-				};
-				if (managed.modelingAttach.ids.length === 0) {
-					managed.modelingAttach = undefined;
-					managed.manager.appendCustomEntry(MODELING_ATTACH_CUSTOM_TYPE, null);
-					this.applyModelingTools(managed);
-				}
-			}
 		}
 		const ok = this.apiModels.delete(id);
 		if (ok) this.hooks.onApiModelChange();
 		return ok;
 	}
 
-	/** Runs a removed project takes with it. */
+	/** Records a removed project takes with it. */
 	purgeProjectApiModels(projectId: string): number {
 		return this.apiModels.purgeProject(projectId);
 	}
@@ -3796,7 +3732,6 @@ export class SentinelRuntime {
 		streamingBehavior?: "steer" | "followUp",
 		images?: ImageContent[],
 		notify?: boolean,
-		attachModelIds?: string[],
 	): Promise<void> {
 		if (!this.activeProjectId) throw new Error(t("请先创建或选择一个项目"));
 		const active = this.active;
@@ -3816,12 +3751,6 @@ export class SentinelRuntime {
 		// is never rebuilt behind the operator's back.
 		await this.ensureModelRuntime();
 		await this.syncMainModel(active);
-		// 带建模数据 lands with the first message of a fresh conversation only: the
-		// catalog is injected before that message runs, and afterwards the composer's
-		// picker is gone (the records stay attached until removed).
-		if (attachModelIds && attachModelIds.length > 0 && branchUserMessages(active.manager.getBranch()).length === 0) {
-			await this.attachModelingRecords(active, attachModelIds);
-		}
 		// Supervision was armed before the conversation; the first prompt is what
 		// starts collecting. An unarmed session has no supervisor state at all.
 		if (this.supervisor.statusOf(active.key) === "waiting") this.supervisor.start(active.key);
@@ -4805,7 +4734,6 @@ export class SentinelRuntime {
 			sessionStatus: active ? readSessionStatus(active.manager.getBranch()) : null,
 			preset: this.presetView(active),
 			modeling: this.modelingView(active),
-			modelingAttached: this.modelingAttachedView(active),
 			droidEnabled: active?.droidOn ?? false,
 			iosEnabled: active?.iosOn ?? false,
 			credentialsEnabled: active?.credentialsOn ?? false,

@@ -22,6 +22,7 @@ import {
 } from "../src/engine.ts";
 import { savePreset, setPresetEnabled } from "../src/presets.ts";
 import type { SentinelEngine, SentinelEngineTask } from "../src/protocol.ts";
+import { summary } from "./modeling-fixtures.ts";
 
 let root = "";
 
@@ -245,6 +246,38 @@ describe("buildCommanderBrief", () => {
 		expect(text).not.toContain("你没有任何执行工具");
 		expect(text).toContain("深入侦察、漏洞验证与利用由执行 Agent 完成");
 		if (permissions.bash) expect(text).toContain("命令预算 40 条");
+	});
+
+	test("tells the commander what the project's business models hold and how to dispatch the rest", () => {
+		const permissions = { bash: false, read: false };
+		const records = [
+			summary({ id: "api-1", title: "商城前台", status: "done", pathCount: 12, operationCount: 30, entityCount: 3 }),
+			summary({ id: "api-2", title: "商城后台", source: "shop-api/", apiCount: 40 }),
+		];
+		const text = buildCommanderBrief(engineFixture(true), [], [], "initial", permissions, records);
+		// What it may do with them, and what it may not.
+		expect(text).toContain("你只读不写，建模由执行 Agent 完成");
+		expect(text).toContain("在 objective 里写明「做业务建模」");
+		// The instruction reaches the worker through the tool, not through the task.
+		expect(text).toContain("你不用把指引抄进任务指令");
+		expect(text).toContain("本工程启动时项目已有的业务建模记录");
+		expect(text).toContain("- 商城前台 [id: api-1]（完成）");
+		expect(text).toContain("- 商城后台 [id: api-2]（建模中）");
+		// With nothing mapped yet the section still says how to get there.
+		const empty = brief(true, []);
+		expect(empty).toContain("业务建模（本项目的接口与业务逻辑模型）");
+		expect(empty).toContain("- 暂无。");
+		// A long history is counted, not listed whole.
+		const many = buildCommanderBrief(
+			engineFixture(true),
+			[],
+			[],
+			"initial",
+			permissions,
+			Array.from({ length: 25 }, (_, index) => summary({ id: `api-${index}`, title: `记录 ${index}` })),
+		);
+		expect(many).toContain("另有 5 份未列出");
+		expect(many).not.toContain("[id: api-24]");
 	});
 });
 

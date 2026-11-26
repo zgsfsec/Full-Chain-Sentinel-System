@@ -525,8 +525,8 @@ export async function startSentinelServer(
 			onGateDecision: (decision) => broadcast({ type: "gate_decision", decision }),
 			onPocChange: () => broadcastPocs(),
 			onPocSourceChange: () => broadcast({ type: "poc_sources", sources: runtime.listPocSources() }),
-			// A modeling run changed (started, submitted, ended): the page is a list
-			// of records, so the whole list is what goes out.
+			// A modeling record changed (opened, a submission stored, ended): the
+			// page is a list of records, so the whole list is what goes out.
 			onApiModelChange: () => broadcastApiModels(),
 			onDroidChange: () => broadcastDroidDevices(),
 			onIosChange: () => broadcastIosDevices(),
@@ -579,6 +579,8 @@ export async function startSentinelServer(
 				agentDir,
 				{
 					credentialStore: () => runtime.credentialStore,
+					// The commander reads each engine's own project records, and nothing else.
+					modelingReadPort: (projectId) => runtime.modelingReadPort(projectId),
 					onCreated: async (engine, input) => {
 						const previous =
 							input.previousEngineId && workProcesses
@@ -880,8 +882,8 @@ export async function startSentinelServer(
 	}
 
 	/**
-	 * The business-modeling runs. The list is project-scoped on the page, so the
-	 * whole set goes out and the console filters it, the way the engine board does.
+	 * The business-modeling records. The list is project-scoped on the page, so
+	 * the whole set goes out and the console filters it, the way the engine board does.
 	 */
 	function broadcastApiModels(): void {
 		broadcast({ type: "api_models", items: runtime.listApiModels() });
@@ -2045,13 +2047,7 @@ export async function startSentinelServer(
 						broadcastEnvironment();
 						return;
 					}
-					await runtime.prompt(
-						message.text,
-						message.streamingBehavior,
-						images,
-						message.notify,
-						message.attachModelIds,
-					);
+					await runtime.prompt(message.text, message.streamingBehavior, images, message.notify);
 					return;
 				}
 				case "compact": {
@@ -3153,7 +3149,7 @@ export async function startSentinelServer(
 					const purgedSessions = await runtime.purgeProjectSessions(target.workDir);
 					const workDir = deleteProjectWorkDir(target.workDir);
 					console.error(
-						`[sentinel-server] 删除项目 ${target.name}，连带删除 ${purged} 条漏洞记录、${purgedGates} 条守门记录、${purgedModels} 份业务模型、${purgedCaptures} 条抓包记录、${purgedAssetQueries} 条资产测绘记录、${purgedLibraryAssets} 条资产库记录、${purgedWebSearch} 条 Web 搜索记录、${purgedSupervisor} 个监督会话、${purgedSessions} 个会话文件${workDir.ok ? "与工作目录" : `（工作目录未删除：${workDir.error ?? ""}）`}`,
+						`[sentinel-server] 删除项目 ${target.name}，连带删除 ${purged} 条漏洞记录、${purgedGates} 条守门记录、${purgedModels} 份业务建模记录、${purgedCaptures} 条抓包记录、${purgedAssetQueries} 条资产测绘记录、${purgedLibraryAssets} 条资产库记录、${purgedWebSearch} 条 Web 搜索记录、${purgedSupervisor} 个监督会话、${purgedSessions} 个会话文件${workDir.ok ? "与工作目录" : `（工作目录未删除：${workDir.error ?? ""}）`}`,
 					);
 					await broadcastProjects();
 					broadcastSnapshot();
@@ -3668,9 +3664,6 @@ export async function startSentinelServer(
 				case "end_modeling":
 					await runtime.endModeling();
 					return;
-				case "detach_modeling":
-					await runtime.detachModeling();
-					return;
 				case "list_api_models":
 					sendTo(socket, { type: "api_models", items: runtime.listApiModels(message.filters) });
 					return;
@@ -3685,7 +3678,7 @@ export async function startSentinelServer(
 				}
 				case "end_api_model": {
 					// The page's way out of a run whose session is gone; a loaded
-					// session ends it through the normal path (tools off, marker).
+					// session ends it through the normal path (run cleared, closing row).
 					const ok = runtime.finishApiModel(message.id, "manual", t("操作员在业务建模页结束"));
 					sendTo(socket, {
 						type: "api_model_result",

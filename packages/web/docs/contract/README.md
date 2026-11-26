@@ -141,10 +141,10 @@
 
 | 方向 | 谁发 | 消息种类 | 文档里的叫法 |
 | --- | --- | --- | --- |
-| 浏览器 → 服务端 | 前端 | 228 种 | 上行消息 |
+| 浏览器 → 服务端 | 前端 | 227 种 | 上行消息 |
 | 服务端 → 浏览器 | 后端 | 119 种 | 下行消息 |
 
-上行消息里的 `type` 不是这 228 种之一时，服务端回 `error`，文案是 `未知消息类型: {type}`。JSON 解析不了时回 `error`，文案是 `无法解析的消息格式`。
+上行消息里的 `type` 不是这 227 种之一时，服务端回 `error`，文案是 `未知消息类型: {type}`。JSON 解析不了时回 `error`，文案是 `无法解析的消息格式`。
 
 ### 回复和广播
 
@@ -261,7 +261,7 @@
 | `packages/web/src/protocol.ts` | 服务端：后端读什么、发什么 | 下行消息以它为准 |
 | `packages/web/webui/src/types.ts` | 浏览器：前端发什么、读什么 | 上行消息以它为准 |
 
-两份是手工保持一致的镜像。编译器会检查它们：228 种上行消息结构上完全一致；下行有 11 种存在已知差异，每一处的取舍写在 [type-alignment.md](websocket/type-alignment.md)。
+两份是手工保持一致的镜像。编译器会检查它们：227 种上行消息结构上完全一致；下行有 11 种存在已知差异，每一处的取舍写在 [type-alignment.md](websocket/type-alignment.md)。
 
 注意两类类型文件不等于线上的情况：
 
@@ -281,7 +281,7 @@
 | 文档对照真实后端 | `packages/web/test/contract/replay.test.ts` | 把每种可以安全发送的上行消息的样例发给真实后端：它回的每种消息、每条失败文案都是条目里列了的，每条消息都符合生成的结构 |
 | HTTP 路由核对 | `packages/web/test/contract/http-doc.test.ts` | `openapi.yaml` 的路径与 `server.ts` 里实际匹配的路由一一对应；版本号与控制台版本一致 |
 | HTTP 文档对照真实后端 | `packages/web/test/contract/http-replay.test.ts` | 把 98 个 HTTP 操作里可以发送的 90 个按文档的示例发给真实后端：状态码是文档列了的、也是步骤预期的，每个 JSON 响应符合文档给这个状态码的结构 |
-| 导入文件自洽 | `packages/web/test/contract/frontend-docs.test.ts` | `http-api.json` 的引用都能解析，只用了 OpenAPI 3.0 的关键字；每个示例符合旁边的结构；Postman 集合发的请求和存的响应就是文档里的示例；`websocket-messages.json` 有全部 347 种消息，内容与各功能域文档一致 |
+| 导入文件自洽 | `packages/web/test/contract/frontend-docs.test.ts` | `http-api.json` 的引用都能解析，只用了 OpenAPI 3.0 的关键字；每个示例符合旁边的结构；Postman 集合发的请求和存的响应就是文档里的示例；`websocket-messages.json` 有全部 346 种消息，内容与各功能域文档一致 |
 | 生成物不过期 | `npm --prefix packages/web run check:contract` | 文案表、常量表、结构定义、导入文件都与源码一致 |
 
 ## 已知的服务端缺口

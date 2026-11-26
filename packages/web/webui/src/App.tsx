@@ -57,7 +57,7 @@ import { SupervisorFloatingWindow } from "./components/SupervisorFloatingWindow.
 import { AssetLibraryPage } from "./components/AssetLibraryPage.tsx";
 import { OutputViewer, ToolCard } from "./components/ToolCard.tsx";
 import { VulnDetail, VulnPage } from "./components/VulnPage.tsx";
-import { groupRuns, messageKey, runFoldState, textFromContent } from "./transcript.ts";
+import { groupRuns, isInSnapshot, messageKey, runFoldState, textFromContent } from "./transcript.ts";
 import type {
 	AgentMessageView,
 	DroidDevice,
@@ -553,7 +553,7 @@ export function App() {
 		lanIps: [],
 		certPin: null,
 	});
-	/** Business modeling: the runs of the active project, and the open drill-down. */
+	/** Business modeling: the records of the active project, and the open drill-down. */
 	const [apiModels, setApiModels] = useState<SentinelApiModelSummary[]>([]);
 	const [apiModelView, apiModelRequest] = useDetailRequest<{ model: SentinelApiModel; events: SentinelApiModelEvent[] }>();
 	const apiModelDetail = apiModelView?.data?.model ?? null;
@@ -637,8 +637,10 @@ export function App() {
 	const [supervisorAudit, setSupervisorAudit] = useState<SentinelSupervisorAuditPage | null>(null);
 	const [supervisorView, supervisorRequest] = useDetailRequest<SentinelSupervisorDetail>();
 	const supervisorDetail = supervisorView?.data ?? null;
-	const detailRequests = useMemo(() => [assetRequest, pocRequest, codeMonitorRequest, apiModelRequest, supervisorRequest],
-		[assetRequest, pocRequest, codeMonitorRequest, apiModelRequest, supervisorRequest]);
+	const detailRequests = useMemo(
+		() => [assetRequest, pocRequest, codeMonitorRequest, apiModelRequest, supervisorRequest],
+		[assetRequest, pocRequest, codeMonitorRequest, apiModelRequest, supervisorRequest],
+	);
 	const [supervisorCallOutput, setSupervisorCallOutput] = useState<{
 		callId: string;
 		text: string;
@@ -762,11 +764,11 @@ export function App() {
 					setOptimisticUserMessages((prev) => prev.filter((item) => userCount < item.userCountAtSend + 1));
 					// The snapshot is authoritative: anything it already carries stops
 					// being rendered from the event-built lists. A message is matched by
-					// role plus timestamp, and by content when it has none.
-					const persisted = new Set(
-						message.snapshot.messages.map((entry) => messageKey(entry as { role?: string; timestamp?: number })),
+					// role plus timestamp, and by content when it has none; a custom
+					// message by what it says, because its two timestamps differ.
+					setPendingMessages((prev) =>
+						prev.filter((entry) => !isInSnapshot(entry, message.snapshot.messages as AgentMessageView[], prev)),
 					);
-					setPendingMessages((prev) => prev.filter((entry) => !persisted.has(messageKey(entry))));
 					setLiveTools((tools) =>
 						tools.filter(
 							(tool) =>
@@ -1582,12 +1584,22 @@ export function App() {
 					break;
 				case "api_model_result":
 					if (!message.ok && message.error) pushError(message.error);
-					if (message.ok && message.action === "删除" && message.id === apiModelRequest.current?.id) apiModelRequest.close();
+					if (message.ok && message.id && message.id === apiModelRequest.current?.id) {
+						// The drill-down shows the record it was opened on, so one that was
+						// just closed from there is read again for its new status.
+						if (message.action === "删除") apiModelRequest.close();
+						else if (message.action === "结束") apiModelRequest.refresh();
+					}
 					break;
 				case "api_model_export": {
-					// The document is text, so the download is built directly instead of
-					// going through the base64 path the file panel uses.
-					const mime = message.format === "yaml" ? "text/yaml;charset=utf-8" : "application/json;charset=utf-8";
+					// Text, so the download is built directly instead of going through
+					// the base64 path the file panel uses.
+					const mime =
+						message.format === "markdown"
+							? "text/markdown;charset=utf-8"
+							: message.format === "yaml"
+								? "text/yaml;charset=utf-8"
+								: "application/json;charset=utf-8";
 					const url = URL.createObjectURL(new Blob([message.text], { type: mime }));
 					const anchor = document.createElement("a");
 					anchor.href = url;
@@ -2759,9 +2771,11 @@ export function App() {
 					? t("Agent 正在运行，等本轮结束或中止后再启动")
 					: snapshot?.compacting
 						? t("正在压缩上下文，压缩完成或中止后再启动目标")
-						: goal && goal.status !== "completed"
-							? t("当前会话已有未结束的目标")
-							: null;
+							: goal && goal.status !== "completed"
+								? t("当前会话已有未结束的目标")
+								: null;
+	/** The viewed conversation is an engineering task's: its reports and its modeling belong to its commander. */
+	const taskConversation = sessions.some((item) => item.id === snapshot?.activeSessionId && item.engine !== undefined);
 
 	const visibleMessages = useMemo(
 		() => (snapshot?.messages ?? []).filter((message) => message.role !== "system"),
@@ -3254,7 +3268,7 @@ export function App() {
 									goalDisabledReason={goalDisabledReason}
 									onOpenGoal={() => setGoalOpen(true)}
 									modeling={snapshot?.modeling ?? null}
-									modelingAttached={snapshot?.modelingAttached ?? []}
+									taskSession={taskConversation}
 									droidEnabled={snapshot?.droidEnabled ?? false}
 									onToggleDroid={(next) => send({ type: "droid_set_enabled", enabled: next })}
 									iosEnabled={snapshot?.iosEnabled ?? false}
@@ -3263,19 +3277,13 @@ export function App() {
 									onToggleCredentials={(next) => send({ type: "credentials_set_enabled", enabled: next })}
 									reportsEnabled={snapshot?.reportsEnabled ?? false}
 									reportTemplate={snapshot?.reportTemplate}
-									reportsReadOnly={sessions.some((item) => item.id === snapshot?.activeSessionId && item.engine !== undefined)}
+									reportsReadOnly={taskConversation}
 									onToggleReports={(next, templateId) => send({ type: "reports_set_enabled", enabled: next, templateId })}
-									apiModels={
-										snapshot?.project
-											? apiModels.filter((item) => item.projectId === snapshot.project?.id)
-											: apiModels
-									}
 									freshConversation={
 										!(snapshot?.messages ?? []).some(
 											(message) => (message as { role?: string }).role === "user",
 										)
 									}
-									onDetachModeling={() => send({ type: "detach_modeling" })}
 									onStartModeling={() => send({ type: "start_modeling" })}
 									onEndModeling={() => send({ type: "end_modeling" })}
 									presets={presets ?? []}
@@ -3310,7 +3318,7 @@ export function App() {
 									}}
 									onShowSupervisorWindow={showSupervisorWindow}
 									onSetPreset={(presetId) => send({ type: "set_session_preset", presetId })}
-									onSend={(text, behavior, images, attachModelIds) => {
+									onSend={(text, behavior, images) => {
 										const userCount = (snapshotRef.current?.messages ?? []).filter(
 											(entry) => (entry as { role?: string }).role === "user",
 										).length;
@@ -3324,7 +3332,6 @@ export function App() {
 											streamingBehavior: behavior,
 											images,
 											notify: notifyRun ?? undefined,
-											...(attachModelIds && attachModelIds.length > 0 ? { attachModelIds } : {}),
 										});
 									}}
 									onAbort={() => send({ type: "abort" })}

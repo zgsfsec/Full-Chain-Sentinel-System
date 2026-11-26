@@ -19,12 +19,17 @@ const TOOL_WORKFLOW_ROUTES: readonly { tools: readonly string[]; guideline: stri
 	{
 		tools: ["api_model_read"],
 		guideline:
-			"会话已带入业务建模记录时：主动用 api_model_read 读取与当前接口测试有关的完整记录，再依据参数和响应结构设计验证；目录摘要不是完整文档。",
+			"涉及本项目的接口或业务逻辑时：先用 api_model_read 查本项目有没有业务建模记录，有就读与当前工作有关的部分（接口文档、接口源码映射、业务逻辑模型），再设计验证，不凭印象猜参数和规则。任务里写明要做业务建模时，先用 api_model_read 取 part=guide 的操作指引。",
 	},
 	{
 		tools: ["api_model_submit", "api_model_done"],
 		guideline:
-			"仅在用户明确要求业务建模或已通过按钮启动建模时：用 api_model_submit 分批提交有证据的接口与实体，完成后用 api_model_done 说明覆盖范围；不能因普通渗透任务自行启动建模。",
+			"仅在用户或任务指令要求业务建模时：用 api_model_submit 分批提交有证据的接口与实体，完成后用 api_model_done 说明覆盖范围；普通渗透任务不自行启动建模。",
+	},
+	{
+		tools: ["source_model_submit", "api_model_done"],
+		guideline:
+			"仅在用户或任务指令要求业务建模时：用 source_model_submit 分批提交读过源码的接口映射和业务逻辑模型，每条结论带代码位置，完成后用 api_model_done 说明覆盖范围；普通代码审计不自行启动建模。",
 	},
 	{
 		tools: ["capture_import"],

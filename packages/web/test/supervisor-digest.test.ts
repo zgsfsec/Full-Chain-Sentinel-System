@@ -64,6 +64,22 @@ describe("digestToolCall", () => {
 		expect(record.httpStatus).toBeNull();
 		expect(record.signals).toContain("error:connection-error");
 	});
+
+	test("a stored source submission is new evidence; a refused one is not", () => {
+		const stored = digest("已入库：接口映射 2 条，业务实体 1 个，状态机 0 个，业务规则 1 条。", {
+			toolName: "source_model_submit",
+			args: { apis: [] },
+		});
+		expect(stored.record.newEvidence).toBe(true);
+		expect(stored.record.signals).toContain("finding");
+		const refused = digest("提交被拒绝，未入库：\n- apis[0] 的 line 必须是从 1 开始的行号。", {
+			toolName: "source_model_submit",
+			args: { apis: [] },
+			isError: true,
+		});
+		expect(refused.record.newEvidence).toBe(false);
+		expect(refused.record.signals).not.toContain("finding");
+	});
 });
 
 test("running-call summaries redact secrets without treating intended requests as evidence", () => {

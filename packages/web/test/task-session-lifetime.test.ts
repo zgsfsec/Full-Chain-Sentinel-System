@@ -90,6 +90,15 @@ function persistEvidence(manager: SessionManager): void {
 	});
 }
 
+test("a task session carries the modeling tools: a worker models because its task says so, not because a button was pressed", async () => {
+	const { runtime, options } = setup();
+	const handle = await runtime.acquireTaskSession(options);
+	const active = handle.session.getActiveToolNames();
+	for (const name of ["api_model_read", "api_model_submit", "source_model_submit", "api_model_done"])
+		expect(active).toContain(name);
+	handle.release();
+});
+
 test("finished background tasks dispose live sessions and preserve reopenable history", async () => {
 	const { runtime, options } = setup();
 	for (let i = 0; i < 6; i += 1) {

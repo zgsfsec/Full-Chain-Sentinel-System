@@ -22,12 +22,15 @@ export type PresetMenuAnchor = PickerAnchor;
  * inside the viewport. The composer's switch sits near the bottom of the window,
  * where a fixed menu cannot be scrolled into view, so the menu flips upward when
  * the space below is too small.
+ *
+ * `needed` is the height the menu's content takes. Below that, opening downward
+ * would only put a scrollbar in front of the last items, so the menu goes up.
  */
-export function presetMenuPosition(rect: DOMRect, width = 260, maximumHeight = 320): PresetMenuAnchor {
+export function presetMenuPosition(rect: DOMRect, width = 260, maximumHeight = 320, needed = 200): PresetMenuAnchor {
 	const left = Math.max(8, Math.min(rect.left - 6, window.innerWidth - width - 8));
 	const below = Math.max(0, window.innerHeight - rect.bottom - 12);
 	const above = Math.max(0, rect.top - 12);
-	if (below < 200 && above > below) {
+	if (below < needed && above > below) {
 		return {
 			left,
 			bottom: window.innerHeight - rect.top + 4,

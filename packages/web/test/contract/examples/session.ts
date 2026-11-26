@@ -15,7 +15,6 @@ export const client = {
 			},
 		],
 		notify: false,
-		attachModelIds: ["attach-model-1"],
 	},
 	compact: {
 		type: "compact",
@@ -262,17 +261,15 @@ export const server = {
 				runId: "run-1",
 				title: "示例文本",
 				target: "text",
+				source: "text",
 				startedAt: "2026-11-24T08:30:00.000Z",
 				pathCount: 2,
 				operationCount: 2,
 				entityCount: 2,
+				apiCount: 2,
+				stateMachineCount: 2,
+				ruleCount: 2,
 			},
-			modelingAttached: [
-				{
-					id: "id-1",
-					title: "示例文本",
-				},
-			],
 			gatekeeper: {
 				globalMode: "review",
 				sessionMode: "review",

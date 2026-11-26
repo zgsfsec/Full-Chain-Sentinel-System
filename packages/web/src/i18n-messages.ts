@@ -597,8 +597,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	"Agent 正在运行，请先中止再继续目标": "The agent is running; abort it before resuming the goal",
 	"Agent 正在运行，请先中止或等本轮结束再启动目标":
 		"The agent is running; abort it or wait for this round to end before starting a goal",
-	"Agent 正在运行，请先中止或等本轮结束再开始业务建模":
-		"The agent is running; abort it or wait for this round to end before starting API modeling",
 	"Agent 白名单": "Agent allowlist",
 	"Agent 的工具列表里能看到 {tool}。": "The Agent's tool list shows {tool}.",
 	"Agent 运行中：切换后它会在后台继续运行": "Agent is running; it keeps running in the background after the switch",
@@ -1014,8 +1012,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	业务建模: "API modeling",
 	业务建模已启动: "API modeling started",
 	业务建模已结束: "API modeling finished",
-	"业务建模：开始一次建模，或把已有建模数据关联给这条对话":
-		"API modeling: start a run, or attach existing modeling data to this conversation",
 	两次输入的密码不一致: "The passwords do not match",
 	两次输入的新密码不一致: "The new passwords do not match",
 	严重: "Critical",
@@ -1078,7 +1074,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	人工结束: "Ended manually",
 	人工重新评审: "Manual re-review",
 	仅手动: "Manual only",
-	仅新对话可用: "New conversations only",
 	仅本地: "Local only",
 	仅远端: "Remote only",
 	介入: "Intervene",
@@ -1330,7 +1325,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	"关注攻击链下一跳、权限提升和横向，但不放宽安全规则。":
 		"Focus on the next hop in the attack chain, privilege escalation, and lateral movement, without relaxing safety rules.",
 	关注点与建议风格: "Focus areas and suggestion style",
-	关联建模数据: "Link modeling data",
 	关键字: "Keyword",
 	关键词: "Keyword",
 	关闭: "Close",
@@ -1431,8 +1425,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	"加载模板全文…": "Loading template…",
 	"勾选后随第一条消息把接口目录交给 Agent（细节它可用 api_model_read 自己查）；一条都不勾，就什么都不插入。发送后勾选自动清空。":
 		"Checked records send their endpoint catalog to the agent with the first message (it can look up details with api_model_read); with nothing checked, nothing is inserted. Selections clear after sending.",
-	"勾选已有建模记录，随第一条消息把接口目录交给 Agent":
-		"Select an existing modeling record to pass its endpoint catalog to the Agent with the first message",
 	"勾选指挥官可以使用的预设；未勾选任何一项 = 不限制（指挥官可用全部已启用的预设）。":
 		"Check the presets the commander may use; checking none = no restriction (every enabled preset is available).",
 	"勾选的事件会同时发送到所有已启用渠道。": "Checked events are sent to every enabled channel.",
@@ -1492,7 +1484,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	只有已暂停的工程才能继续: "Only a paused engagement can be resumed",
 	只有运行中或已完成的工程可以和指挥官对话: "Only a running or completed engagement can chat with the commander",
 	只有运行中的工程才能暂停: "Only a running engagement can be paused",
-	只有还没有发过消息的新对话可以关联建模数据: "Only new conversations with no messages yet can link modeling data",
 	只看失败: "Failures only",
 	"只看评审 LLM 标记为「存疑」的记录：证据不足以支撑结论":
 		"Only show records the review LLM flagged as Dubious: the evidence does not support the conclusion",
@@ -1584,10 +1575,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	在对话中打开: "Open in chat",
 	"在对话页输入框上方点「业务建模」即可开始：Agent 会在当前会话里临时拿到两个建模工具，把还原出来的接口与业务实体提交到这里。平时它看不到这两个工具。":
 		'Click "Business modeling" above the chat input to start: the Agent temporarily gets two modeling tools in the current session and submits the endpoints and business entities it recovered here. It cannot see those tools otherwise.',
-	"在当前会话里还原目标的接口与业务实体，生成 Swagger 文档":
-		"Reconstruct the target's endpoints and business entities in the current session and generate Swagger docs",
-	"在本会话里还原接口与业务实体；在对话里直接要求也可以":
-		"Reconstruct endpoints and business entities in this session; you can also just ask in the chat",
 	在查看器中打开全部内容: "Open the full content in the viewer",
 	在沙箱里打开插件界面: "Open the plugin UI in the sandbox",
 	"在项目容器内执行命令（审批模式仍逐条确认）":
@@ -1952,8 +1939,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	已存在同名项目: "A Project with this name already exists",
 	已安装: "Installed",
 	已完成: "Completed",
-	"已带入业务建模 {count} 份": "Attached {count} API modeling entries",
-	已带入业务建模数据: "Attached API modeling data",
 	"已开启监督：{mode} · {strategy}": "Supervision enabled: {mode} · {strategy}",
 	已忽略: "Ignored",
 	已拒绝: "Denied",
@@ -1979,7 +1964,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	"已确认 {count}": "Confirmed {count}",
 	"已确认，可以进入平台": "Confirmed. You may enter the platform.",
 	"已禁用：{tools}": "Disabled: {tools}",
-	已移除带入的建模数据: "Removed attached modeling data",
 	已终止: "Stopped",
 	已结束: "Finished",
 	"已装 v{current}，可更新": "Installed v{current}, update available",
@@ -2049,8 +2033,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	当前会话已有未结束的目标: "This session already has an unfinished target",
 	"当前会话已有未结束的目标，请先在目标条上继续或清除它":
 		"This session already has an unfinished goal; resume or clear it on the goal bar first",
-	当前会话已经在业务建模中: "This session is already running API modeling",
-	当前会话没有带入业务建模数据: "This session has no attached API modeling data",
 	当前会话没有持续目标: "This session has no persistent goal",
 	当前会话没有进行中的业务建模: "This session has no API modeling run in progress",
 	"当前会话还没有子代理。让主代理用 spawn_agent 派发独立任务后，这里会显示它的实时过程。":
@@ -2599,7 +2581,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	"查看当前会话的子代理运行，可中止或追加指令":
 		"View this session's subagent runs; stop them or send more instructions",
 	查看总报告: "View summary report",
-	"查看本会话已带入的建模数据，或全部移除": "View the modeling data loaded into this session, or remove it all",
 	查看源码与许可证: "View source code and license",
 	查询: "Search",
 	"查询中…": "Looking up…",
@@ -2639,8 +2620,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	次: "times",
 	"次 · 0 = 不限": "queries · 0 = unlimited",
 	次数: "Attempts",
-	"正在业务建模：{title}；已提交 {paths} 路径 / {operations} 操作 / {entities} 实体":
-		"API modeling in progress: {title}; {paths} paths / {operations} operations / {entities} entities submitted",
 	正在加载插件界面: "Loading the plugin UI",
 	"正在压缩上下文，压缩完成后可继续发送；也可在工具栏点「中止压缩」放弃这次压缩":
 		"Compacting context; you can keep sending once it finishes, or click Abort compaction in the toolbar to skip this compaction",
@@ -2975,7 +2954,6 @@ export const EN_MESSAGES: Record<string, string> = {
 	终止: "Terminate",
 	"终止会同时停用后续定时计划，确定？": "Terminating also disables the remaining schedule. Continue?",
 	结束建模: "End modeling",
-	"结束这次建模，Agent 回到普通工作": "End this modeling session and return the Agent to normal work",
 	结论: "Conclusion",
 	"结论: {result}": "Result: {result}",
 	结论复核: "Conclusion review",
@@ -3311,7 +3289,6 @@ export const EN_MESSAGES: Record<string, string> = {
 		"No episodes yet. One is created every 20 calls or when repetition or idling is detected.",
 	"还没有 token。创建一个，填进手机上的 DroidBridge。":
 		"No tokens yet. Create one and enter it in DroidBridge on the phone.",
-	"还没有业务建模记录。": "No business modeling records yet.",
 	"还没有产物。": "No artifacts yet.",
 	"还没有任务。指挥官启动后会在这里派发。": "No tasks yet. The commander dispatches here once it starts.",
 	"还没有会话，无法设置预设": "There is no session to set a preset on",
@@ -3364,15 +3341,12 @@ export const EN_MESSAGES: Record<string, string> = {
 	这个模型没有可复制的端点配置: "This model has no endpoint configuration to copy",
 	这个模型没有可用的端点配置: "This model has no usable endpoint configuration",
 	这个角色必须选择一条模型或跟随主模型: "This role must select a model or follow the main model",
-	"这个项目还没有业务建模记录。先开始一次建模。":
-		"This project has no modeling records yet. Start a modeling run first.",
 	"这些值会烘焙进工具镜像，所以保存后需要重建镜像；pip / npm / go 三项在容器内运行时（pip install、npm install、go install）同样生效。留空表示使用官方源。":
 		"These values are baked into the tool image, so rebuild it after saving; the pip, npm and Go settings also apply when running inside the container (pip install, npm install, go install). Leave a field blank to use the official source.",
 	"这些文件属于另一个项目，请移除后重新上传：{names}":
 		"These files belong to another project. Remove them and upload again: {names}",
 	"这些调用不经过判定，只留痕": "These calls are not judged; they are only recorded",
 	这条建议已被忽略: "This suggestion has already been ignored",
-	"这次建模没有整理业务实体。": "This modeling run did not organize any business entities.",
 	"这次监督没有给出建议。": "This supervision run produced no advice.",
 	这次调用的完整输出已不在当前会话文件中: "The full output of this call is no longer in the current session file",
 	进入平台: "Enter platform",
@@ -4171,6 +4145,119 @@ export const EN_MESSAGES: Record<string, string> = {
 	"请求头值不能包含控制字符：{name}": "Header value cannot contain control characters: {name}",
 	"请填写请求头 {name} 的值": "Enter a value for header {name}",
 	插件开发任务: "Plugin development task",
+
+	工具函数: "Utility function",
+	中间件: "Middleware",
+	其他: "Other",
+	登录校验: "Authentication check",
+	权限校验: "Permission check",
+	资源归属校验: "Ownership check",
+	"HTTP 请求": "HTTP request",
+	"RPC 调用": "RPC call",
+	消息队列: "Message queue",
+	缓存: "Cache",
+	文件读写: "File I/O",
+	前置条件: "Precondition",
+	后置条件: "Postcondition",
+	业务不变量: "Business invariant",
+	资源所有权: "Resource ownership",
+	依赖: "Requires",
+	修改数据: "Mutates data",
+	"另 {count} 处": "{count} more",
+	部分为推断: "Partly inferred",
+	模块: "Module",
+	入口: "Entry point",
+	调用链: "Call chain",
+	"{count} 步": "{count} steps",
+	"入口函数之外没有更深的调用。": "Nothing is called beyond the entry point.",
+	数据访问: "Data access",
+	"{count} 处": "{count} places",
+	"这条调用链不读写数据库。": "This call chain does not read or write the database.",
+	写: "Write",
+	读: "Read",
+	"经 {name}": "via {name}",
+	未发现权限校验: "No permission check found",
+	"整条调用链上没有找到登录、权限或资源归属的校验。审计时先看这里。":
+		"No authentication, permission or ownership check was found anywhere on the call chain. Look here first when auditing.",
+	外部调用: "External calls",
+	"这条调用链不调用外部服务。": "This call chain calls no external service.",
+	"搜索路径、入口函数或表名": "Search by path, handler or table",
+	搜索接口映射: "Search endpoint mappings",
+	全部模块: "All modules",
+	没有符合条件的接口映射: "No endpoint mapping matches",
+	校验: "Checks",
+	未发现: "Not found",
+	"选择左侧的一个接口，看它的调用链、数据访问和权限校验。":
+		"Select an endpoint on the left to see its call chain, data access and permission checks.",
+	"这一部分还没有内容。": "This part is empty.",
+	"搜索实体、表名或归属方": "Search entities, tables or owners",
+	搜索实体: "Search entities",
+	对应的表: "Table",
+	资源归属: "Owner",
+	位置: "Location",
+	起点: "From",
+	关系: "Relation",
+	终点: "To",
+	"{states} 个状态 · {transitions} 条迁移": "{states} states · {transitions} transitions",
+	初始: "Initial",
+	"没有记录到状态迁移。": "No transitions were recorded.",
+	未记录: "Not recorded",
+	结果: "Effect",
+	定义位置: "Defined at",
+	"搜索规则、对象或接口": "Search rules, subjects or endpoints",
+	搜索业务规则: "Search business rules",
+	规则类型: "Rule type",
+	对象: "Subject",
+	规则: "Rule",
+	涉及接口: "Endpoints",
+	实体关系: "Relations",
+	状态机: "State machines",
+	业务规则: "Business rules",
+	跨接口依赖: "Cross-endpoint dependencies",
+	失败: "Failed",
+	业务建模的成果按项目归档: "Modeling results are archived per project",
+	请先在侧栏顶部创建或选择一个项目: "Create or select a project at the top of the sidebar first",
+	源码范围: "Source scope",
+	接口映射: "Endpoint mappings",
+	时间: "Time",
+	备注: "Notes",
+	方法: "Method",
+	"这条业务建模记录已被删除，不能再提交；需要继续建模，先点「结束建模」再重新开始。":
+		"This modeling record was deleted and takes no further submissions; to continue modeling, click End modeling first, then start again.",
+	"这条业务建模记录已经结束，不能再提交；需要继续建模，先点「结束建模」再重新开始。":
+		"This modeling record is finished and takes no further submissions; to continue modeling, click End modeling first, then start again.",
+	"这次业务建模已经结束，本轮不能再提交；需要继续建模，等本轮结束后重新点「开始建模」。":
+		"This modeling run is over and takes no further submissions in this turn; to continue modeling, click Start modeling again once this turn has ended.",
+	源码映射: "Source mappings",
+	业务逻辑: "Business logic",
+	源码实体: "Source entities",
+	导出: "Export",
+	"接口文档（OpenAPI JSON）": "Interface document (OpenAPI JSON)",
+	"接口文档（OpenAPI YAML）": "Interface document (OpenAPI YAML)",
+	"完整记录（JSON）": "Whole record (JSON)",
+	"完整记录（Markdown）": "Whole record (Markdown)",
+	"{apis} 条接口映射": "{apis} source mappings",
+	"{apis} 条源码映射": "{apis} source mappings",
+	"{machines} 个状态机": "{machines} state machines",
+	"{rules} 条规则": "{rules} rules",
+	"提交（{counts}）": "Submission ({counts})",
+	"搜索名称、目标或源码范围": "Search by name, target or source scope",
+	"还没有业务建模记录。在输入框上方点「业务建模 → 开始建模」，让 Agent 还原目标的接口，或读一遍项目的源码。":
+		"No modeling records yet. Click 业务建模 → 开始建模 above the composer to have the agent restore the target's interfaces, or read the project's source.",
+	"正在业务建模：{title}；已提交 {paths} 路径 / {operations} 操作 / {entities} 实体 / {apis} 条源码映射 / {machines} 个状态机 / {rules} 条规则":
+		"Modeling in progress: {title}; {paths} paths / {operations} operations / {entities} entities / {apis} source mappings / {machines} state machines / {rules} rules submitted",
+	"业务建模：让 Agent 还原目标的接口、或读懂项目源码；在对话里直接要求也可以":
+		"Business modeling: have the agent restore the target's interfaces or read the project's source; asking in the conversation works too",
+	"工程任务的会话由指挥官安排业务建模，不能在这里开始":
+		"An engineering task's modeling is dispatched by its commander; it cannot start here",
+	"Agent 正在运行：建模指令会排到本轮之后": "The agent is running; the modeling instruction is queued after this turn",
+	"把建模指令发给 Agent：有流量就还原接口，工作目录里有源码就读源码":
+		"Send the modeling instruction to the agent: restore interfaces from traffic, or read the source in the work directory",
+	"只发一段建模指令，做哪部分由 Agent 按输入决定":
+		"Sends the instruction only; the agent decides which part to do from what it has",
+	"结束这次建模（{title}），Agent 回到普通工作": "End this modeling run ({title}); the agent returns to normal work",
+	"{title} · {paths} 路径 / {apis} 条源码映射": "{title} · {paths} paths / {apis} source mappings",
+	结束这条对话正在写的那条记录: "Close the record this conversation is writing",
 };
 
 export function translate(language: UiLanguage, source: string, vars?: Record<string, string | number>): string {

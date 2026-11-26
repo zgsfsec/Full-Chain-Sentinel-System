@@ -245,7 +245,6 @@ export const DOMAINS = {
 		[
 			"start_modeling",
 			"end_modeling",
-			"detach_modeling",
 			"list_api_models",
 			"get_api_model",
 			"end_api_model",

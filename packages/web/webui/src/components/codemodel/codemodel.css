@@ -1,0 +1,205 @@
+/*
+ * The source half of a modeling record: the list of endpoints beside the
+ * endpoint it explains, and the business logic model under it.
+ *
+ * The split sits inside the page's pane, which owns the height; each side
+ * scrolls on its own, so a long call chain never moves the list out of view.
+ * Colours come from the console's variables and antd's, so the dark theme
+ * needs no rules of its own here.
+ */
+
+.codemodel-split {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	gap: 12px;
+}
+
+.codemodel-split__list {
+	flex: 0 0 46%;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	overflow: auto;
+}
+
+.codemodel-split__detail {
+	flex: 1;
+	min-width: 0;
+	overflow: auto;
+	padding: 14px 18px;
+	border: 1px solid var(--console-border);
+	border-radius: 10px;
+}
+
+.codemodel-toolbar {
+	margin-bottom: 2px;
+}
+
+.codemodel-row.is-selected > td {
+	background: var(--ant-control-item-bg-active);
+}
+
+/* An endpoint cell holds two lines: the path keeps an ellipsis of its own, and
+   the module sits under it in small print instead of in a column. */
+.codemodel-endpoint {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 2px;
+	min-width: 0;
+}
+
+.codemodel-endpoint__path {
+	display: block;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.codemodel-endpoint__module {
+	font-size: 12px;
+	line-height: 18px;
+}
+
+/* A handler name keeps its function and gives up its class: the front shrinks
+   a thousand times more readily than the end, which only gives way when the
+   function alone is wider than the cell. */
+.codemodel-handler code {
+	display: inline-flex;
+	max-width: 100%;
+}
+
+.codemodel-handler__head,
+.codemodel-handler__tail {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+}
+
+.codemodel-handler__head {
+	flex: 0 1000 auto;
+}
+
+.codemodel-handler__tail {
+	flex: 0 1 auto;
+}
+
+.codemodel-mapping {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.codemodel-sec {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding-top: 10px;
+	border-top: 1px solid var(--console-border);
+}
+
+.codemodel-sec__head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.codemodel-line {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px 10px;
+}
+
+/* The chain is read top to bottom: the numbers are what make the order visible. */
+.codemodel-chain {
+	margin: 0;
+	padding-left: 24px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.codemodel-chain li::marker {
+	color: var(--console-text);
+	font-variant-numeric: tabular-nums;
+}
+
+.codemodel-lines {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.codemodel-tags {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.codemodel-tag-mono {
+	font-family: var(--ant-font-family-code);
+	font-size: 12px;
+}
+
+.codemodel-locs {
+	display: inline-flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 4px 8px;
+}
+
+/* In a table cell only the file's name and the line fit; the full path is the tooltip. */
+.codemodel-loc--brief {
+	display: inline-block;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	vertical-align: bottom;
+}
+
+.codemodel-logic {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+/* The card is only for its padding and gap: the page already draws the frame. */
+.codemodel-logic .ant-card {
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+.codemodel-logic .ant-card-body {
+	padding: 0;
+}
+
+.codemodel-machine {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+/* Narrow screens read top to bottom: the list first, the endpoint it explains below it. */
+@media (max-width: 1100px) {
+	.codemodel-split {
+		flex-direction: column;
+		overflow: auto;
+	}
+
+	.codemodel-split__list,
+	.codemodel-split__detail {
+		flex: none;
+		overflow: visible;
+	}
+}

@@ -17,7 +17,7 @@ const MAX_SIGNALS = 12;
 const MAX_URLS = 12;
 
 /** Tools whose success is itself new evidence, regardless of the text. */
-const FINDING_TOOLS = new Set(["vuln_submit", "api_model_submit"]);
+const FINDING_TOOLS = new Set(["vuln_submit", "api_model_submit", "source_model_submit"]);
 /** A successful edit/write changes project state, so it is progress even without a new URL. */
 const STATE_CHANGE_TOOLS = new Set(["edit", "write"]);
 

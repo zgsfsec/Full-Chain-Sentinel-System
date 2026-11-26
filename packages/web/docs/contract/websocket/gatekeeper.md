@@ -6,7 +6,7 @@
 | --- | --- |
 | 上行消息 | 5 种 |
 | 下行消息 | 4 种 |
-| 处理代码 | `packages/web/src/server.ts` 第 4512–4514、4515–4522、4523–4527、4528–4532、4533–4541 行 |
+| 处理代码 | `packages/web/src/server.ts` 第 4505–4507、4508–4515、4516–4520、4521–4525、4526–4534 行 |
 
 字段形状以 `packages/web/src/protocol.ts` 为准（浏览器视角在 `packages/web/webui/src/types.ts`）。通用约定见 [README](README.md)。「字段」一行给出字段名、类型和类型定义里的注释。
 

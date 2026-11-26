@@ -3,8 +3,10 @@
  * an isolated sub-agent session with its own transcript and turn budget.
  *
  * Sub-agents receive permission-filtered coding tools, hub tools, optional
- * search tools and extensions. Console-only modeling, device and report tools
- * are not passed. They never receive spawn_agent, so delegation cannot recurse.
+ * search tools and extensions, and the modeling read tool: they can read the
+ * project's business-modeling records but have no way to write one. Device and
+ * report tools are not passed. They never receive spawn_agent, so delegation
+ * cannot recurse.
  */
 
 import type { Model } from "@earendil-works/pi-ai";
@@ -95,13 +97,13 @@ export function createSubagentTool(options: SubagentToolOptions): ToolDefinition
 		name: "spawn_agent",
 		label: "Sub-agent",
 		description:
-			"Spawn an isolated sub-agent to complete one delegated task and return its result. Use for parallelizable or self-contained work such as reconnaissance of a single host, log triage, or researching one question. It receives only its permission-filtered coding, project-record, POC, MITM, configured search and extension tools; it does not receive this session's business-modeling, mobile-device, capture or report-screenshot tools, and cannot delegate further. Commands follow this session's approval mode.",
+			"Spawn an isolated sub-agent to complete one delegated task and return its result. Use for parallelizable or self-contained work such as reconnaissance of a single host, log triage, or researching one question. It receives only its permission-filtered coding, project-record, POC, MITM, configured search and extension tools, plus the read tool for the project's business models; it cannot submit a business model, does not receive mobile-device, capture or report-screenshot tools, and cannot delegate further. Commands follow this session's approval mode.",
 		promptSnippet:
 			"Delegate a self-contained task (e.g. recon of one host) to an isolated sub-agent and get its result",
 		promptGuidelines: [
 			"Prefer spawn_agent for independent per-target work (e.g. recon several hosts in parallel) instead of doing everything in this conversation",
 			"Give each sub-agent a complete, self-contained task with explicit target scope; it cannot ask you questions and cannot delegate further",
-			"Keep work that requires console-only business models, mobile devices, capture or report screenshots in the parent session; a sub-agent does not inherit those tools or the parent's conversation",
+			"A sub-agent can read business models but cannot submit them: keep work that requires writing a business model, or mobile devices, capture or report screenshots, in the parent session; a sub-agent does not inherit those tools or the parent's conversation",
 		],
 		parameters: subagentSchema,
 		executionMode: "parallel",
