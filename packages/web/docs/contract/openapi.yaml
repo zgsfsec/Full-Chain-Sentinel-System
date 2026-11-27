@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: 全链哨兵 Web 控制台 HTTP 接口
-  version: 2.3.5
+  version: 2.3.6
   summary: "浏览器控制台与后端之间的 HTTP 接口。WebSocket `/ws` 的消息另见 docs/contract/websocket。"
   description: |
     这份文档只覆盖 HTTP。每个请求依次经过三道门，任何一道没过都到不了接口本身：

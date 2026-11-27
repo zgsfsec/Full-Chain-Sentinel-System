@@ -1,10 +1,10 @@
 {
 	"info": {
-		"_postman_id": "bf8c8188-e35b-4e53-abdb-801928924415",
+		"_postman_id": "95ecb688-4fe1-415f-af00-ea07c7d1e4da",
 		"name": "全链哨兵 Web 控制台 HTTP 接口",
-		"description": "版本 2.3.5。由 scripts/generate-contract-api.mjs 生成。\n\n先看「0. 先做这三步」。环境变量 `baseUrl`、`gateToken`、`username`、`password`、`wsHost` 在同名的环境文件里。\n每个请求的 Examples 里存着每种状态码的响应样例。\n\nWebSocket 消息在最后一个分组，结构见 websocket-messages.json。",
+		"description": "版本 2.3.6。由 scripts/generate-contract-api.mjs 生成。\n\n先看「0. 先做这三步」。环境变量 `baseUrl`、`gateToken`、`username`、`password`、`wsHost` 在同名的环境文件里。\n每个请求的 Examples 里存着每种状态码的响应样例。\n\nWebSocket 消息在最后一个分组，结构见 websocket-messages.json。",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-		"version": "2.3.5"
+		"version": "2.3.6"
 	},
 	"variable": [
 		{

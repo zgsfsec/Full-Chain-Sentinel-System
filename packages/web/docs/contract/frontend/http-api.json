@@ -2,7 +2,7 @@
 	"openapi": "3.0.3",
 	"info": {
 		"title": "全链哨兵 Web 控制台 HTTP 接口",
-		"version": "2.3.5",
+		"version": "2.3.6",
 		"description": "全链哨兵 Web 控制台的 HTTP 接口，给前端开发用。可以导入 ApiFox 或 Postman，导入方法见 docs/contract/frontend/README.md。\n\n这份文档由 scripts/generate-contract-api.mjs 生成：说明、状态码、参数和请求示例来自手写的 openapi.yaml，响应和请求体的精确结构来自后端的 TypeScript 类型。\n\nWebSocket `/ws` 的 347 种消息不在这里，见同目录的 websocket-messages.json 和 docs/contract/websocket/ 下的各功能域文档。\n\n这份文档只覆盖 HTTP。每个请求依次经过三道门，任何一道没过都到不了接口本身：\n\n1. **入口串**：除了标明「不需要入口 Cookie」的路径，不带 `sentinel-gate` Cookie 的请求一律回\n   `404`，正文是纯文本 `Not Found\\n`。打开启动日志里的入口地址 `/<入口串>` 会得到 `302` 到 `/`，\n   并下发这个 Cookie。\n2. **会话 Cookie**：`/api/*`（除登录相关的几条）和插件图标需要 `sentinel-auth` Cookie，否则回\n   `401`，正文 `{\"error\":\"未登录\"}`。\n3. **授权承诺**：账号还没接受首次使用的授权承诺时，已登录的请求访问 `/api/*` 回 `403`，正文\n   `{\"error\":\"consent_required\"}`。\n\n通用约定：\n\n- JSON 响应的 `Content-Type` 是 `application/json; charset=utf-8`。出错的正文都是 `{\"error\": \"…\"}`，\n  `error` 是给操作员看的完整句子，按当前界面语言生成（少数路由固定为中文或英文）。\n- 没有匹配到任何路由的路径返回前端页面 `index.html`（`200`，`text/html`），这是单页应用的路由回退。\n  所以对一条存在的 API 路径用了不支持的请求方法时，多数情况下得到的不是 `405`，而是 `200` 的 HTML 页面；\n  只有文档里列出了 `405` 的路由会明确拒绝。\n- 路径里带查询参数 `projectId` 的路由都要求它是**当前项目**的 ID：项目在请求期间被切换时回 `409`。\n\n响应和请求体的精确结构不在这份文件里手写。写成 `schema: { x-schema: Http.某名称 }` 的地方，结构由后端的\nTypeScript 类型生成，`Http.某名称` 是 `docs/contract/frontend/schemas.generated.json` 里根的名字。\n`docs/contract/frontend/http-api.json` 把这两样合在一起，并带上示例，是可以导入 ApiFox 或 Postman 的那一份。\n"
 	},
 	"servers": [
